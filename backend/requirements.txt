@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+notebooklm-py
+httpx
+rich
+click
