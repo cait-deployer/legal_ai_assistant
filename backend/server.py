@@ -49,27 +49,51 @@ async def ask_lawyer(data: dict):
             sources = await client.sources.list(nb.id)
             source_titles = {s.id: (s.title or f"Source {s.id[:8]}") for s in sources}
 
-            # Group all passages by citation number (one [N] can reference multiple chunks)
+            # Fetch fulltext for each unique source that has citations (to expand context)
+            cited_source_ids = {ref.source_id for ref in result.references if ref.cited_text}
+            source_fulltexts: dict[str, object] = {}
+            for sid in cited_source_ids:
+                try:
+                    ft = await client.sources.get_fulltext(nb.id, sid)
+                    if ft.content:
+                        source_fulltexts[sid] = ft
+                        print(f"[📄] Loaded fulltext for {source_titles.get(sid, sid)}: {ft.char_count} chars")
+                except Exception as e:
+                    print(f"[⚠️] Could not load fulltext for {sid}: {e}")
+
+            # Group by citation number, expanding each short snippet to ±300 chars context
             refs_by_num: dict[int, dict] = {}
             for ref in result.references:
                 num = ref.citation_number
-                if num is None: continue
-                
-                # Берем текст. Если есть расширенный контекст - берем его
-                text = (ref.cited_text or "").strip()
-                
+                if num is None:
+                    continue
+
+                short_text = (ref.cited_text or "").strip()
+                if not short_text:
+                    continue
+
                 if num not in refs_by_num:
                     refs_by_num[num] = {
                         "num": num,
                         "source_title": source_titles.get(ref.source_id, f"Source {num}"),
                         "passages": [],
                     }
-                
-                # Добавляем текст, только если он уникальный и длиннее 10 символов
-                if text and len(text) > 10 and text not in refs_by_num[num]["passages"]:
-                    refs_by_num[num]["passages"].append(text)
 
-            # Сортируем и отдаем
+                # Try to expand the short snippet to a fuller passage using fulltext
+                ft = source_fulltexts.get(ref.source_id)
+                if ft:
+                    contexts = ft.find_citation_context(short_text, context_chars=300)
+                    if contexts:
+                        for ctx_text, _ in contexts:
+                            ctx_text = ctx_text.strip()
+                            if ctx_text and ctx_text not in refs_by_num[num]["passages"]:
+                                refs_by_num[num]["passages"].append(ctx_text)
+                        continue  # context found — skip adding raw short snippet
+
+                # Fallback: add the raw short snippet if no fulltext or no match found
+                if short_text not in refs_by_num[num]["passages"]:
+                    refs_by_num[num]["passages"].append(short_text)
+
             references = sorted(refs_by_num.values(), key=lambda r: r["num"])
 
             return {"answer": result.answer, "references": references}

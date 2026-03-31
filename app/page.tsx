@@ -67,7 +67,7 @@ type StudioTool = {
     autoNote: string | null;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // --- RENDER HELPERS ---
 function CitationBadge({
@@ -80,16 +80,17 @@ function CitationBadge({
     onOpen: (c: Citation) => void;
 }) {
     const citation = refs.find(r => r.num === Number(num));
+    const base = "inline-flex items-center justify-center align-super mx-0.5 min-w-[16px] h-[16px] px-1 text-[11px] font-bold rounded leading-none";
     if (!citation)
-        return <sup className="text-[10px] font-bold text-indigo-400 mx-0.5">[{num}]</sup>;
+        return <span className={`${base} text-indigo-400 border border-indigo-200 bg-indigo-50`}>{num}</span>;
     return (
-        <sup>
-            <button
-                onClick={() => onOpen(citation)}
-                className="text-[10px] font-bold text-white bg-indigo-600 px-1.5 py-0.5 rounded-sm mx-0.5 hover:bg-indigo-700 transition-all shadow-sm">
-                {num}
-            </button>
-        </sup>
+        <button
+            onClick={() => onOpen(citation)}
+            title={citation.source_title}
+            className={`${base} text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer`}
+        >
+            {num}
+        </button>
     );
 }
 
@@ -331,7 +332,7 @@ export default function LawyerDashboard() {
         setInput('');
         setIsLoading(true);
         try {
-          const res = await fetch('${API_URL}/ask', {
+          const res = await fetch(`${API_URL}/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: input }),
@@ -408,11 +409,9 @@ export default function LawyerDashboard() {
 
                     {/* STUDIO TOOLS TRIGGER (SHEET) */}
                     <Sheet>
-                        <SheetTrigger>
-                            <button className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all active:scale-95 group">
-                                <Settings2 className="h-4 w-4 text-slate-400 group-hover:rotate-90 transition-transform duration-300" />
-                                Studio Tools
-                            </button>
+                        <SheetTrigger className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all active:scale-95 group">
+                            <Settings2 className="h-4 w-4 text-slate-400 group-hover:rotate-90 transition-transform duration-300" />
+                            Studio Tools
                         </SheetTrigger>
                         <SheetContent
                             side="right"
@@ -585,27 +584,56 @@ export default function LawyerDashboard() {
             </Dialog>
 
             <Dialog open={!!activeCitation} onOpenChange={o => !o && setActiveCitation(null)}>
-                <DialogContent className="max-w-2xl bg-white rounded-3xl p-0 border-none shadow-3xl overflow-hidden">
-                    <div className="bg-slate-950 p-8 flex justify-between items-center text-white">
-                        <div className="flex items-center gap-4">
-                            <BookOpenText className="h-7 w-7 text-indigo-400" />
-                            <DialogTitle className="font-bold tracking-tight text-xl">
-                                Source Reference [{activeCitation?.num}]
-                            </DialogTitle>
-                        </div>
-                        <X
-                            className="h-5 w-5 cursor-pointer opacity-50 hover:opacity-100"
-                            onClick={() => setActiveCitation(null)}
-                        />
-                    </div>
-                    <ScrollArea className="max-h-[450px] p-10 font-serif italic text-slate-700 leading-relaxed text-lg">
-                        {activeCitation?.passages.map((p, i) => (
-                            <div
-                                key={i}
-                                className="pl-6 border-l-4 border-indigo-100 mb-8 last:mb-0">
-                                {p}
+                <DialogContent className="max-w-xl bg-white rounded-2xl p-0 border-none shadow-2xl overflow-hidden">
+                    {/* Header */}
+                    <div className="bg-slate-950 px-6 py-5 flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3 min-w-0">
+                            <BookOpenText className="h-5 w-5 text-indigo-400 mt-0.5 shrink-0" />
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-white bg-indigo-600 rounded">
+                                        {activeCitation?.num}
+                                    </span>
+                                    <DialogTitle className="text-white font-semibold text-sm truncate">
+                                        {activeCitation?.source_title}
+                                    </DialogTitle>
+                                </div>
+                                <p className="text-slate-400 text-xs">
+                                    {activeCitation && activeCitation.passages.length > 0
+                                        ? `${activeCitation.passages.length} excerpt${activeCitation.passages.length > 1 ? "s" : ""} from this source`
+                                        : "Source referenced in this answer"}
+                                </p>
                             </div>
-                        ))}
+                        </div>
+                        <button onClick={() => setActiveCitation(null)} className="text-slate-500 hover:text-white transition-colors shrink-0 mt-0.5">
+                            <X className="h-4 w-4" />
+                        </button>
+                    </div>
+
+                    {/* Passages */}
+                    <ScrollArea className="max-h-[400px]">
+                        <div className="p-6 space-y-4">
+                            {activeCitation && activeCitation.passages.length > 0 ? (
+                                activeCitation.passages.map((p, i) => (
+                                    <div key={i} className="relative">
+                                        {activeCitation.passages.length > 1 && (
+                                            <div className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest mb-2">
+                                                Excerpt {i + 1}
+                                            </div>
+                                        )}
+                                        <blockquote className="border-l-[3px] border-indigo-400 pl-4 py-0.5 text-sm text-slate-700 leading-relaxed italic bg-indigo-50/40 rounded-r-lg pr-3">
+                                            &ldquo;{p}&rdquo;
+                                        </blockquote>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center py-6 text-slate-400 text-sm">
+                                    <BookOpenText className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                                    <p>This source was referenced but no passage preview is available.</p>
+                                    <p className="text-xs mt-1 text-slate-300">Open NotebookLM to view the full source.</p>
+                                </div>
+                            )}
+                        </div>
                     </ScrollArea>
                 </DialogContent>
             </Dialog>
