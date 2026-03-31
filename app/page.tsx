@@ -67,6 +67,8 @@ type StudioTool = {
     autoNote: string | null;
 };
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 // --- RENDER HELPERS ---
 function CitationBadge({
     num,
@@ -329,7 +331,7 @@ export default function LawyerDashboard() {
         setInput('');
         setIsLoading(true);
         try {
-            const res = await fetch('http://localhost:8000/ask', {
+          const res = await fetch('${API_URL}/ask', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: input }),
@@ -357,7 +359,7 @@ export default function LawyerDashboard() {
         setLaunchDialogOpen(false);
         setToolLoading(launchTool.name);
         try {
-            const res = await fetch(`http://localhost:8000${launchTool.endpoint}`, {
+          const res = await fetch(`${API_URL}${launchTool.endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ instructions: launchInstructions }),
@@ -366,8 +368,8 @@ export default function LawyerDashboard() {
             if (data.error) throw new Error(data.error);
             setToolResult({ ...data, title: launchTool.name });
             setResultDialogOpen(true);
-        } catch (e) {
-            toast.error(e.message || 'Execution failed');
+        } catch (e: unknown) {
+            toast.error((e as Error).message || 'Execution failed');
         } finally {
             setToolLoading(null);
             setLaunchTool(null);
