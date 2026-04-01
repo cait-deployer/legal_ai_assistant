@@ -16,7 +16,7 @@ load_dotenv()
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-SERVICE_ACCOUNT_FILE = 'credentials.json'
+SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE")
 FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
 
 # ✅ ФИКС: правильное название модели для langchain-google-genai
