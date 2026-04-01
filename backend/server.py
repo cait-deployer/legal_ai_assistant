@@ -1,244 +1,117 @@
-import asyncio
 import os
-import tempfile
-import csv
-import json
+import traceback
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from notebooklm import NotebookLMClient
-from notebooklm.rpc import ReportFormat
+from pydantic import BaseModel
+from dotenv import load_dotenv
+from google.genai import Client, types
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+load_dotenv()
+
+SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+gemini = Client(api_key=GOOGLE_API_KEY)
+
+# Используем стабильную модель для эмбеддингов
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001",
+    google_api_key=GOOGLE_API_KEY
 )
 
+class Query(BaseModel):
+    question: str
 
-async def _get_first_notebook(client):
-    notebooks = await client.notebooks.list()
-    if not notebooks:
-        raise Exception("No notebooks found in this account.")
-    return notebooks[0]
-
-
-@app.get("/")
-async def home():
-    return {"status": "NotebookLM Backend is Online"}
-
+def search_supabase(query_vector: list, top_k: int = 10) -> list:
+    """Векторный поиск через RPC функцию match_documents"""
+    try:
+        with httpx.Client() as client:
+            response = client.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/match_documents",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "query_embedding": query_vector, # httpx сам поймет список чисел
+                    "match_threshold": 0.5,
+                    "match_count": top_k
+                },
+                timeout=10.0
+            )
+            if response.status_code != 200:
+                print(f"❌ Supabase search error: {response.text}")
+                return []
+            return response.json()
+    except Exception as e:
+        print(f"❌ Connection error: {str(e)}")
+        return []
 
 @app.post("/ask")
-async def ask_lawyer(data: dict):
-    question = data.get("question")
-    print(f"\n[🚀] NEW REQUEST: {question}")
+async def ask_lawyer(data: Query):
+    print(f"🔍 ПОИСК: {data.question}")
     try:
-        print("[🔑] Connecting to NotebookLM storage...")
-        async with await NotebookLMClient.from_storage() as client:
-            print("[📚] Fetching your notebooks...")
-            nb = await _get_first_notebook(client)
-            print(f"[📂] Using notebook: '{nb.title}' (ID: {nb.id})")
-            print("[🧠] AI is thinking... Please wait (15-40 sec)")
-            result = await client.chat.ask(nb.id, question)
-            print(f"[✅] Answer received! {len(result.references)} citations found.")
+        # 1. Генерируем вектор вопроса
+        query_vector = embeddings.embed_query(data.question)
 
-            # Map source UUIDs to human-readable titles
-            sources = await client.sources.list(nb.id)
-            source_titles = {s.id: (s.title or f"Source {s.id[:8]}") for s in sources}
+        # 2. Ищем в базе (теперь получаем поля out_id, out_content, out_metadata)
+        docs = search_supabase(query_vector, top_k=10)
+        
+        if not docs:
+            return {"answer": "В моей базе знаний пока нет информации по этому вопросу.", "references": []}
 
-            # Fetch fulltext for each unique source that has citations (to expand context)
-            cited_source_ids = {ref.source_id for ref in result.references if ref.cited_text}
-            source_fulltexts: dict[str, object] = {}
-            for sid in cited_source_ids:
-                try:
-                    ft = await client.sources.get_fulltext(nb.id, sid)
-                    if ft.content:
-                        source_fulltexts[sid] = ft
-                        print(f"[📄] Loaded fulltext for {source_titles.get(sid, sid)}: {ft.char_count} chars")
-                except Exception as e:
-                    print(f"[⚠️] Could not load fulltext for {sid}: {e}")
+        # 3. Собираем контекст (используем новые ключи out_content и out_metadata)
+        context_parts = []
+        for i, d in enumerate(docs):
+            content = d.get("out_content", "")
+            source = d.get("out_metadata", {}).get("source", "Документ")
+            context_parts.append(f"[{i+1}] Источник: {source}\nТекст: {content}")
+        
+        context = "\n\n---\n\n".join(context_parts)
 
-            # Group by citation number, expanding each short snippet to ±300 chars context
-            refs_by_num: dict[int, dict] = {}
-            for ref in result.references:
-                num = ref.citation_number
-                if num is None:
-                    continue
+        # 4. Формируем промпт для Gemini
+        prompt = f"""Ты - профессиональный юрист. Ответь на вопрос, используя ТОЛЬКО предоставленный контекст.
+Обязательно ставь номер источника [1], [2] в конце каждого факта.
 
-                short_text = (ref.cited_text or "").strip()
-                if not short_text:
-                    continue
+КОНТЕКСТ:
+{context}
 
-                if num not in refs_by_num:
-                    refs_by_num[num] = {
-                        "num": num,
-                        "source_title": source_titles.get(ref.source_id, f"Source {num}"),
-                        "passages": [],
-                    }
+ВОПРОС: {data.question}"""
 
-                # Try to expand the short snippet to a fuller passage using fulltext
-                ft = source_fulltexts.get(ref.source_id)
-                if ft:
-                    contexts = ft.find_citation_context(short_text, context_chars=300)
-                    if contexts:
-                        for ctx_text, _ in contexts:
-                            ctx_text = ctx_text.strip()
-                            if ctx_text and ctx_text not in refs_by_num[num]["passages"]:
-                                refs_by_num[num]["passages"].append(ctx_text)
-                        continue  # context found — skip adding raw short snippet
+        response = gemini.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
+        )
 
-                # Fallback: add the raw short snippet if no fulltext or no match found
-                if short_text not in refs_by_num[num]["passages"]:
-                    refs_by_num[num]["passages"].append(short_text)
+        # 5. Формируем ссылки для фронтенда (сопоставляем с out_metadata)
+        seen_sources = {}
+        references = []
+        for i, d in enumerate(docs):
+            content_snippet = d.get("out_content") or d.get("content") or ""
+            metadata = d.get("out_metadata") or d.get("metadata") or {}
+            source_name = metadata.get("source", "Документ")
+            
+            # Каждый чанк из базы получает свой порядковый номер [1], [2], [3]...
+            references.append({
+                "num": i + 1,
+                "source_title": f"{source_name} (фрагмент {i+1})",
+                "passages": [content_snippet]
+            })
 
-            references = sorted(refs_by_num.values(), key=lambda r: r["num"])
+        print(f"✅ Готово. Сформировано ссылок: {len(references)}")
+        return {"answer": response.text, "references": references}
 
-            return {"answer": result.answer, "references": references}
     except Exception as e:
-        print(f"[🔥] CRITICAL ERROR: {str(e)}")
-        return {"answer": f"Backend Error: {str(e)}", "references": []}
+        traceback.print_exc()
+        return {"answer": f"Системная ошибка: {str(e)}", "references": []}
 
-
-@app.post("/risk-report")
-async def risk_report():
-    print("\n[📊] RISK REPORT generation started")
-    try:
-        async with await NotebookLMClient.from_storage() as client:
-            nb = await _get_first_notebook(client)
-            print(f"[📂] Notebook: '{nb.title}'")
-
-            status = await client.artifacts.generate_report(
-                nb.id,
-                report_format=ReportFormat.CUSTOM,
-                custom_prompt=(
-                    "You are a senior legal analyst. Analyze the provided document and produce "
-                    "a structured Legal Risk Report. Use the following sections:\n\n"
-                    "## Executive Summary\n"
-                    "Brief overview of the document and the most critical risks.\n\n"
-                    "## Key Legal Risks\n"
-                    "List each risk with severity label (🔴 HIGH / 🟡 MEDIUM / 🟢 LOW), "
-                    "description, and impact.\n\n"
-                    "## Problematic Clauses\n"
-                    "Quote or reference specific clauses that require attention.\n\n"
-                    "## Recommended Actions\n"
-                    "Actionable steps to mitigate each identified risk."
-                ),
-            )
-            print(f"[⏳] Waiting for generation (task_id: {status.task_id})...")
-            final = await client.artifacts.wait_for_completion(nb.id, status.task_id, timeout=120)
-
-            if final.is_failed:
-                return {"error": f"Generation failed: {final.error}"}
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".md", delete=False)
-            tmp_path = tmp.name
-            tmp.close()
-
-            try:
-                path = await client.artifacts.download_report(nb.id, tmp_path, artifact_id=status.task_id)
-                with open(path, encoding="utf-8") as f:
-                    content = f.read()
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-
-            print("[✅] Risk report ready!")
-            return {"type": "markdown", "content": content}
-    except Exception as e:
-        print(f"[🔥] ERROR: {str(e)}")
-        return {"error": str(e)}
-
-
-@app.post("/data-table")
-async def data_table():
-    print("\n[📋] DATA TABLE generation started")
-    try:
-        async with await NotebookLMClient.from_storage() as client:
-            nb = await _get_first_notebook(client)
-            print(f"[📂] Notebook: '{nb.title}'")
-
-            status = await client.artifacts.generate_data_table(
-                nb.id,
-                instructions=(
-                    "Extract all key legal entities: parties involved, dates, monetary amounts, "
-                    "obligations, rights, deadlines, and relevant clause references into a table."
-                ),
-            )
-            print(f"[⏳] Waiting for generation (task_id: {status.task_id})...")
-            final = await client.artifacts.wait_for_completion(nb.id, status.task_id, timeout=120)
-
-            if final.is_failed:
-                return {"error": f"Generation failed: {final.error}"}
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
-            tmp_path = tmp.name
-            tmp.close()
-
-            try:
-                path = await client.artifacts.download_data_table(nb.id, tmp_path, artifact_id=status.task_id)
-                with open(path, encoding="utf-8", newline="") as f:
-                    reader = csv.DictReader(f)
-                    headers = list(reader.fieldnames or [])
-                    rows = [dict(row) for row in reader]
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-
-            print(f"[✅] Data table ready! {len(rows)} rows, {len(headers)} columns.")
-            return {"type": "table", "headers": headers, "rows": rows}
-    except Exception as e:
-        print(f"[🔥] ERROR: {str(e)}")
-        return {"error": str(e)}
-
-
-@app.post("/audio-overview")
-async def audio_overview():
-    print("\n[🎧] AUDIO OVERVIEW generation started")
-    try:
-        async with await NotebookLMClient.from_storage() as client:
-            nb = await _get_first_notebook(client)
-            print(f"[📂] Notebook: '{nb.title}'")
-
-            status = await client.artifacts.generate_audio(nb.id)
-            print(f"[⏳] Waiting for audio (task_id: {status.task_id}) — up to 3 min...")
-            final = await client.artifacts.wait_for_completion(nb.id, status.task_id, timeout=180)
-
-            if final.is_failed:
-                return {"error": f"Generation failed: {final.error}"}
-
-            url = final.url
-            if not url:
-                artifact = await client.artifacts.get(nb.id, status.task_id)
-                url = artifact.url if artifact else None
-
-            print(f"[✅] Audio ready! URL: {url}")
-            return {"type": "audio", "url": url, "task_id": status.task_id}
-    except Exception as e:
-        print(f"[🔥] ERROR: {str(e)}")
-        return {"error": str(e)}
-
-
-@app.post("/mind-map")
-async def mind_map():
-    print("\n[🗺️] MIND MAP generation started")
-    try:
-        async with await NotebookLMClient.from_storage() as client:
-            nb = await _get_first_notebook(client)
-            print(f"[📂] Notebook: '{nb.title}'")
-
-            result = await client.artifacts.generate_mind_map(nb.id)
-            mind_map_data = result.get("mind_map")
-
-            if mind_map_data is None:
-                return {"error": "Mind map generation returned no data."}
-
-            print("[✅] Mind map ready!")
-            return {"type": "mindmap", "data": mind_map_data}
-    except Exception as e:
-        print(f"[🔥] ERROR: {str(e)}")
-        return {"error": str(e)}
-
-# Запуск: uvicorn server:app --reload
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
