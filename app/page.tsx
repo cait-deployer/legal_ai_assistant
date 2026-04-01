@@ -59,7 +59,7 @@ type StudioTool = {
   inputPlaceholder: string | null;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // --- RENDER HELPERS ---
 function MessageText({ text, refs, onCitationOpen }: { text: string; refs: Citation[]; onCitationOpen: (c: Citation) => void }) {
