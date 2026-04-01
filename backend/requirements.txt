@@ -1,6 +1,13 @@
 fastapi
-uvicorn
-notebooklm-py
+uvicorn[standard]
 httpx
-rich
-click
+pydantic
+python-dotenv
+google-genai
+langchain-google-genai
+langchain-community
+langchain-text-splitters
+pypdf
+docx2txt
+google-api-python-client
+google-auth
