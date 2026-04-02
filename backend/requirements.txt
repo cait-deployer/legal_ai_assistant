@@ -1,13 +1,29 @@
+# Web framework
 fastapi
 uvicorn[standard]
+
+# HTTP & parsing
 httpx
+requests
+beautifulsoup4
+
+# Data / config
 pydantic
 python-dotenv
+
+# Google AI
 google-genai
 langchain-google-genai
+
+# LangChain
 langchain-community
 langchain-text-splitters
+
+# File parsers
 pypdf
 docx2txt
+
+# Google Drive / Auth
 google-api-python-client
 google-auth
+google-auth-httplib2
