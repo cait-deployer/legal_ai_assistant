@@ -6,6 +6,7 @@ uvicorn[standard]
 httpx
 requests
 beautifulsoup4
+markdownify
 
 # Data / config
 pydantic

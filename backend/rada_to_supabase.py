@@ -1,15 +1,16 @@
 import os
 import time
 import httpx
+import re
 from dotenv import load_dotenv
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from datetime import datetime, timezone
 
 from rada_scanner import (
     get_all_legal_ids,
     get_law_text,
-    get_law_status,
-    SECTIONS,
+    get_law_metadata,
     BASE,
 )
 
@@ -25,32 +26,47 @@ embeddings = GoogleGenerativeAIEmbeddings(
     google_api_key=GOOGLE_API_KEY
 )
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=250)
+text_splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
 
-# ПЕРЕВІРКА ЧЕРЕЗ SUPABASE (замість файлу)
-
-def get_existing_law_ids() -> set:
-    """Отримує всі унікальні law_id безпосередньо з метаданих бази"""
-    print("🔍 Синхронізація з хмарою: отримую список завантажених законів...")
-    # Використовуємо .select(metadata) і фільтруємо law_id
-    url = f"{SUPABASE_URL}/rest/v1/documents?select=metadata"
+def get_existing_laws_meta() -> dict:
+    """Отримує всі law_id та дату їхнього скрапінгу з Supabase (тільки початкові чанки)."""
+    # Вибираємо тільки метадані, де chunk_index = 0, щоб не вантажити всю базу
+    url = f"{SUPABASE_URL}/rest/v1/documents?metadata->>chunk_index=eq.0&select=metadata"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}"
     }
     try:
-        r = httpx.get(url, headers=headers, timeout=20)
+        r = httpx.get(url, headers=headers, timeout=30)
         if r.status_code == 200:
             data = r.json()
-            # Витягуємо law_id з JSONB поля metadata
-            ids = {item['metadata']['law_id'] for item in data if item.get('metadata') and 'law_id' in item['metadata']}
-            print(f"✅ База знає про {len(ids)} законів.")
-            return ids
+            meta_map = {}
+            for item in data:
+                m = item.get('metadata')
+                if m and 'law_id' in m:
+                    # Зберігаємо дату скрапінгу
+                    meta_map[m['law_id']] = m.get('scraped_at', '1970-01-01T00:00:00')
+            return meta_map
     except Exception as e:
-        print(f"⚠️ Помилка доступу до бази: {e}")
-    return set()
+        print(f"⚠️ Помилка отримання метаданих: {e}")
+    return {}
 
-def upload_chunk_to_supabase(text, metadata, embedding):
+def delete_old_law_chunks(law_id: str):
+    """Повністю видаляє всі чанки закону перед оновленням, щоб уникнути дублів."""
+    url = f"{SUPABASE_URL}/rest/v1/documents?metadata->>law_id=eq.{law_id}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+    try:
+        r = httpx.delete(url, headers=headers, timeout=20)
+        if r.status_code in [200, 204]:
+            print(f"🗑️ Стару версію {law_id} видалено з бази.")
+    except Exception as e:
+        print(f"❌ Помилка видалення {law_id}: {e}")
+
+def upload_chunk_to_supabase(text, metadata, embedding, session_id=None):
+    """Завантажує один чанк у Supabase."""
     url = f"{SUPABASE_URL}/rest/v1/documents"
     headers = {
         "apikey": SUPABASE_KEY,
@@ -58,51 +74,77 @@ def upload_chunk_to_supabase(text, metadata, embedding):
         "Content-Type": "application/json",
         "Prefer": "return=minimal"
     }
-    data = {"content": text, "metadata": metadata, "embedding": embedding}
-    r = httpx.post(url, headers=headers, json=data)
-    if r.status_code not in [200, 201]:
-        print(f"   ❌ ПОМИЛКА SUPABASE ({r.status_code}): {r.text}")
+    data = {
+        "content": text, 
+        "metadata": metadata, 
+        "embedding": embedding,
+        "sync_session_id": session_id
+    }
+    try:
+        httpx.post(url, headers=headers, json=data, timeout=15)
+    except Exception as e:
+        print(f"⚠️ Помилка завантаження чанка: {e}")
 
-# ─── RUN SYNC ──────────────────────────────────────────────────────────────────
+def run_rada_sync(log_callback=None, session_id=None):
+    """Головна функція: скрапінг та розумне оновлення бази."""
+    log = log_callback or (lambda msg, level="info": print(msg))
 
-def run_sync():
-    print("=" * 60)
-    print("🚀 LIVE SYNC: RADA -> SUPABASE (No Index File Mode)")
-    print("=" * 60)
+    log("=" * 50)
+    log("🚀 LIVE SYNC: RADA -> SUPABASE (SMART UPDATE)")
+    log("=" * 50)
 
-    # Отримуємо ID прямо з бази
-    downloaded_ids = get_existing_law_ids()
+    # 1. Завантажуємо карту існуючих законів
+    existing_meta = get_existing_laws_meta()
+    log(f"📋 В базі знайдено {len(existing_meta)} унікальних законів.")
 
-    # Скануємо Раду
+    # 2. Скануємо Раду на наявність усіх ID
+    log("📡 Сканування розділів Ради...")
     all_laws = get_all_legal_ids()
-    
-    # Фільтруємо нові
-    new_laws = [l for l in all_laws if l["id"] not in downloaded_ids]
+    processed_count = 0
 
-    if not new_laws:
-        print("\n✅ Нових документів не знайдено. Все актуально!")
-        return
-
-    print(f"\nДо завантаження: {len(new_laws)} нових законів.")
-
-    for i, law in enumerate(new_laws, 1):
+    for i, law in enumerate(all_laws, 1):
         law_id = law["id"]
         law_title = law["title"]
         category = law["category"]
         law_url = f"{BASE}/laws/show/{law_id}"
-
-        print(f"\n[{i}/{len(new_laws)}] 📥 Обробка: {law_title}")
-
-        # Отримуємо текст
-        text = get_law_text(law_id)
-        if not text: continue
-
-        # Отримуємо статус (Чинний/Ні)
-        status = get_law_status(law_id)
         
-        chunks = text_splitter.split_text(text)
-        print(f"   ✂️  {len(chunks)} чанків | Статус: {status}")
+        # 3. ЛОГІКА ДЕДУПЛІКАЦІЇ ТА ОНОВЛЕННЯ
+        should_download = True
+        if law_id in existing_meta:
+            # Парсимо дату (обробляємо Z для сумісності з Python)
+            last_date_str = existing_meta[law_id].replace('Z', '+00:00')
+            last_scraped = datetime.fromisoformat(last_date_str)
+            
+            # Порівнюємо в UTC, щоб уникнути помилок
+            now = datetime.now(timezone.utc) if last_scraped.tzinfo else datetime.now()
+            days_passed = (now - last_scraped).days
+            
+            if days_passed < 7:
+                # Закон свіжий, пропускаємо
+                should_download = False
+            else:
+                # Закон застарів — видаляємо старі чанки перед оновленням
+                log(f"🔄 Оновлення: {law_id} (вік: {days_passed} дн.)...")
+                delete_old_law_chunks(law_id)
 
+        if not should_download:
+            continue
+
+        log(f"[{i}/{len(all_laws)}] Обробка: {law_title}")
+
+        # 4. ЗАВАНТАЖЕННЯ ТЕКСТУ ТА МЕТАДАНИХ
+        text = get_law_text(law_id)
+        if not text:
+            log(f"  ⚠️ Пропущено — порожній текст.", "warning")
+            continue
+
+        law_meta = get_law_metadata(law_id)
+        status = law_meta["status"]
+        chunks = text_splitter.split_text(text)
+        log(f"  ✂️ {len(chunks)} чанків | Статус: {status}")
+
+        # 5. ВЕКТОРІЗАЦІЯ ТА ЗАВАНТАЖЕННЯ
+        scraped_at = datetime.now(timezone.utc).isoformat()
         for j, chunk_text in enumerate(chunks):
             try:
                 vector = embeddings.embed_query(chunk_text)
@@ -110,18 +152,23 @@ def run_sync():
                     "source": law_title,
                     "law_id": law_id,
                     "category": category,
-                    "status": status,      # Твій новий статус
-                    "law_url": law_url,    # Твій новий лінк
+                    "status": status,
+                    "law_url": law_url,
+                    "scraped_at": scraped_at,
                     "chunk_index": j
                 }
-                upload_chunk_to_supabase(chunk_text, metadata, vector)
-                time.sleep(0.7) # Пауза для лімітів Gemini
+                upload_chunk_to_supabase(chunk_text, metadata, vector, session_id=session_id)
+                time.sleep(0.5) # Пауза для стабільності API
             except Exception as e:
-                print(f"   ❌ Помилка: {e}")
-                time.sleep(5)
+                log(f"  ❌ Помилка чанка {j}: {e}", "error")
+                time.sleep(2)
 
-        print(f"   ✅ Готово!")
-        time.sleep(1)
+        processed_count += 1
+        log(f"  ✅ Готово!", "success")
+        time.sleep(0.5)
+
+    return {"processed": processed_count}
 
 if __name__ == "__main__":
-    run_sync()
+    run_rada_sync()
+    
