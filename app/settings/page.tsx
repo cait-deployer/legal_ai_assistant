@@ -1,7 +1,7 @@
 // 
 "use client"
 
-import { useState, useTransition, useEffect } from "react"
+import { useState, useTransition, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import useSWR, { mutate } from "swr"
 import { Button } from "@/components/ui/button"
@@ -514,7 +514,7 @@ function BillingTab({ profile }: { profile: Profile }) {
 }
 
 // ── Main Page
-export default function SettingsPage() {
+function SettingsPage() {
   const { data: profile, error } = useSWR<Profile>("/api/settings/profile", fetcher)
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -581,5 +581,13 @@ export default function SettingsPage() {
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </div>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsPage />
+    </Suspense>
   )
 }

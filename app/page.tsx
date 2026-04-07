@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { mutate } from 'swr';
 import { Textarea } from '@/components/ui/textarea';
@@ -119,7 +119,7 @@ function MarkdownText({ text, refs, onCitationOpen }: {
     );
 }
 
-export default function ChatPage() {
+function ChatPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
@@ -475,5 +475,13 @@ export default function ChatPage() {
                 </DialogContent>
             </Dialog>
         </div>
+    );
+}
+
+export default function Page() {
+    return (
+        <Suspense fallback={null}>
+            <ChatPage />
+        </Suspense>
     );
 }
