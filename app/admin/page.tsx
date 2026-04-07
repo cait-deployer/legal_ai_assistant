@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -37,7 +36,7 @@ export default function AdminDashboard() {
       const data = await res.json()
       setStats(data)
       setLastUpdated(new Date())
-    } catch {}
+    } catch { }
     finally { setLoading(false) }
   }
 
@@ -54,30 +53,36 @@ export default function AdminDashboard() {
         body: JSON.stringify({ enabled: next }),
       })
       setStats((s) => s ? { ...s, schedule_enabled: next } : s)
-    } catch {}
+    } catch { }
     finally { setScheduleToggling(false) }
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 py-2">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-primary/10 rounded-xl shrink-0">
-            <LayoutDashboard className="w-10 h-10 text-primary" />
+          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
+            <LayoutDashboard className="w-8 h-8 text-[#BFA071]" />
           </div>
           <div>
-            <h1 className="text-4xl font-bold tracking-tight">Дашборд</h1>
-            <p className="text-lg text-muted-foreground mt-1">Огляд системи Lawyer AI</p>
+            <h1 className="text-3xl font-serif font-bold text-white">Дашборд</h1>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Огляд системи Lawyer AI</p>
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {lastUpdated && (
-            <p className="text-xs text-muted-foreground hidden sm:block">
+            <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest hidden sm:block">
               Оновлено {lastUpdated.toLocaleTimeString()}
             </p>
           )}
-          <Button variant="outline" size="sm" onClick={fetchStats} disabled={loading} className="gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={fetchStats}
+            disabled={loading}
+            className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+          >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Оновити
           </Button>
@@ -87,190 +92,177 @@ export default function AdminDashboard() {
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {/* Doc count */}
-        <Card className="hover:border-primary/40 hover:shadow-sm transition-all duration-200">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-5">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Документів у базі</CardTitle>
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <FileText className="w-4 h-4 text-primary" />
+        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 hover:border-[#BFA071]/30 rounded-[2rem] p-6 transition-all duration-200">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-[0.2em]">Документів у базі</p>
+            <div className="w-9 h-9 rounded-xl bg-[#BFA071]/10 flex items-center justify-center">
+              <FileText className="w-4 h-4 text-[#BFA071]" />
             </div>
-          </CardHeader>
-          <CardContent className="px-5 pb-4">
-            {loading ? (
-              <div className="h-9 w-24 rounded-lg bg-muted animate-pulse" />
-            ) : (
-              <div className="text-3xl font-bold tabular-nums">
-                {stats?.doc_count?.toLocaleString() ?? "—"}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground mt-1.5">Векторних чанків у Supabase</p>
-          </CardContent>
-        </Card>
+          </div>
+          {loading ? (
+            <div className="h-10 w-28 rounded-xl bg-[#BFA071]/5 animate-pulse" />
+          ) : (
+            <div className="text-4xl font-serif font-bold text-white tabular-nums">
+              {stats?.doc_count?.toLocaleString() ?? "—"}
+            </div>
+          )}
+          <p className="text-xs text-[#BFA071]/50 mt-2 font-medium uppercase tracking-wider">Векторних чанків у Supabase</p>
+        </div>
 
         {/* Schedule toggle */}
-        <Card className="hover:border-primary/40 hover:shadow-sm transition-all duration-200">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-5">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Автосинхронізація</CardTitle>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/20 flex items-center justify-center">
-              <Calendar className="w-4 h-4 text-blue-500" />
+        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 hover:border-[#BFA071]/30 rounded-[2rem] p-6 transition-all duration-200">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-[0.2em]">Автосинхронізація</p>
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
+              <Calendar className="w-4 h-4 text-blue-400" />
             </div>
-          </CardHeader>
-          <CardContent className="px-5 pb-4">
-            {loading ? (
-              <div className="h-9 w-24 rounded-lg bg-muted animate-pulse" />
-            ) : (
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2.5 h-2.5 rounded-full transition-colors ${stats?.schedule_enabled ? "bg-green-500" : "bg-muted-foreground/40"}`} />
-                    <span className="text-xl font-bold">
-                      {stats?.schedule_enabled ? "Увімкнено" : "Вимкнено"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1.5">Щодня о 01:00</p>
+          </div>
+          {loading ? (
+            <div className="h-10 w-28 rounded-xl bg-[#BFA071]/5 animate-pulse" />
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full transition-colors ${stats?.schedule_enabled ? "bg-emerald-400" : "bg-[#BFA071]/20"}`} />
+                  <span className="text-xl font-serif font-bold text-white">
+                    {stats?.schedule_enabled ? "Увімкнено" : "Вимкнено"}
+                  </span>
                 </div>
-                <button
-                  onClick={handleToggleSchedule}
-                  disabled={scheduleToggling}
-                  className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60 ${
-                    stats?.schedule_enabled ? "bg-primary" : "bg-muted-foreground/30"
-                  }`}
-                  role="switch"
-                  aria-checked={stats?.schedule_enabled}
-                >
-                  <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-300 ${
-                    stats?.schedule_enabled ? "translate-x-6" : "translate-x-1"
-                  }`} />
-                </button>
+                <p className="text-[10px] text-[#BFA071]/50 mt-1.5 font-black uppercase tracking-wider">Щодня о 01:00</p>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <button
+                onClick={handleToggleSchedule}
+                disabled={scheduleToggling}
+                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-300 focus:outline-none disabled:opacity-60 ${stats?.schedule_enabled ? "bg-[#BFA071]" : "bg-[#BFA071]/20"
+                  }`}
+                role="switch"
+                aria-checked={stats?.schedule_enabled}
+              >
+                <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-300 ${stats?.schedule_enabled ? "translate-x-6" : "translate-x-1"
+                  }`} />
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* Scraping status */}
-        <Card className="hover:border-primary/40 hover:shadow-sm transition-all duration-200">
-          <CardHeader className="flex flex-row items-center justify-between pb-2 pt-4 px-5">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Статус скрапінгу</CardTitle>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/20 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-amber-500" />
+        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 hover:border-[#BFA071]/30 rounded-[2rem] p-6 transition-all duration-200">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-[0.2em]">Статус скрапінгу</p>
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-amber-400" />
             </div>
-          </CardHeader>
-          <CardContent className="px-5 pb-4">
-            {loading ? (
-              <div className="h-9 w-24 rounded-lg bg-muted animate-pulse" />
-            ) : stats?.scraping_running ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
-                <span className="text-xl font-bold text-amber-500">Виконується</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                <span className="text-xl font-bold">Очікування</span>
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground mt-1.5">Поточний стан синхронізації</p>
-          </CardContent>
-        </Card>
+          </div>
+          {loading ? (
+            <div className="h-10 w-28 rounded-xl bg-[#BFA071]/5 animate-pulse" />
+          ) : stats?.scraping_running ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+              <span className="text-xl font-serif font-bold text-amber-400">Виконується</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+              <span className="text-xl font-serif font-bold text-white">Очікування</span>
+            </div>
+          )}
+          <p className="text-[10px] text-[#BFA071]/50 mt-2 font-black uppercase tracking-wider">Поточний стан синхронізації</p>
+        </div>
       </div>
 
       {/* Last sync */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Clock className="w-4 h-4 text-primary" /> Остання синхронізація
-              </CardTitle>
-              <CardDescription className="mt-0.5">Результат останнього запуску скрапінгу</CardDescription>
+      <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-[2rem] p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#BFA071]" />
+              <h2 className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Остання синхронізація</h2>
             </div>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Результат останнього запуску скрапінгу</p>
+          </div>
+          <Link href="/admin/settings">
+            <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5 rounded-xl">
+              Керувати <ArrowRight className="w-3 h-3" />
+            </Button>
+          </Link>
+        </div>
+        {loading ? (
+          <div className="space-y-2">
+            <div className="h-4 w-48 rounded bg-[#BFA071]/5 animate-pulse" />
+            <div className="h-4 w-32 rounded bg-[#BFA071]/5 animate-pulse" />
+          </div>
+        ) : !stats?.last_sync ? (
+          <p className="text-sm text-[#E0E6ED]/70 py-2">Синхронізацій ще не було.</p>
+        ) : (
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="flex items-center gap-2">
+              {stats.last_sync.status === "success" && (
+                <Badge className="gap-1 text-emerald-400 border-emerald-500/30 bg-emerald-500/10 rounded-xl">
+                  <CheckCircle className="w-3 h-3" /> Успішно
+                </Badge>
+              )}
+              {stats.last_sync.status === "error" && (
+                <Badge className="gap-1 text-red-400 border-red-500/30 bg-red-500/10 rounded-xl">
+                  <XCircle className="w-3 h-3" /> Помилка
+                </Badge>
+              )}
+              {stats.last_sync.status === "running" && (
+                <Badge className="gap-1 text-amber-400 border-amber-500/30 bg-amber-500/10 rounded-xl">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Виконується
+                </Badge>
+              )}
+            </div>
+            <div className="text-sm text-[#E0E6ED]/70 space-y-1">
+              <p>
+                <span className="font-medium text-[#BFA071]/60">Початок:</span>{" "}
+                {new Date(stats.last_sync.started_at).toLocaleString("uk-UA")}
+              </p>
+              {stats.last_sync.finished_at && (
+                <p>
+                  <span className="font-medium text-[#BFA071]/60">Кінець:</span>{" "}
+                  {new Date(stats.last_sync.finished_at).toLocaleString("uk-UA")}
+                </p>
+              )}
+              {stats.last_sync.laws_processed != null && (
+                <p>
+                  <span className="font-medium text-[#BFA071]/60">Оброблено:</span>{" "}
+                  {stats.last_sync.laws_processed} законів
+                </p>
+              )}
+              {stats.last_sync.error_message && (
+                <p className="text-red-400">{stats.last_sync.error_message}</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Quick actions */}
+      <div className="bg-[#0d1120]/40 border border-dashed border-[#BFA071]/10 rounded-[2rem] p-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Швидкі дії</p>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Перейдіть до потрібного розділу</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Link href="/admin/settings">
-              <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-muted-foreground hover:text-foreground">
-                Керувати <ArrowRight className="w-3 h-3" />
+              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#BFA071]/15 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl text-xs">
+                <Settings className="w-4 h-4" /> Налаштування
+              </Button>
+            </Link>
+            <Link href="/admin/base">
+              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#BFA071]/15 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl text-xs">
+                <BookOpen className="w-4 h-4" /> База знань
+              </Button>
+            </Link>
+            <Link href="/">
+              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#BFA071]/15 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl text-xs">
+                <FileText className="w-4 h-4" /> Відкрити чат
               </Button>
             </Link>
           </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="space-y-2">
-              <div className="h-4 w-48 rounded bg-muted animate-pulse" />
-              <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-            </div>
-          ) : !stats?.last_sync ? (
-            <p className="text-sm text-muted-foreground py-2">Синхронізацій ще не було.</p>
-          ) : (
-            <div className="flex flex-wrap items-start gap-4">
-              <div className="flex items-center gap-2">
-                {stats.last_sync.status === "success" && (
-                  <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30 bg-green-50 dark:bg-green-950/20">
-                    <CheckCircle className="w-3 h-3" /> Успішно
-                  </Badge>
-                )}
-                {stats.last_sync.status === "error" && (
-                  <Badge variant="outline" className="gap-1 text-destructive border-destructive/30 bg-destructive/10">
-                    <XCircle className="w-3 h-3" /> Помилка
-                  </Badge>
-                )}
-                {stats.last_sync.status === "running" && (
-                  <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30 bg-amber-50 dark:bg-amber-950/20">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Виконується
-                  </Badge>
-                )}
-              </div>
-              <div className="text-sm text-muted-foreground space-y-1">
-                <p>
-                  <span className="font-medium text-foreground">Початок:</span>{" "}
-                  {new Date(stats.last_sync.started_at).toLocaleString("uk-UA")}
-                </p>
-                {stats.last_sync.finished_at && (
-                  <p>
-                    <span className="font-medium text-foreground">Кінець:</span>{" "}
-                    {new Date(stats.last_sync.finished_at).toLocaleString("uk-UA")}
-                  </p>
-                )}
-                {stats.last_sync.laws_processed != null && (
-                  <p>
-                    <span className="font-medium text-foreground">Оброблено:</span>{" "}
-                    {stats.last_sync.laws_processed} законів
-                  </p>
-                )}
-                {stats.last_sync.error_message && (
-                  <p className="text-destructive">{stats.last_sync.error_message}</p>
-                )}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Quick actions */}
-      <Card className="border-dashed">
-        <CardContent className="pt-5 pb-5">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <p className="font-semibold text-sm">Швидкі дії</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Перейдіть до потрібного розділу</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/admin/settings">
-                <Button variant="outline" size="sm" className="gap-2 h-9">
-                  <Settings className="w-4 h-4" /> Налаштування
-                </Button>
-              </Link>
-              <Link href="/admin/base">
-                <Button variant="outline" size="sm" className="gap-2 h-9">
-                  <BookOpen className="w-4 h-4" /> База знань
-                </Button>
-              </Link>
-              <Link href="/">
-                <Button variant="outline" size="sm" className="gap-2 h-9">
-                  <FileText className="w-4 h-4" /> Відкрити чат
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

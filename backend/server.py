@@ -1,24 +1,35 @@
 import os
 import re
+import sys
 import traceback
+import asyncio
 import httpx
 import threading
 import datetime
 from collections import deque
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from google.genai import Client, types
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from google import genai
+from google.genai import types
+import vertexai
+from vertexai.language_models import TextEmbeddingModel
+from auth_router import router as auth_router, get_optional_user, check_and_increment_limit, _extract_ip, _upsert_profile, _get_profile, _sb_headers
+import settings_cache
 
 load_dotenv()
 
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+# ── З .env беремо ТІЛЬКИ Supabase підключення ────────────────────────────────
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-AI_MODEL = os.environ.get("AI_MODEL")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL")
+
+# Завантажуємо всі налаштування (SA JSON, моделі, промпт) з Supabase при старті
+settings_cache.load()
 
 app = FastAPI()
 app.add_middleware(
@@ -28,12 +39,51 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-gemini = Client(api_key=GOOGLE_API_KEY)
+app.include_router(auth_router)
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model=EMBEDDING_MODEL,
-    google_api_key=GOOGLE_API_KEY
-)
+
+def _get_genai_client() -> genai.Client:
+    """
+    Повертає google.genai.Client через Vertex AI backend
+    з service account credentials зі settings_cache.
+    """
+    creds   = settings_cache.get_credentials()
+    project = settings_cache.get_vertex_project()
+    location = settings_cache.get_vertex_location()
+    if not creds or not project:
+        raise ValueError(
+            "Service Account JSON не налаштовано. "
+            "Завантажте JSON в адмінці: AI Налаштування → Service Account."
+        )
+    print(f"DEBUG: Використовуємо проект {project} у локації {location}")
+    return genai.Client(
+        vertexai=True,
+        project=project,
+        location=location,
+        credentials=creds,
+    )
+
+
+def _init_vertexai():
+    """Ініціалізує vertexai SDK (потрібно для TextEmbeddingModel)."""
+    creds    = settings_cache.get_credentials()
+    project  = settings_cache.get_vertex_project()
+    location = settings_cache.get_vertex_location()
+    if not creds or not project:
+        raise ValueError(
+            "Service Account JSON не налаштовано. "
+            "Завантажте JSON в адмінці: AI Налаштування → Service Account."
+        )
+    vertexai.init(project=project, location=location, credentials=creds)
+
+
+def get_embedding(text: str, model_name: str | None = None) -> list[float]:
+    """Векторизація тексту через Vertex AI TextEmbeddingModel."""
+    _init_vertexai()
+    model_id = model_name or settings_cache.get("embedding_model", "text-embedding-004")
+    model = TextEmbeddingModel.from_pretrained(model_id)
+    embeddings = model.get_embeddings([text])
+    return embeddings[0].values
 
 # ── COURT CASE DETECTOR ────────────────────────────────────────────────────
 
@@ -186,6 +236,7 @@ class Query(BaseModel):
 
 def search_templates(query_vector: list, top_k: int = 3) -> list:
     """Векторний пошук по таблиці document_templates."""
+    threshold = settings_cache.get_float("match_threshold_templates", 0.3)
     try:
         with httpx.Client() as client:
             response = client.post(
@@ -197,7 +248,7 @@ def search_templates(query_vector: list, top_k: int = 3) -> list:
                 },
                 json={
                     "query_embedding": query_vector,
-                    "match_threshold": 0.3,
+                    "match_threshold": threshold,
                     "match_count": top_k,
                 },
                 timeout=10.0,
@@ -211,7 +262,19 @@ def search_templates(query_vector: list, top_k: int = 3) -> list:
         return []
 
 
-def search_supabase(query_vector: list, top_k: int = 10) -> list:
+def search_supabase(query_vector: list, top_k: int = 10, filter_domains: list | None = None, match_threshold: float = 0.4) -> list:
+    """
+    Vector search in documents table.
+    filter_domains: list of domain strings (e.g. ['zakon.rada.gov.ua', 'ccu.gov.ua'])
+                    None = no filter, return all sources.
+    """
+    body: dict = {
+        "query_embedding": query_vector,
+        "match_threshold": match_threshold,
+        "match_count": top_k,
+        "filter_domains": filter_domains or [],
+    }
+
     try:
         with httpx.Client() as client:
             response = client.post(
@@ -221,11 +284,7 @@ def search_supabase(query_vector: list, top_k: int = 10) -> list:
                     "Authorization": f"Bearer {SUPABASE_KEY}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "query_embedding": query_vector,
-                    "match_threshold": 0.4,
-                    "match_count": top_k,
-                },
+                json=body,
                 timeout=10.0,
             )
             if response.status_code != 200:
@@ -237,47 +296,332 @@ def search_supabase(query_vector: list, top_k: int = 10) -> list:
         return []
 
 
-@app.post("/ask")
-async def ask_lawyer(data: Query):
-    print(f"🔍 ЗАПИТ: {data.question}")
+_SOURCE_FEATURE_MAP = {
+    "source_rada":     "zakon.rada.gov.ua",
+    "source_legalaid": "legalaid.gov.ua",
+    "source_ccu":      "ccu.gov.ua",
+    "source_supreme":  "supreme.court.gov.ua",
+}
+
+
+def _get_enabled_features(plan_id: str) -> set:
+    """
+    Fetch all enabled feature keys for a subscription plan.
+    Returns empty set on error (safe default: no premium features).
+    """
     try:
+        with httpx.Client(timeout=5.0) as c:
+            r = c.get(
+                f"{SUPABASE_URL}/rest/v1/plan_features",
+                params={
+                    "plan_id": f"eq.{plan_id}",
+                    "enabled": "eq.true",
+                    "select": "feature_key",
+                },
+                headers=_sb_headers(service=True),
+            )
+            if r.status_code == 200:
+                return {row["feature_key"] for row in r.json()}
+    except Exception:
+        pass
+    return set()
+
+
+def _domains_from_features(features: set) -> list | None:
+    """
+    Convert enabled feature set to source domain allowlist.
+    Returns None if no source features enabled (= allow all, shouldn't happen).
+    """
+    domains = [v for k, v in _SOURCE_FEATURE_MAP.items() if k in features]
+    return domains if domains else None
+
+
+def _build_response_rules(features: set) -> str:
+    """
+    Build Gemini prompt rules section based on the plan's enabled response features.
+    """
+    rules = [
+        "1. Стиль офіційно-діловий.",
+        "2. Вказуй джерела [1], [2] після кожного твердження.",
+    ]
+    n = 3
+
+    if "response_detailed" in features:
+        rules.append(f"{n}. Надай повний розгорнутий аналіз — не обмежуйся коротким summary.")
+        n += 1
+    else:
+        rules.append(f"{n}. Відповідь стисла та конкретна (3–5 речень).")
+        n += 1
+
+    if "response_steps" in features:
+        rules.append(f"{n}. Обов'язково додай розділ «Що робити далі» з конкретними кроками.")
+        n += 1
+
+    if "response_scenarios" in features:
+        rules.append(f"{n}. Розглянь альтернативні сценарії розвитку ситуації (мінімум 2 варіанти).")
+        n += 1
+
+    if "response_vs_position" in features:
+        rules.append(f"{n}. Обов'язково посилайся на конкретні правові позиції Верховного суду.")
+        n += 1
+
+    return "\n".join(rules)
+
+
+# _get_all_settings замінено на settings_cache.get_all() — дивись settings_cache.py
+
+async def _get_plan_limits(plan_id: str) -> tuple[int, int]:
+    """Returns (docs_limit, templates_limit) for a specific plan. Fallbacks to Free plan limits."""
+    docs_limit, tpl_limit = 5, 1 
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/subscription_plans?id=eq.{plan_id}&select=max_docs_retrieved,max_templates_retrieved",
+                headers=_sb_headers(service=True),
+                timeout=5.0,
+            )
+            if r.status_code == 200 and r.json():
+                data = r.json()[0]
+                docs_limit = data.get("max_docs_retrieved", docs_limit)
+                tpl_limit = data.get("max_templates_retrieved", tpl_limit)
+    except Exception:
+        pass
+    return docs_limit, tpl_limit
+
+# @app.post("/ask")
+# async def ask_lawyer(
+#     data: Query,
+#     request: Request,
+#     user: Optional[dict] = Depends(get_optional_user),
+# ):
+#     print(f"🔍 ЗАПИТ: {data.question}")
+
+#     # ── Auth + limit check ───────────────────────────────────────────────────
+#     if user:
+#         user_id: str = user["id"]
+#         check_and_increment_limit(user_id)
+
+#         # Record IP / UA on each request (best-effort, non-blocking)
+#         ip = _extract_ip(request)
+#         ua = request.headers.get("user-agent", "")
+#         if ip:
+#             _upsert_profile({
+#                 "id": user_id,
+#                 "email": user.get("email", ""),
+#                 "last_ip": ip,
+#                 "user_agent": ua,
+#                 "updated_at": datetime.datetime.utcnow().isoformat(),
+#             })
+#     else:
+#         # No token — still allow for now (frontend will block via middleware)
+#         # but you can change this to raise 401 if you want strict enforcement
+#         pass
+
+#     try:
+#         court_instruction = try_fetch_court_case(data.question)
+
+#         query_vector = await asyncio.wait_for(
+#             asyncio.to_thread(get_embedding, data.question),
+#             timeout=90.0,
+#         )
+
+#         # Паралельний пошук: закони + шаблони
+#         docs, template_hits = await asyncio.gather(
+#             asyncio.to_thread(search_supabase, query_vector, 10),
+#             asyncio.to_thread(search_templates, query_vector, 3),
+#         )
+
+#         if not docs and not template_hits:
+#             return {
+#                 "answer": "Вибачте, у моїй базі знань поки немає інформації за цим запитом. Спробуйте уточнити питання.",
+#                 "references": [],
+#                 "templates": [],
+#             }
+
+#         context_parts = []
+#         seen_files = set()
+
+#         for i, d in enumerate(docs):
+#             content = d.get("out_content", "")
+#             meta = d.get("out_metadata", {})
+#             source_title = meta.get("source", "Документ")
+#             category = meta.get("category", "Загальне")
+
+#             context_parts.append(
+#                 f"--- Джерело [{i+1}]: {source_title} ({category}) ---\n"
+#                 f"Текст: {content}"
+#             )
+
+#             # Шаблони що прийшли з таблиці documents (wiki)
+#             file_url = meta.get("file_url")
+#             if file_url and file_url not in seen_files:
+#                 seen_files.add(file_url)
+
+#         context = "\n\n".join(context_parts)
+
+#         # Шаблони з document_templates — головне джерело файлів
+#         templates = []
+#         for t in template_hits:
+#             file_url = t.get("file_url", "")
+#             if file_url and file_url not in seen_files:
+#                 templates.append({
+#                     "title": t.get("title", "Шаблон"),
+#                     "url": file_url,
+#                     "category": t.get("category", ""),
+#                     "type": "template",
+#                 })
+#                 seen_files.add(file_url)
+
+#         template_instruction = ""
+#         if templates:
+#             template_list = "\n".join([f"- {t['title']}" for t in templates])
+#             template_instruction = (
+#                 f"\nВАЖЛИВО: Знайдено офіційні шаблони документів:\n{template_list}\n"
+#                 f"Обов'язково порадь користувачу завантажити відповідний шаблон."
+#             )
+
+#         prompt = f"""Ти — досвідчений український адвокат. Твоє завдання: надати точну, структуровану та корисну відповідь на питання користувача, базуючись ТІЛЬКИ на наданому контексті.
+
+# ПРАВИЛА ВІДПОВІДІ:
+# 1. Використовуй офіційно-діловий, але зрозумілий стиль.
+# 2. Обов'язково вказуй номери джерел [1], [2] після кожного твердження.
+# 3. Якщо в контексті є суперечності, вкажи на це.
+# 4. Якщо інформації недостатньо, чесно скажи про це.
+# {template_instruction}{court_instruction}
+
+# КОНТЕКСТ:
+# {context}
+
+# ПИТАННЯ КОРИСТУВАЧА: {data.question}
+# ВІДПОВІДЬ АДВОКАТА:"""
+
+#         response = await asyncio.wait_for(
+#             asyncio.to_thread(
+#                 gemini.models.generate_content,
+#                 model=AI_MODEL,
+#                 contents=types.Content(
+#                     role="user",
+#                     parts=[types.Part.from_text(text=prompt)],
+#                 ),
+#                 config=types.GenerateContentConfig(
+#                     temperature=0.1,
+#                     top_p=0.8,
+#                 ),
+#             ),
+#             timeout=90.0,
+#         )
+
+#         references = []
+#         for i, d in enumerate(docs):
+#             meta = d.get("out_metadata") or {}
+#             content_snippet = d.get("out_content") or ""
+#             references.append({
+#                 "num": i + 1,
+#                 "source_title": meta.get("source", "Документ"),
+#                 "category": meta.get("category", "Невідомо"),
+#                 "law_url": meta.get("law_url", ""),
+#                 "status": meta.get("status", "Чинний"),
+#                 "is_template": meta.get("is_template", False),
+#                 "passages": [content_snippet],
+#             })
+
+#         print(f"✅ Відповідь сформована. Знайдено шаблонів: {len(templates)}")
+#         return {"answer": response.text, "references": references, "templates": templates}
+
+#     except asyncio.TimeoutError:
+#         friendly_answer = "Запит зайняв занадто багато часу. Спробуйте ще раз."
+#         return {"answer": friendly_answer, "references": [], "templates": []}
+#     except Exception as e:
+#         traceback.print_exc()
+#         error_msg = str(e)
+
+#         if "503" in error_msg or "high demand" in error_msg.lower():
+#             friendly_answer = "Вибачте, зараз занадто багато запитів до нейромережі. Будь ласка, спробуйте ще раз через 1-2 хвилини."
+#         else:
+#             friendly_answer = f"На жаль, сталася технічна помилка. Спробуйте пізніше або зверніться в підтримку."
+            
+#         return {
+#             "answer": friendly_answer,
+#             "references": [],
+#             "templates": [],
+#             "error_detail": error_msg # залишаємо для логів
+#         }
+
+
+
+
+@app.post("/ask")
+async def ask_lawyer(
+    data: Query,
+    request: Request,
+    user: Optional[dict] = Depends(get_optional_user),
+):
+    print(f"🔍 ЗАПИТ: {data.question}")
+
+    # ── 1. Авторизація та ліміти ───────────────────────────────────────────
+    filter_domains: list | None = None
+    enabled_features: set = set()
+    plan_id = "free"
+    profile: dict | None = None
+
+    if user:
+        user_id: str = user["id"]
+        await asyncio.to_thread(check_and_increment_limit, user_id)
+
+        ip = _extract_ip(request)
+        ua = request.headers.get("user-agent", "")
+        if ip:
+            await asyncio.to_thread(_upsert_profile, {
+                "id": user_id,
+                "email": user.get("email", ""),
+                "last_ip": ip,
+                "user_agent": ua,
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            })
+
+        profile = await asyncio.to_thread(_get_profile, user_id)
+        if profile:
+            plan_id = profile.get("subscription_tier", plan_id)
+            enabled_features = await asyncio.to_thread(_get_enabled_features, plan_id)
+            filter_domains = _domains_from_features(enabled_features)
+
+    ai_model    = settings_cache.get("ai_model",        "gemini-2.0-flash-lite")
+    emb_model   = settings_cache.get("embedding_model", "text-embedding-004")
+    sys_prompt  = settings_cache.get("system_prompt",   "Ти — досвідчений український адвокат.")
+    temperature = settings_cache.get_float("temperature", 0.1)
+    top_p       = settings_cache.get_float("top_p", 0.8)
+    doc_limit, tpl_limit = await _get_plan_limits(plan_id)
+
+    try:
+        # ── 2. Пошук контексту ──────────────────────────────────────────────
         court_instruction = try_fetch_court_case(data.question)
 
-        query_vector = embeddings.embed_query(data.question)
+        query_vector = await asyncio.wait_for(
+            asyncio.to_thread(get_embedding, data.question, emb_model),
+            timeout=60.0,
+        )
 
-        # Паралельний пошук: закони + шаблони
-        docs = search_supabase(query_vector, top_k=10)
-        template_hits = search_templates(query_vector, top_k=3)
+        docs, template_hits = await asyncio.gather(
+            asyncio.to_thread(search_supabase, query_vector, doc_limit, filter_domains),
+            asyncio.to_thread(search_templates, query_vector, tpl_limit),
+        )
 
         if not docs and not template_hits:
             return {
-                "answer": "Вибачте, у моїй базі знань поки немає інформації за цим запитом. Спробуйте уточнити питання.",
+                "answer": "Вибачте, інформації не знайдено.",
                 "references": [],
                 "templates": [],
             }
 
         context_parts = []
         seen_files = set()
-
         for i, d in enumerate(docs):
             content = d.get("out_content", "")
             meta = d.get("out_metadata", {})
-            source_title = meta.get("source", "Документ")
-            category = meta.get("category", "Загальне")
-
-            context_parts.append(
-                f"--- Джерело [{i+1}]: {source_title} ({category}) ---\n"
-                f"Текст: {content}"
-            )
-
-            # Шаблони що прийшли з таблиці documents (wiki)
-            file_url = meta.get("file_url")
-            if file_url and file_url not in seen_files:
-                seen_files.add(file_url)
+            context_parts.append(f"--- Джерело [{i+1}]: {meta.get('source')} ---\nТекст: {content}")
 
         context = "\n\n".join(context_parts)
 
-        # Шаблони з document_templates — головне джерело файлів
         templates = []
         for t in template_hits:
             file_url = t.get("file_url", "")
@@ -290,68 +634,106 @@ async def ask_lawyer(data: Query):
                 })
                 seen_files.add(file_url)
 
-        template_instruction = ""
         if templates:
             template_list = "\n".join([f"- {t['title']}" for t in templates])
             template_instruction = (
                 f"\nВАЖЛИВО: Знайдено офіційні шаблони документів:\n{template_list}\n"
                 f"Обов'язково порадь користувачу завантажити відповідний шаблон."
             )
+        else:
+            template_instruction = ""
 
-        prompt = f"""Ти — досвідчений український адвокат. Твоє завдання: надати точну, структуровану та корисну відповідь на питання користувача, базуючись ТІЛЬКИ на наданому контексті.
+        # ── 3. Формування промпту ───────────────────────────────────────────
 
-ПРАВИЛА ВІДПОВІДІ:
-1. Використовуй офіційно-діловий, але зрозумілий стиль.
-2. Обов'язково вказуй номери джерел [1], [2] після кожного твердження.
-3. Якщо в контексті є суперечності, вкажи на це.
-4. Якщо інформації недостатньо, чесно скажи про це.
+        # Контекст користувача з онбордингу
+        user_ctx_parts = []
+        if profile:
+            role    = profile.get("role") or ""
+            sub     = profile.get("sub_role") or ""
+            segs    = profile.get("segment") or []
+            if isinstance(segs, list) and segs:
+                user_ctx_parts.append(f"Сфери інтересів: {', '.join(segs)}")
+            if role:
+                user_ctx_parts.append(f"Роль: {role}")
+            if sub:
+                if isinstance(sub, list):
+                    user_ctx_parts.append(f"Спеціалізація: {', '.join(sub)}")
+                else:
+                    user_ctx_parts.append(f"Спеціалізація: {sub}")
+
+        user_context_block = (
+            "ПРОФІЛЬ КОРИСТУВАЧА:\n" + "\n".join(user_ctx_parts) + "\n"
+            "Адаптуй рівень деталізації та термінологію під цього користувача.\n"
+        ) if user_ctx_parts else ""
+
+        response_rules = _build_response_rules(enabled_features)
+
+        prompt = f"""{sys_prompt}
+
+{user_context_block}
+ПРАВИЛА ВІДПОВІДІ (ОБОВ'ЯЗКОВО):
+{response_rules}
 {template_instruction}{court_instruction}
 
-КОНТЕКСТ:
+КРИТИЧНО ВАЖЛИВО — ЗАБОРОНЕНО:
+- Вигадувати, припускати або доповнювати інформацію яка НЕ міститься в КОНТЕКСТІ нижче
+- Посилатися на закони, статті або рішення яких немає в КОНТЕКСТІ
+- Відповідати «за загальними знаннями» якщо їх немає в КОНТЕКСТІ
+- Якщо контексту недостатньо — прямо скажи: «У доступній базі знань немає достатньої інформації для повної відповіді»
+
+КОНТЕКСТ (єдине джерело інформації):
 {context}
 
-ПИТАННЯ КОРИСТУВАЧА: {data.question}
+ПИТАННЯ: {data.question}
 ВІДПОВІДЬ АДВОКАТА:"""
 
-        response = gemini.models.generate_content(
-            model=AI_MODEL,
-            contents=types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=prompt)],
-            ),
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                top_p=0.8,
-            ),
-        )
+        # ── Генерація через Vertex AI (google.genai з vertexai=True) ─────────
+        def _generate():
+            client = _get_genai_client()
+            return client.models.generate_content(
+                model=ai_model,
+                contents=types.Content(role="user", parts=[types.Part.from_text(text=prompt)]),
+                config=types.GenerateContentConfig(temperature=temperature, top_p=top_p),
+            )
+        sdk_response = await asyncio.to_thread(_generate)
+        answer_text = sdk_response.text or "Вибачте, ШІ не зміг сформувати відповідь."
 
+        # ── 4. Формування references ────────────────────────────────────────
         references = []
         for i, d in enumerate(docs):
             meta = d.get("out_metadata") or {}
-            content_snippet = d.get("out_content") or ""
             references.append({
                 "num": i + 1,
                 "source_title": meta.get("source", "Документ"),
                 "category": meta.get("category", "Невідомо"),
                 "law_url": meta.get("law_url", ""),
                 "status": meta.get("status", "Чинний"),
-                "is_template": meta.get("is_template", False),
-                "passages": [content_snippet],
+                "passages": [d.get("out_content", "")],
             })
 
-        print(f"✅ Відповідь сформована. Знайдено шаблонів: {len(templates)}")
-        return {"answer": response.text, "references": references, "templates": templates}
+        print(f"✅ Відповідь сформована. Шаблонів: {len(templates)}")
+        return {"answer": answer_text, "references": references, "templates": templates}
 
+    except asyncio.TimeoutError:
+        return {"answer": "Сервер занадто довго аналізував дані.", "references": [], "templates": []}
     except Exception as e:
         traceback.print_exc()
-        return {
-            "answer": f"На жаль, сталася технічна помилка: {str(e)}",
-            "references": [],
-            "templates": [],
-        }
+        error_msg = str(e).lower()
+        if "handshake" in error_msg or "ssl" in error_msg:
+            friendly_answer = "Проблема захищеного з'єднання. Спробуйте ще раз."
+        else:
+            friendly_answer = "Сталася технічна помилка. Спробуйте пізніше."
+        return {"answer": friendly_answer, "references": [], "templates": [], "error_detail": str(e)}
+# ── Admin: Settings cache refresh ──────────────────────────────────────────
+
+@app.post("/admin/settings/refresh")
+async def refresh_settings():
+    """Перезавантажує кеш налаштувань з Supabase. Викликається адмінкою після збереження."""
+    await settings_cache.refresh()
+    return {"ok": True, "settings": list(settings_cache.get_all().keys())}
 
 
-# ── Admin: RADA endpoints ──────────────────────────────────────────────────
+# ── Admin: RADA endpoints
 
 @app.post("/admin/rada/trigger")
 async def trigger_rada_now():
@@ -945,7 +1327,7 @@ async def get_base_docs(
                 params=params,
                 timeout=15.0,
             )
-            if r.status_code != 200:
+            if r.status_code not in (200, 206):
                 raise HTTPException(status_code=r.status_code, detail=r.text[:200])
 
             docs = r.json()

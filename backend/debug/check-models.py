@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-client = Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+client = Client(api_key=os.environ.get("NEXT_PUBLIC_GOOGLE_API_KEY"))
 
 print("=== Модели с поддержкой embedContent ===")
 for m in client.models.list():

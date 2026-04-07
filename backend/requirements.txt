@@ -12,20 +12,31 @@ markdownify
 pydantic
 python-dotenv
 
-# Google AI
+# Google AI & LangChain
 google-genai
-langchain-google-genai
-
-# LangChain
+google-cloud-aiplatform
+langchain-google-vertexai
 langchain-community
 langchain-text-splitters
+langchain-qdrant
+
+# Векторна база
+qdrant-client
 
 # File parsers
 pypdf
 docx2txt
 
-# Google Drive / Auth
+# Google Drive / Auth / Scheduling
 google-api-python-client
 google-auth
 google-auth-httplib2
 apscheduler
+
+# Статистика та геопозиція (як у Claude)
+geoip2
+user-agents
+
+# Робота з базою (Supabase/Postgres)
+supabase
+psycopg2-binary

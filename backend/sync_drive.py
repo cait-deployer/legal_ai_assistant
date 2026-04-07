@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 # 1. Загружаем настройки
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
+api_key = os.getenv("NEXT_PUBLIC_GOOGLE_API_KEY")
 
 if not api_key:
     print("❌ КРИТИЧЕСКАЯ ОШИБКА: GOOGLE_API_KEY не найден в .env!")

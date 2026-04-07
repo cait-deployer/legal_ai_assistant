@@ -3,24 +3,51 @@ import httpx
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google.oauth2 import service_account
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_vertexai import VertexAIEmbeddings
 import tempfile
+import settings_cache
 
 load_dotenv()
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE")
-FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL")
+FOLDER_ID    = os.environ.get("DRIVE_FOLDER_ID")
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model=EMBEDDING_MODEL,
-    google_api_key=os.environ.get("GOOGLE_API_KEY")
-)
+
+def _get_embeddings() -> VertexAIEmbeddings:
+    import vertexai
+    creds    = settings_cache.get_credentials()
+    project  = settings_cache.get_vertex_project()
+    location = settings_cache.get_vertex_location()
+    model    = settings_cache.get("embedding_model", "text-embedding-004")
+    vertexai.init(project=project, location=location, credentials=creds)
+    return VertexAIEmbeddings(model_name=model, credentials=creds, project=project)
+
+
+def _get_drive_service():
+    """Google Drive service з тим самим SA JSON що і для Gemini."""
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    sa = settings_cache.get_sa_info()
+    if sa:
+        creds = service_account.Credentials.from_service_account_info(
+            sa,
+            scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        )
+    else:
+        creds = settings_cache.get_credentials()
+    return build("drive", "v3", credentials=creds)
+
+
+class _LazyEmbeddings:
+    def embed_query(self, text: str) -> list:
+        return _get_embeddings().embed_query(text)
+    def embed_documents(self, texts: list) -> list:
+        return _get_embeddings().embed_documents(texts)
+
+embeddings = _LazyEmbeddings()
 
 def file_exists_in_supabase(filename):
     """Проверяет, есть ли уже в базе чанки из этого файла"""

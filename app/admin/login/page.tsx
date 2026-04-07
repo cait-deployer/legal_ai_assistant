@@ -36,22 +36,22 @@ function LoginForm() {
   }
 
   return (
-    <div className="bg-card/80 backdrop-blur-sm border border-border/60 rounded-2xl shadow-xl shadow-black/5 p-7">
-      <div className="mb-6">
-        <h2 className="text-lg font-semibold text-foreground">Вхід</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">Введіть дані для доступу до панелі</p>
+    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-8">
+      <div className="mb-7">
+        <h2 className="text-2xl font-serif font-bold text-white">Вхід</h2>
+        <p className="text-sm text-[#E0E6ED]/60 mt-1">Введіть дані для доступу до панелі</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
-          <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+          <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             {error}
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="username" className="text-sm font-medium">Логін</Label>
+        <div className="space-y-2">
+          <Label htmlFor="username" className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Логін</Label>
           <Input
             id="username"
             type="text"
@@ -60,13 +60,13 @@ function LoginForm() {
             autoComplete="username"
             autoFocus
             onChange={(e) => { setUsername(e.target.value); setError("") }}
-            className="h-11 bg-background/80"
+            className="h-14 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/50 focus-visible:ring-0"
             required
           />
         </div>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="password" className="text-sm font-medium">Пароль</Label>
+        <div className="space-y-2">
+          <Label htmlFor="password" className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Пароль</Label>
           <div className="relative">
             <Input
               id="password"
@@ -75,29 +75,27 @@ function LoginForm() {
               value={password}
               autoComplete="current-password"
               onChange={(e) => { setPassword(e.target.value); setError("") }}
-              className="h-11 pr-11 bg-background/80"
+              className="h-14 pr-12 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/50 focus-visible:ring-0"
               required
             />
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#BFA071]/50 hover:text-[#BFA071] transition-colors"
               onClick={() => setShowPassword((v) => !v)}
               tabIndex={-1}
             >
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </Button>
+              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
           </div>
         </div>
 
         <Button
           type="submit"
           disabled={loading || !username || !password}
-          className="w-full h-11 gap-2 font-semibold mt-2"
+          className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 mt-2"
         >
           {loading ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Вхід...</>
+            <Loader2 className="w-5 h-5 animate-spin" />
           ) : (
             "Увійти"
           )}
@@ -109,45 +107,46 @@ function LoginForm() {
 
 export default function AdminLoginPage() {
   return (
-    <div className="min-h-screen bg-background relative flex items-center justify-center overflow-hidden">
-      {/* Abstract background */}
-      <div className="absolute inset-0 pointer-events-none select-none" aria-hidden>
-        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-primary/8 blur-[120px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-primary/6 blur-[140px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full bg-muted/30 blur-[100px]" />
-        <svg className="absolute inset-0 w-full h-full opacity-[0.025]">
+    <div className="min-h-screen bg-[#0A0E1A] relative flex items-center justify-center overflow-hidden p-4">
+      {/* Background */}
+      <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
+        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#BFA071]/5" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#BFA071]/[0.03]" />
+        <svg className="absolute inset-0 w-full h-full opacity-[0.015]">
           <defs>
             <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-              <circle cx="1.5" cy="1.5" r="1.5" fill="currentColor" />
+              <circle cx="1.5" cy="1.5" r="1.5" fill="#BFA071" />
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="url(#dots)" className="text-foreground" />
+          <rect width="100%" height="100%" fill="url(#dots)" />
         </svg>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-border/30" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-border/15" />
       </div>
 
-      <div className="relative z-10 w-full max-w-[400px] mx-4">
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/25 ring-4 ring-primary/10">
-            <Scale className="w-7 h-7 text-primary-foreground" />
+      <div className="relative z-10 w-full max-w-[420px]">
+        <div className="flex flex-col items-center gap-4 mb-10">
+          <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
+            <Scale className="w-8 h-8 text-[#0A0E1A]" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Lawyer AI</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Панель адміністратора</p>
+            <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
+              Lawyer <span className="text-[#BFA071]">AI</span>
+            </h1>
+            <p className="text-sm text-[#E0E6ED]/70 mt-0.5">Панель адміністратора</p>
           </div>
         </div>
 
         <Suspense fallback={
-          <div className="bg-card/80 backdrop-blur-sm border border-border/60 rounded-2xl shadow-xl p-7 flex items-center justify-center h-[280px]">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[280px]">
+            <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]" />
           </div>
         }>
           <LoginForm />
         </Suspense>
 
-        <p className="text-center text-sm text-muted-foreground mt-5">
-          <a href="/" className="hover:text-foreground transition-colors inline-flex items-center gap-1.5 underline underline-offset-4">
+        <p className="text-center mt-6">
+          <a href="/" className="text-[10px] font-black text-[#BFA071]/70 hover:text-[#BFA071] uppercase tracking-[0.2em] transition-colors inline-flex items-center gap-1.5">
             ← Назад до чату
           </a>
         </p>

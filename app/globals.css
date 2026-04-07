@@ -49,6 +49,13 @@
 }
 
 :root {
+  --gold: #C9A84C;
+  --gold-light: #E2C47A;
+  --border-gold: rgba(201,168,76,0.25);
+  --card: #12192b;
+  --card-hover: rgba(201,168,76,0.06);
+  --text-secondary: rgba(255,255,255,0.45);
+  --secondary: rgba(255,255,255,0.08);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -126,5 +133,27 @@
   }
   html {
     @apply font-sans;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(191, 160, 113, 0.25) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(191, 160, 113, 0.25);
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(191, 160, 113, 0.5);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }

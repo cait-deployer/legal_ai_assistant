@@ -3,7 +3,7 @@ from google.genai import Client
 from dotenv import load_dotenv
 
 load_dotenv()
-client = Client(api_key=os.getenv("GOOGLE_API_KEY"))
+client = Client(api_key=os.getenv("NEXT_PUBLIC_GOOGLE_API_KEY"))
 
 print("🧹 Начинаю очистку облака Gemini...")
 files = list(client.files.list())

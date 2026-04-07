@@ -4,8 +4,9 @@ import httpx
 import re
 from dotenv import load_dotenv
 from langchain_text_splitters import MarkdownTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_vertexai import VertexAIEmbeddings
 from datetime import datetime, timezone
+import settings_cache
 
 from rada_scanner import (
     get_all_legal_ids,
@@ -18,13 +19,27 @@ load_dotenv()
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL")
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model=EMBEDDING_MODEL,
-    google_api_key=GOOGLE_API_KEY
-)
+
+def _get_embeddings() -> VertexAIEmbeddings:
+    """Vertex AI embeddings з credentials із settings_cache."""
+    import vertexai
+    creds    = settings_cache.get_credentials()
+    project  = settings_cache.get_vertex_project()
+    location = settings_cache.get_vertex_location()
+    model    = settings_cache.get("embedding_model", "text-embedding-004")
+    vertexai.init(project=project, location=location, credentials=creds)
+    return VertexAIEmbeddings(model_name=model, credentials=creds, project=project)
+
+
+class _LazyEmbeddings:
+    """Proxy: при кожному виклику бере свіжі credentials з кешу."""
+    def embed_query(self, text: str) -> list:
+        return _get_embeddings().embed_query(text)
+    def embed_documents(self, texts: list) -> list:
+        return _get_embeddings().embed_documents(texts)
+
+embeddings = _LazyEmbeddings()
 
 text_splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
 
@@ -154,6 +169,7 @@ def run_rada_sync(log_callback=None, session_id=None):
                     "category": category,
                     "status": status,
                     "law_url": law_url,
+                    "source_domain": "zakon.rada.gov.ua",
                     "scraped_at": scraped_at,
                     "chunk_index": j
                 }
