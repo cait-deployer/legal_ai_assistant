@@ -20,8 +20,10 @@ async function getGeo(ip: string): Promise<Record<string, string>> {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   // Behind nginx proxy: reconstruct public origin from forwarded headers
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || ""
-  const proto = request.headers.get("x-forwarded-proto") || "https"
+  // x-forwarded-host can contain multiple comma-separated values — take first only
+  const rawHost = request.headers.get("x-forwarded-host") || request.headers.get("host") || ""
+  const host = rawHost.split(",")[0].trim()
+  const proto = (request.headers.get("x-forwarded-proto") || "https").split(",")[0].trim()
   const origin = host ? `${proto}://${host}` : new URL(request.url).origin
 
   const code  = searchParams.get("code")
