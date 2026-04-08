@@ -15,7 +15,7 @@ async function checkAdmin() {
   return c.get("admin_session")?.value === "authenticated"
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const BACKEND = process.env.API_URL || "http://localhost:8000"
 
 // All settings managed via admin panel
 const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default: string | number | boolean; secret?: boolean }> = {

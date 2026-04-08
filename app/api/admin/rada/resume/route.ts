@@ -4,7 +4,7 @@ const BACKEND = process.env.API_URL || "http://localhost:8000"
 
 export async function POST() {
   try {
-    const res = await fetch(`${BACKEND}/admin/wiki/trigger`, { method: "POST" })
+    const res = await fetch(`${BACKEND}/admin/rada/resume`, { method: "POST" })
     const data = await res.json()
     return NextResponse.json(data, { status: res.status })
   } catch {

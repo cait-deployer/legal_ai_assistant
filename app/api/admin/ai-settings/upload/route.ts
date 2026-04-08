@@ -15,7 +15,7 @@ async function checkAdmin() {
   return c.get("admin_session")?.value === "authenticated"
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const BACKEND = process.env.API_URL || "http://localhost:8000"
 
 const REQUIRED_SA_FIELDS = ["type", "project_id", "private_key", "client_email"]
 

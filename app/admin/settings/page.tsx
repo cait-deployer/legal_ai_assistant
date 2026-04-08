@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Settings, Play, Loader2, RefreshCw,
-  CheckCircle, XCircle, Database, Scale, BookOpen, FileText,
+  Settings, Play, Pause, RotateCcw, Loader2, RefreshCw,
+  CheckCircle, XCircle, Database, Scale, BookOpen,
 } from "lucide-react"
 
 type LogEntry = {
@@ -25,17 +25,42 @@ type HistoryEntry = {
 
 type SourceState = {
   running: boolean
+  pause_requested: boolean
+  can_resume: boolean
+  resume_progress?: { next_index: number; total: number } | null
   logs: LogEntry[]
 }
 
 function StatusBadge({ status }: { status: string }) {
   if (status === "success")
-    return <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0"><CheckCircle className="w-3 h-3" /> Успішно</span>
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
+        <CheckCircle className="w-3 h-3" /> Успішно
+      </span>
+    )
   if (status === "error")
-    return <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0"><XCircle className="w-3 h-3" /> Помилка</span>
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+        <XCircle className="w-3 h-3" /> Помилка
+      </span>
+    )
   if (status === "running")
-    return <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0"><Loader2 className="w-3 h-3 animate-spin" /> Виконується</span>
-  return <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-[#BFA071]/5 border border-[#BFA071]/10 text-[#BFA071]/70 shrink-0">{status}</span>
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
+        <Loader2 className="w-3 h-3 animate-spin" /> Виконується
+      </span>
+    )
+  if (status === "paused")
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
+        <Pause className="w-3 h-3" /> Призупинено
+      </span>
+    )
+  return (
+    <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-[#BFA071]/5 border border-[#BFA071]/10 text-[#BFA071]/70 shrink-0">
+      {status}
+    </span>
+  )
 }
 
 const SOURCES = [
@@ -48,6 +73,9 @@ const SOURCES = [
     iconBg: "bg-blue-500/10 border border-blue-500/20",
     triggerUrl: "/api/admin/rada/trigger",
     logsUrl: "/api/admin/rada/logs",
+    pauseUrl: "/api/admin/rada/pause",
+    resumeUrl: "/api/admin/rada/resume",
+    supportsPause: true,
   },
   {
     key: "supreme",
@@ -58,6 +86,9 @@ const SOURCES = [
     iconBg: "bg-purple-500/10 border border-purple-500/20",
     triggerUrl: "/api/admin/supreme/trigger",
     logsUrl: "/api/admin/supreme/logs",
+    pauseUrl: null,
+    resumeUrl: null,
+    supportsPause: false,
   },
   {
     key: "wiki",
@@ -68,21 +99,29 @@ const SOURCES = [
     iconBg: "bg-emerald-500/10 border border-emerald-500/20",
     triggerUrl: "/api/admin/wiki/trigger",
     logsUrl: "/api/admin/wiki/logs",
+    pauseUrl: null,
+    resumeUrl: null,
+    supportsPause: false,
   },
-  // {
-  //   key: "templates",
-  //   label: "Шаблони",
-  //   description: "Офіційні шаблони документів з data.gov.ua",
-  //   icon: FileText,
-  //   iconColor: "text-amber-400",
-  //   iconBg: "bg-amber-500/10 border border-amber-500/20",
-  //   triggerUrl: "/api/admin/templates/trigger",
-  //   logsUrl: "/api/admin/templates/logs",
-  // },
 ]
 
+function logColor(level: string) {
+  switch (level) {
+    case "error":   return "text-red-400"
+    case "success": return "text-emerald-400"
+    case "warning": return "text-amber-400"
+    default:        return "text-[#E0E6ED]/70"
+  }
+}
+
 function SourceCard({ source }: { source: typeof SOURCES[0] }) {
-  const [state, setState] = useState<SourceState>({ running: false, logs: [] })
+  const [state, setState] = useState<SourceState>({
+    running: false,
+    pause_requested: false,
+    can_resume: false,
+    resume_progress: null,
+    logs: [],
+  })
   const [error, setError] = useState("")
   const logsEndRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -92,20 +131,21 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     try {
       const r = await fetch(source.logsUrl)
       const d = await r.json()
-      setState({ running: d.running ?? false, logs: d.live_logs ?? [] })
-    } catch { }
+      setState({
+        running: d.running ?? false,
+        pause_requested: d.pause_requested ?? false,
+        can_resume: d.can_resume ?? false,
+        resume_progress: d.resume_progress ?? null,
+        logs: d.live_logs ?? [],
+      })
+    } catch { /* silently ignore network errors */ }
   }
 
-  useEffect(() => { 
-    const fetchInit = async () => {
-      return fetchLogs()
-    }
-    fetchInit() }
-    , [])
+  useEffect(() => { fetchLogs() }, [])
 
   useEffect(() => {
     if (state.running) {
-      pollRef.current = setInterval(fetchLogs, 4000)
+      pollRef.current = setInterval(fetchLogs, 3000)
     } else {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     }
@@ -119,7 +159,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
   const handleRun = async () => {
     if (state.running) return
     setError("")
-    setState((s) => ({ ...s, running: true }))
+    setState((s) => ({ ...s, running: true, logs: [], can_resume: false }))
     try {
       const res = await fetch(source.triggerUrl, { method: "POST" })
       if (!res.ok) {
@@ -135,19 +175,53 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     }
   }
 
-  const logColor = (level: string) => {
-    switch (level) {
-      case "error": return "text-red-400"
-      case "success": return "text-emerald-400"
-      case "warning": return "text-amber-400"
-      default: return "text-[#E0E6ED]/70"
+  const handlePause = async () => {
+    if (!source.pauseUrl) return
+    setError("")
+    try {
+      await fetch(source.pauseUrl, { method: "POST" })
+      setState((s) => ({ ...s, pause_requested: true }))
+    } catch {
+      setError("Не вдалося надіслати команду паузи")
     }
   }
 
+  const handleResume = async () => {
+    if (!source.resumeUrl) return
+    setError("")
+    setState((s) => ({ ...s, running: true, can_resume: false }))
+    try {
+      const res = await fetch(source.resumeUrl, { method: "POST" })
+      if (!res.ok) {
+        const d = await res.json()
+        setError(d.detail ?? d.error ?? "Помилка відновлення")
+        setState((s) => ({ ...s, running: false }))
+        return
+      }
+      await fetchLogs()
+    } catch {
+      setError("Не вдалося підключитися до бекенду")
+      setState((s) => ({ ...s, running: false }))
+    }
+  }
+
+  const showLogs = state.running || state.logs.length > 0
+
   return (
-    <div className={`bg-[#0d1120]/60 border rounded-2xl transition-all duration-200 ${state.running ? "border-amber-500/30" : "border-[#BFA071]/10 hover:border-[#BFA071]/20"}`}>
+    <div
+      className={`bg-[#0d1120]/60 border rounded-2xl transition-all duration-200 ${
+        state.running
+          ? state.pause_requested
+            ? "border-blue-500/30"
+            : "border-amber-500/30"
+          : state.can_resume
+          ? "border-blue-500/20"
+          : "border-[#BFA071]/10 hover:border-[#BFA071]/20"
+      }`}
+    >
       <div className="p-5">
-        <div className="flex items-center justify-between gap-3">
+        {/* Top row: icon + name + actions */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl ${source.iconBg} flex items-center justify-center shrink-0`}>
               <Icon className={`w-5 h-5 ${source.iconColor}`} />
@@ -157,39 +231,106 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
               <p className="text-xs text-[#E0E6ED]/70 mt-0.5">{source.description}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {state.running && (
+
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {/* Status badge */}
+            {state.running && state.pause_requested && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                <Loader2 className="w-3 h-3 animate-spin" /> Зупиняємось...
+              </span>
+            )}
+            {state.running && !state.pause_requested && (
               <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
                 <Loader2 className="w-3 h-3 animate-spin" /> Виконується
               </span>
             )}
+
+            {/* Pause button (only while running, before pause is requested) */}
+            {source.supportsPause && state.running && !state.pause_requested && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handlePause}
+                className="gap-1.5 h-9 rounded-xl border border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10 text-blue-400 font-black uppercase tracking-wider text-[10px]"
+              >
+                <Pause className="w-3.5 h-3.5" /> Пауза
+              </Button>
+            )}
+
+            {/* Resume button (when paused and not running) */}
+            {source.supportsPause && !state.running && state.can_resume && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleResume}
+                className="gap-1.5 h-9 rounded-xl border border-emerald-500/30 hover:border-emerald-500/50 hover:bg-emerald-500/10 text-emerald-400 font-black uppercase tracking-wider text-[10px]"
+              >
+                <Play className="w-3.5 h-3.5" /> Відновити
+              </Button>
+            )}
+
+            {/* Start / restart button */}
             <Button
               size="sm"
               onClick={handleRun}
               disabled={state.running}
               className="gap-1.5 h-9 rounded-xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#BFA071]/10 disabled:opacity-40"
             >
-              {state.running
-                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Йде...</>
-                : <><Play className="w-3.5 h-3.5" /> Запустити</>}
+              {state.running ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Йде...</>
+              ) : state.can_resume ? (
+                <><RotateCcw className="w-3.5 h-3.5" /> З початку</>
+              ) : (
+                <><Play className="w-3.5 h-3.5" /> Запустити</>
+              )}
             </Button>
           </div>
         </div>
+
+        {/* Resume progress bar */}
+        {source.supportsPause && state.can_resume && state.resume_progress && (
+          <div className="mt-3 p-3 bg-blue-500/5 border border-blue-500/15 rounded-xl">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black text-blue-400 uppercase tracking-wider">
+                Збережений прогрес
+              </span>
+              <span className="text-[10px] font-mono text-blue-400">
+                {state.resume_progress.next_index} / {state.resume_progress.total} законів
+              </span>
+            </div>
+            <div className="w-full bg-[#0A0E1A] rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-blue-400 h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${Math.round(
+                    (state.resume_progress.next_index / state.resume_progress.total) * 100
+                  )}%`,
+                }}
+              />
+            </div>
+            <p className="text-[10px] text-[#E0E6ED]/50 mt-1.5">
+              Натисніть «Відновити» щоб продовжити з місця зупинки,
+              або «З початку» щоб почати заново.
+            </p>
+          </div>
+        )}
+
         {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
       </div>
 
-      {(state.running || state.logs.length > 0) && (
+      {/* Live log terminal */}
+      {showLogs && (
         <div className="px-5 pb-5 pt-0">
-          <div className="bg-[#0A0E1A]/80 rounded-xl border border-[#BFA071]/10 font-mono text-xs h-40 overflow-y-auto p-3 space-y-0.5">
+          <div className="bg-[#0A0E1A]/80 rounded-xl border border-[#BFA071]/10 font-mono text-xs h-48 overflow-y-auto p-3 space-y-0.5">
             {state.logs.length === 0 ? (
               <p className="text-[#BFA071]/50">Очікування логів...</p>
             ) : (
-              state.logs.map((log, i) => (
-                <div key={i} className={`flex gap-2 ${logColor(log.level)}`}>
+              state.logs.map((entry, i) => (
+                <div key={i} className={`flex gap-2 ${logColor(entry.level)}`}>
                   <span className="shrink-0 opacity-60 tabular-nums">
-                    {new Date(log.ts).toLocaleTimeString("uk-UA")}
+                    {new Date(entry.ts).toLocaleTimeString("uk-UA")}
                   </span>
-                  <span className="break-all">{log.message}</span>
+                  <span className="break-all">{entry.message}</span>
                 </div>
               ))
             )}
@@ -213,7 +354,7 @@ export default function SettingsPage() {
       const d = await r.json()
       setHistory(d.history ?? [])
       setLastUpdated(new Date())
-    } catch { }
+    } catch { /* ignore */ }
     finally { setHistoryLoading(false) }
   }
 
@@ -266,13 +407,15 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#BFA071]/10">
               <p className="text-sm text-[#E0E6ED]/70">Останні 20 запусків</p>
               {lastUpdated && (
-                <span className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest">{lastUpdated.toLocaleTimeString()}</span>
+                <span className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest">
+                  {lastUpdated.toLocaleTimeString()}
+                </span>
               )}
             </div>
             <div className="p-5">
               {historyLoading ? (
                 <div className="space-y-2">
-                  {Array.from({ length: 3 }).map((_, i) => (
+                  {[0, 1, 2].map((i) => (
                     <div key={i} className="h-10 rounded-xl bg-[#BFA071]/5 animate-pulse" />
                   ))}
                 </div>
@@ -294,16 +437,37 @@ export default function SettingsPage() {
                     </thead>
                     <tbody>
                       {history.map((h, i) => (
-                        <tr key={h.id ?? i} className="border-b border-[#BFA071]/5 last:border-0 hover:bg-[#BFA071]/3 transition-colors">
-                          <td className="px-4 py-3"><StatusBadge status={h.status} /></td>
+                        <tr
+                          key={h.id ?? i}
+                          className="border-b border-[#BFA071]/5 last:border-0 hover:bg-[#BFA071]/3 transition-colors"
+                        >
+                          <td className="px-4 py-3">
+                            <StatusBadge status={h.status} />
+                          </td>
                           <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs">
-                            {h.started_at ? new Date(h.started_at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }) : "—"}
+                            {h.started_at
+                              ? new Date(h.started_at).toLocaleString("uk-UA", {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                })
+                              : "—"}
                           </td>
                           <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs hidden sm:table-cell">
-                            {h.finished_at ? new Date(h.finished_at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" }) : "—"}
+                            {h.finished_at
+                              ? new Date(h.finished_at).toLocaleString("uk-UA", {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                })
+                              : "—"}
                           </td>
                           <td className="px-4 py-3">
-                            {h.laws_processed != null ? <span className="font-serif font-bold text-[#BFA071]">{h.laws_processed}</span> : <span className="text-[#E0E6ED]/30">—</span>}
+                            {h.laws_processed != null ? (
+                              <span className="font-serif font-bold text-[#BFA071]">
+                                {h.laws_processed}
+                              </span>
+                            ) : (
+                              <span className="text-[#E0E6ED]/30">—</span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs hidden md:table-cell max-w-[220px]">
                             <span className="truncate block">{h.error_message ?? "—"}</span>

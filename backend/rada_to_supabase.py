@@ -133,7 +133,7 @@ def run_rada_sync(log_callback=None, session_id=None):
                     "chunk_index": j
                 }
                 upload_to_qdrant(chunk_text, metadata, vector, session_id=session_id)
-                time.sleep(0.5) # Пауза для стабільності API
+                time.sleep(0.7) # Пауза для стабільності API
             except Exception as e:
                 log(f"  ❌ Помилка чанка {j}: {e}", "error")
                 time.sleep(2)

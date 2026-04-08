@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import {
   LayoutDashboard, FileText, Clock,
   CheckCircle, XCircle, Loader2, RefreshCw,
-  ArrowRight, Zap, Calendar, Settings, BookOpen,
+  ArrowRight, Zap, Calendar, Settings, BookOpen, Pause,
 } from "lucide-react"
 
 type Stats = {
@@ -21,6 +21,8 @@ type Stats = {
   } | null
   schedule_enabled: boolean
   scraping_running: boolean
+  can_resume: boolean
+  resume_progress?: { next_index: number; total: number } | null
 }
 
 export default function AdminDashboard() {
@@ -159,6 +161,27 @@ export default function AdminDashboard() {
             <div className="flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
               <span className="text-xl font-serif font-bold text-amber-400">Виконується</span>
+            </div>
+          ) : stats?.can_resume ? (
+            <div>
+              <div className="flex items-center gap-2">
+                <Pause className="w-4 h-4 text-blue-400" />
+                <span className="text-xl font-serif font-bold text-blue-400">Призупинено</span>
+              </div>
+              {stats.resume_progress && (
+                <div className="mt-2">
+                  <div className="flex justify-between text-[10px] text-[#E0E6ED]/50 mb-1">
+                    <span>Прогрес</span>
+                    <span>{stats.resume_progress.next_index} / {stats.resume_progress.total}</span>
+                  </div>
+                  <div className="w-full bg-[#0A0E1A] rounded-full h-1 overflow-hidden">
+                    <div
+                      className="bg-blue-400 h-full rounded-full"
+                      style={{ width: `${Math.round((stats.resume_progress.next_index / stats.resume_progress.total) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-2">

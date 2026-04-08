@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
-const ADMIN_USERNAME = "admin"
-const ADMIN_PASSWORD = "rada2025"
+// Credentials from .env (ADMIN_USERNAME / ADMIN_PASSWORD)
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME?.trim() || "admin"
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD?.trim() || "rada2025"
 
 export async function POST(request: Request) {
   const body = await request.json()

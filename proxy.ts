@@ -4,8 +4,14 @@ import { createServerClient } from "@supabase/ssr"
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // ── Admin routes — keep existing cookie-based auth ──────────────────────
-  if (pathname.startsWith("/admin") && !pathname.startsWith("/admin/login")) {
+  // ── /api/admin/* — без перевірок (login API має бути доступний) ────────────
+  if (pathname.startsWith("/api/admin")) {
+    return NextResponse.next()
+  }
+
+  // ── /admin/* крім /admin/login → потрібен admin_session cookie ─────────────
+  // Адмін-логін НЕ залежить від Supabase — окрема cookie-авторизація
+  if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
     const session = request.cookies.get("admin_session")
     if (!session || session.value !== "authenticated") {
       const loginUrl = new URL("/admin/login", request.url)
@@ -15,7 +21,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // ── Supabase session refresh
+  // ── /admin/login — доступна без будь-якої авторизації ─────────────────────
+  if (pathname === "/admin/login") {
+    return NextResponse.next()
+  }
+
+  // ── Решта маршрутів — Supabase session management ──────────────────────────
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -46,31 +57,28 @@ export async function proxy(request: NextRequest) {
 
   const isAuthPage =
     pathname.startsWith("/auth") && !pathname.startsWith("/auth/callback")
-  const isOnboardingPage = pathname === "/onboarding"
-  const isProtected = pathname === "/" || pathname.startsWith("/chat") || pathname.startsWith("/settings")
-  const needsAuth = isProtected || isOnboardingPage
+  const isProtected =
+    pathname === "/" ||
+    pathname.startsWith("/chat") ||
+    pathname.startsWith("/settings") ||
+    pathname === "/onboarding"
 
-  // ── Not logged in → redirect to login ───────────────────────────────────
-  if (needsAuth && !user) {
+  // ── Не залогінений → редірект на login ────────────────────────────────────
+  if (isProtected && !user) {
     const url = new URL("/auth/login", request.url)
     url.searchParams.set("from", pathname)
     return NextResponse.redirect(url)
   }
 
-  if (user && needsAuth) {
-    // One DB query for both checks — email_confirmed + is_onboarded
+  if (user && isProtected) {
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("email_confirmed, is_onboarded")
       .eq("id", user.id)
       .single()
 
-    // If column doesn't exist yet (schema not patched) fall back to auth.users value
-    // so we never get stuck in a redirect loop due to a missing DB column
     if (profileError) {
-      // PGRST116 = no rows found (not onboarded yet) — other errors = schema/network issue
       if (profileError.code !== "PGRST116") {
-        // Schema likely missing email_confirmed — use auth.users as source of truth
         const provider = user.app_metadata?.provider ?? "email"
         const emailConfirmed = !!user.email_confirmed_at
         if (provider === "email" && !emailConfirmed) {
@@ -78,12 +86,10 @@ export async function proxy(request: NextRequest) {
           if (user.email) url.searchParams.set("email", user.email)
           return NextResponse.redirect(url)
         }
-        // Can't check is_onboarded — let through, onboarding page handles it
         if (isAuthPage) return NextResponse.redirect(new URL("/", request.url))
         return supabaseResponse
       }
-      // No profile row at all → redirect to onboarding
-      if (isProtected) {
+      if (pathname !== "/onboarding") {
         const redirect = NextResponse.redirect(new URL("/onboarding", request.url))
         redirect.cookies.delete("_ob")
         return redirect
@@ -91,24 +97,25 @@ export async function proxy(request: NextRequest) {
     }
 
     const provider = user.app_metadata?.provider ?? "email"
-    // Fallback to auth.users if profile row doesn't exist yet
     const emailConfirmed = profile?.email_confirmed ?? !!user.email_confirmed_at
 
-    // ── Email/password: email must be confirmed before anything else ───────
     if (provider === "email" && !emailConfirmed) {
       const url = new URL("/auth/verify-email", request.url)
       if (user.email) url.searchParams.set("email", user.email)
       return NextResponse.redirect(url)
     }
 
-    // ── Protected routes: must be onboarded ────────────────────────────────
-    if (isProtected && !profile?.is_onboarded) {
+    if (
+      pathname !== "/onboarding" &&
+      !profile?.is_onboarded &&
+      (pathname === "/" || pathname.startsWith("/chat") || pathname.startsWith("/settings"))
+    ) {
       const redirect = NextResponse.redirect(new URL("/onboarding", request.url))
       redirect.cookies.delete("_ob")
       return redirect
     }
 
-    if (isProtected && profile?.is_onboarded) {
+    if (profile?.is_onboarded) {
       supabaseResponse.cookies.set("_ob", "1", {
         path: "/",
         maxAge: 60 * 60 * 24 * 30,
@@ -118,7 +125,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // ── Already logged in (confirmed) → don't show auth pages ───────────────
+  // ── Вже залогінений → не показувати auth-сторінки ─────────────────────────
   if (user && isAuthPage) {
     return NextResponse.redirect(new URL("/", request.url))
   }
