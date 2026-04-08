@@ -10,7 +10,7 @@ from qdrant_client.models import (
     Filter, FieldCondition, MatchValue, MatchAny,
 )
 
-QDRANT_URL      = os.environ.get("QDRANT_URL", "https://n-ai01.nexchance.de")
+QDRANT_URL      = os.environ.get("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = "ukrainian_laws"
 
 _client: QdrantClient | None = None
@@ -19,7 +19,12 @@ _client: QdrantClient | None = None
 def get_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(url=QDRANT_URL, prefix="qdrant", timeout=30)
+        # localhost — без prefix (прямий доступ всередині сервера)
+        # зовнішній URL — з prefix "qdrant" (через Nginx)
+        if "localhost" in QDRANT_URL or "127.0.0.1" in QDRANT_URL:
+            _client = QdrantClient(url=QDRANT_URL, timeout=30)
+        else:
+            _client = QdrantClient(url=QDRANT_URL, prefix="qdrant", timeout=30)
     return _client
 
 
