@@ -224,7 +224,7 @@ def _do_rada(
     """
     Головна функція синхронізації Ради.
     Підтримує: старт з нуля, resume з індексу, пауза після поточного документа.
-    section_codes — вибрані розділи (None = всі дефолтні SECTIONS).
+    section_codes — selected sections (None = all ALL_THEMES).
     """
     src = "rada"
     log = lambda m, lv="info": _log(src, m, lv)

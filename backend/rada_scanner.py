@@ -18,13 +18,8 @@ HEADERS = {
     "Cookie": "lang=uk",
 }
 
-# Розділи які скануємо: (код розділу на Раді, людська назва)
-SECTIONS = [
-    ("h14", "Збройні сили, безпека, мобілізація"),
-    ("h25", "Кримінальне право"),
-    ("h19", "Трудові відносини, бронювання"),
-    ("h20", "Соціальне забезпечення, ветерани"),
-]
+# ALL_THEMES (визначений нижче).
+# Для автосинхронізації і ручного запуску без вибору → скрапиться ALL_THEMES.
 
 # ─── TEST MODE ─────────────────────────────────────────────────────────────────
 # Скільки документів брати з кожного розділу для тесту.
@@ -215,17 +210,11 @@ def get_all_legal_ids(section_codes: list[str] | None = None) -> list[dict]:
     section_codes — список кодів (наприклад ["h14", "h19"]); None = всі SECTIONS.
     Дедуплікація по law_id — один закон може бути в кількох розділах.
     """
-    # Вибираємо потрібні розділи
+    code_to_label = dict(ALL_THEMES)
     if section_codes:
-        # Шукаємо назви з ALL_THEMES, або зі стандартних SECTIONS
-        code_to_label = dict(ALL_THEMES)
-        code_to_label.update(dict(SECTIONS))  # SECTIONS мають пріоритет
-        sections_to_scan = [
-            (code, code_to_label.get(code, code))
-            for code in section_codes
-        ]
+        sections_to_scan = [(code, code_to_label.get(code, code)) for code in section_codes]
     else:
-        sections_to_scan = list(SECTIONS)
+        sections_to_scan = list(ALL_THEMES)
 
     all_laws = []
     seen_ids = set()

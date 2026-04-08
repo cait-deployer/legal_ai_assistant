@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
   const law_id = req.nextUrl.searchParams.get("law_id") || ""
   try {
     const res = await fetch(
-      `${BACKEND}/admin/supreme/laws/text?law_id=${encodeURIComponent(law_id)}`,
+      `${BACKEND}/admin/laws/text?law_id=${encodeURIComponent(law_id)}`,
       { cache: "no-store" }
     )
     const data = await res.json()

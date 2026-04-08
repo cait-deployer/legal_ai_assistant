@@ -125,7 +125,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     logs: [],
   })
   const [error, setError] = useState("")
-  const logsEndRef = useRef<HTMLDivElement>(null)
+  const logsContainerRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const Icon = source.icon
 
@@ -166,7 +166,8 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
   }, [state.running])
 
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = logsContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [state.logs])
 
   const openRunModal = async () => {
@@ -425,7 +426,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                 </div>
               ))
             )}
-            <div ref={logsEndRef} />
+            <div ref={logsContainerRef} />
           </div>
         </div>
       )}
