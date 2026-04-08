@@ -288,6 +288,18 @@ def get_law_text(law_id: str) -> str:
     містить чистий текст закону без UI-сміття.
     Запасний варіант: звичайна сторінка, шукаємо div#lawContentBody.
     """
+    # ── Фрази що означають відсутність публічного тексту ────────────────────
+    _RESTRICTED_PHRASES = (
+        "для службового використання",
+        "не підлягає опублікуванню",
+        "текст документа не оприлюднюється",
+        "доступ до цього документа обмежено",
+    )
+
+    def _is_restricted(text: str) -> bool:
+        low = text.lower()
+        return any(p in low for p in _RESTRICTED_PHRASES)
+
     # ── Спроба 1: /print — завжди статичний, без JS-рендерингу ──────────────
     print_url = f"{BASE}/laws/show/{law_id}/print"
     try:
@@ -306,6 +318,9 @@ def get_law_text(law_id: str) -> str:
                 )
                 md = re.sub(r'\n{3,}', '\n\n', md).strip()
                 if len(md) > 100:
+                    if _is_restricted(md):
+                        print(f"🔒 {law_id}: службового використання — пропускаємо")
+                        return ""
                     return md
     except Exception as e:
         print(f"⚠️  get_law_text /print ({law_id}): {e}")
@@ -331,7 +346,12 @@ def get_law_text(law_id: str) -> str:
 
         md = md_convert(str(container), heading_style="ATX")
         md = re.sub(r'\n{3,}', '\n\n', md).strip()
-        return md if len(md) > 100 else ""
+        if len(md) > 100:
+            if _is_restricted(md):
+                print(f"🔒 {law_id}: службового використання — пропускаємо")
+                return ""
+            return md
+        return ""
 
     except Exception as e:
         print(f"❌ get_law_text({law_id}): {e}")

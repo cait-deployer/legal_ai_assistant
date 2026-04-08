@@ -329,9 +329,23 @@ export default function BasePage() {
       const res = await fetch(`/api/admin/base/docs?${params}`, { cache: "no-store" })
       if (!res.ok) throw new Error("Не вдалося завантажити документи")
       const data = await res.json()
-      setDocs(data.docs ?? [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setDocs((data.docs ?? []).map((doc: any) => ({
+        id: doc.id,
+        content: "",
+        metadata: {
+          law_id: doc.law_id ?? "",
+          source: doc.title ?? "",
+          status: doc.status ?? "",
+          law_url: doc.law_url ?? "",
+          category: doc.category ?? "",
+          chunk_index: 0,
+          scraped_at: doc.scraped_at,
+          source_domain: doc.source_domain,
+        },
+      })))
       setTotal(data.total ?? 0)
-      setTotalPages(data.total_pages ?? 1)
+      setTotalPages(Math.ceil((data.total ?? 0) / itemsPerPage) || 1)
       setLastUpdated(new Date())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Помилка")
