@@ -17,12 +17,13 @@ import {
 import {
   LayoutDashboard, Menu, X, LogOut, ChevronLeft,
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Settings, BookOpen, CreditCard, Bot,
+  Settings, BookOpen, CreditCard, Bot, BarChart2,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
 const navigation = [
   { name: "Дашборд", href: "/admin", icon: LayoutDashboard },
+  { name: "Аналітика", href: "/admin/analytics", icon: BarChart2 },
   { name: "Тарифи", href: "/admin/plans", icon: CreditCard },
   { name: "Налаштування", href: "/admin/settings", icon: Settings },
   { name: "AI Налаштування", href: "/admin/ai-settings", icon: Bot },

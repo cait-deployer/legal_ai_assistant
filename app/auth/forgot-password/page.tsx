@@ -28,7 +28,7 @@ function AuthBg() {
 }
 
 function ForgotPasswordForm() {
-  const supabase = createClient()
+  // Клієнт створюємо ТІЛЬКИ всередині handleSubmit, щоб не ламати білд на сервері
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
@@ -39,17 +39,25 @@ function ForgotPasswordForm() {
     setError("")
     setLoading(true)
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
-    })
+    try {
+      // Ініціалізація клієнта відбувається в момент кліку (клієнтська дія)
+      const supabase = createClient()
 
-    if (error) {
-      setError("Помилка відправки листа. Перевірте email і спробуйте ще раз.")
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      })
+
+      if (error) {
+        setError("Помилка відправки листа. Перевірте email і спробуйте ще раз.")
+        setLoading(false)
+        return
+      }
+
+      setSuccess(true)
+    } catch (err) {
+      setError("Сталася непередбачувана помилка. Спробуйте пізніше.")
       setLoading(false)
-      return
     }
-
-    setSuccess(true)
   }
 
   if (success) {
@@ -148,6 +156,7 @@ export default function ForgotPasswordPage() {
           </div>
         </div>
 
+        {/* Suspense захищає білд від помилок рендерингу searchParams або ініціалізації клієнта */}
         <Suspense fallback={
           <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[280px]">
             <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]" />

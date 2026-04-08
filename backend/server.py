@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import json
 import traceback
 import asyncio
 import httpx
@@ -550,12 +551,62 @@ async def _get_plan_limits(plan_id: str) -> tuple[int, int]:
 
 
 
+def _save_analytics(payload: dict):
+    """Зберігає запис в query_analytics. Запускається асинхронно через asyncio.to_thread."""
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            client.post(
+                f"{SUPABASE_URL}/rest/v1/query_analytics",
+                headers={**_sb_headers(service=True), "Prefer": "return=minimal"},
+                json=payload,
+            )
+    except Exception as e:
+        print(f"⚠️ [analytics] save error: {e}")
+
+
+def _touch_last_active(user_id: str):
+    """Оновлює last_active_at у profiles."""
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            client.patch(
+                f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+                headers={**_sb_headers(service=True), "Prefer": "return=minimal"},
+                json={"last_active_at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+            )
+    except Exception as e:
+        print(f"⚠️ [analytics] touch error: {e}")
+
+
+_METADATA_RE = re.compile(
+    r'\n*METADATA:\s*(\{.*?\})\s*$',
+    re.DOTALL | re.IGNORECASE
+)
+
+
+def _extract_metadata(raw_text: str) -> tuple[str, dict]:
+    """
+    Витягує блок METADATA: {...} з кінця тексту AI.
+    Повертає (чистий_текст, dict_метаданих).
+    """
+    m = _METADATA_RE.search(raw_text)
+    if not m:
+        return raw_text.strip(), {}
+    answer = raw_text[:m.start()].strip()
+    try:
+        meta = json.loads(m.group(1))
+    except Exception:
+        meta = {}
+    return answer, meta
+
+
 @app.post("/ask")
 async def ask_lawyer(
     data: Query,
     request: Request,
     user: Optional[dict] = Depends(get_optional_user),
 ):
+    import time as _time
+    start_time = _time.time()
     print(f"🔍 ЗАПИТ: {data.question}")
 
     # ── 1. Авторизація та ліміти ───────────────────────────────────────────
@@ -685,7 +736,10 @@ async def ask_lawyer(
 {context}
 
 ПИТАННЯ: {data.question}
-ВІДПОВІДЬ АДВОКАТА:"""
+ВІДПОВІДЬ АДВОКАТА:
+
+Після відповіді користувачу додай окремий технічний рядок (невидимий юзеру):
+METADATA: {{"category": "<одна з: ФОП/Бізнес | Трудове право | Нерухомість | Сімейне право | Кримінальне право | Податки | Загальне>", "complexity": <1-5>, "user_intent": "<консультація|скарга|пошук_шаблону>", "sentiment": "<neutral|urgent|frustrated>"}}"""
 
         # ── Генерація через Vertex AI (google.genai з vertexai=True) ─────────
         def _generate():
@@ -696,7 +750,12 @@ async def ask_lawyer(
                 config=types.GenerateContentConfig(temperature=temperature, top_p=top_p),
             )
         sdk_response = await asyncio.to_thread(_generate)
-        answer_text = sdk_response.text or "Вибачте, ШІ не зміг сформувати відповідь."
+        raw_text = sdk_response.text or "Вибачте, ШІ не зміг сформувати відповідь."
+
+        # Витягуємо METADATA з кінця відповіді (не показуємо юзеру)
+        answer_text, ai_meta = _extract_metadata(raw_text)
+
+        processing_time_ms = int((_time.time() - start_time) * 1000)
 
         # ── 4. Формування references ────────────────────────────────────────
         references = []
@@ -711,8 +770,21 @@ async def ask_lawyer(
                 "passages": [d.get("out_content", "")],
             })
 
-        print(f"✅ Відповідь сформована. Шаблонів: {len(templates)}")
-        return {"answer": answer_text, "references": references, "templates": templates}
+        # ── 5. Оновлення last_active_at (тільки це залишаємо на Python) ────────
+        if user:
+            asyncio.create_task(asyncio.to_thread(_touch_last_active, user["id"]))
+
+        # ── 6. Повертаємо мета-дані фронтенду — Next.js збереже аналітику ────
+        _meta = {
+            "category":          ai_meta.get("category", "Загальне"),
+            "sentiment":         ai_meta.get("sentiment"),
+            "complexity_score":  ai_meta.get("complexity"),
+            "user_intent":       ai_meta.get("user_intent"),
+            "processing_time_ms": processing_time_ms,
+        }
+
+        print(f"✅ Відповідь ({processing_time_ms}ms) | cat={_meta['category']} complexity={_meta['complexity_score']} sentiment={_meta['sentiment']} | шаблонів: {len(templates)}")
+        return {"answer": answer_text, "references": references, "templates": templates, "_meta": _meta}
 
     except asyncio.TimeoutError:
         return {"answer": "Сервер занадто довго аналізував дані.", "references": [], "templates": []}

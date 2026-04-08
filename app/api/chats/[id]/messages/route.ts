@@ -25,6 +25,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       query_text: string
       ai_response: string
       category?: string
+      sentiment?: string
+      complexity_score?: number
+      user_intent?: string
+      processing_time_ms?: number
       user_ip?: string
     }
   }
@@ -43,52 +47,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  // Check if plan allows history persistence
-  const { data: profile } = await admin()
-    .from("profiles")
-    .select("subscription_tier")
-    .eq("id", user.id)
+  // Always save messages to DB (history in UI is controlled by plan, but we store for analytics)
+  const { data: savedMsg, error: msgError } = await admin()
+    .from("messages")
+    .insert({ chat_id: chatId, role, content })
+    .select()
     .single()
 
-  const planId = profile?.subscription_tier ?? "free"
-  const { data: historyFeature } = await admin()
-    .from("plan_features")
-    .select("enabled")
-    .eq("plan_id", planId)
-    .eq("feature_key", "history_saved")
-    .single()
+  if (msgError) return NextResponse.json({ error: msgError.message }, { status: 500 })
+  const message = savedMsg
 
-  const historySaved = historyFeature?.enabled === true
-
-  // Save message only if plan includes history persistence
-  let message: { id: string; chat_id: string; role: string; content: string; created_at: string } | null = null
-  if (historySaved) {
-    const { data: savedMsg, error: msgError } = await admin()
-      .from("messages")
-      .insert({ chat_id: chatId, role, content })
-      .select()
-      .single()
-
-    if (msgError) return NextResponse.json({ error: msgError.message }, { status: 500 })
-    message = savedMsg
-  } else {
-    // Return an ephemeral message object without persisting to DB
-    message = {
-      id: crypto.randomUUID(),
-      chat_id: chatId,
-      role,
-      content,
-      created_at: new Date().toISOString(),
-    }
-  }
-
-  // Update chat's updated_at so it bubbles to top of sidebar (only if saving history)
-  if (historySaved) {
-    await admin()
-      .from("chats")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", chatId)
-  }
+  // Update chat's updated_at so it bubbles to top of sidebar
+  await admin()
+    .from("chats")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", chatId)
 
   // When the AI responds: increment usage counter + save analytics
   if (role === "assistant") {
@@ -135,12 +108,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Save analytics row
     if (analytics) {
       await admin().from("query_analytics").insert({
-        user_id:     user.id,
-        chat_id:     chatId,
-        query_text:  analytics.query_text,
-        ai_response: analytics.ai_response,
-        category:    analytics.category ?? null,
-        user_ip:     analytics.user_ip ?? null,
+        user_id:            user.id,
+        chat_id:            chatId,
+        query_text:         analytics.query_text,
+        ai_response:        analytics.ai_response,
+        category:           analytics.category ?? null,
+        sentiment:          analytics.sentiment ?? null,
+        complexity_score:   analytics.complexity_score ?? null,
+        user_intent:        analytics.user_intent ?? null,
+        processing_time_ms: analytics.processing_time_ms ?? null,
+        user_ip:            analytics.user_ip ?? null,
       })
     }
   }

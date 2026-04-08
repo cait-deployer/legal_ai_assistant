@@ -256,7 +256,15 @@ function ChatPage() {
                     body: JSON.stringify({
                         role: 'assistant',
                         content: data.answer,
-                        analytics: { query_text: questionText, ai_response: data.answer },
+                        analytics: {
+                            query_text: questionText,
+                            ai_response: data.answer,
+                            category: data._meta?.category,
+                            sentiment: data._meta?.sentiment,
+                            complexity_score: data._meta?.complexity_score,
+                            user_intent: data._meta?.user_intent,
+                            processing_time_ms: data._meta?.processing_time_ms,
+                        },
                     }),
                 }).catch(() => { });
 
@@ -384,7 +392,7 @@ function ChatPage() {
                             </div>
                         )}
 
-                        {isLoading && (
+                        {!historyLoading && isLoading && (
                             <div className="flex gap-4 items-center">
                                 <div className="h-10 w-10 rounded-2xl bg-[#0d1120] border border-[#BFA071]/20 flex items-center justify-center">
                                     <Loader2 className="h-5 w-5 animate-spin text-[#BFA071]" />

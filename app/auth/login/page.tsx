@@ -86,6 +86,15 @@ function LoginForm() {
       return
     }
 
+    // Record IP / geo / UA on every email login (fire-and-forget)
+    fetch("/api/auth/login-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fingerprint: btoa(`${navigator.userAgent}-${screen.width}x${screen.height}`).slice(0, 64),
+      }),
+    }).catch(() => {})
+
     router.push(redirectTo)
     router.refresh()
   }
