@@ -129,22 +129,35 @@ def search_qdrant(
             must=[FieldCondition(key="source_domain", match=MatchAny(any=filter_domains))]
         )
 
+    client = get_client()
     try:
-        results = get_client().search(
-            collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
-            limit=top_k,
-            query_filter=qdrant_filter,
-            score_threshold=match_threshold,
-            with_payload=True,
-        )
+        # qdrant-client >= 1.7: query_points; fallback to legacy search
+        if hasattr(client, "query_points"):
+            response = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=query_vector,
+                limit=top_k,
+                query_filter=qdrant_filter,
+                score_threshold=match_threshold,
+                with_payload=True,
+            )
+            points = response.points
+        else:
+            points = client.search(
+                collection_name=COLLECTION_NAME,
+                query_vector=query_vector,
+                limit=top_k,
+                query_filter=qdrant_filter,
+                score_threshold=match_threshold,
+                with_payload=True,
+            )
         return [
             {
                 "out_content": r.payload.get("content", ""),
                 "out_metadata": {k: v for k, v in r.payload.items() if k != "content"},
                 "similarity": r.score,
             }
-            for r in results
+            for r in points
         ]
     except Exception as e:
         print(f"❌ Qdrant search error: {e}")
