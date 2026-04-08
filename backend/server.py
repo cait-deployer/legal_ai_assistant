@@ -802,6 +802,104 @@ async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = 
         raise HTTPException(500, str(e))
 
 
+# ── /ask — основний чат-ендпоінт ──────────────────────────────────────────────
+
+class AskRequest(BaseModel):
+    question: str
+
+
+@app.post("/ask")
+async def ask(body: AskRequest):
+    """Приймає питання → повертає відповідь від Gemini + посилання на закони."""
+    import asyncio as _asyncio
+
+    start_time = time.time()
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+
+    # 1. Embed query
+    try:
+        from rada_to_supabase import embeddings
+        query_vector = await _asyncio.to_thread(embeddings.embed_query, question)
+    except Exception as e:
+        raise HTTPException(500, f"Embedding error: {e}")
+
+    # 2. Search Qdrant
+    from qdrant_storage import search_qdrant
+    results = await _asyncio.to_thread(search_qdrant, query_vector, 8, None, 0.35)
+
+    # 3. Build context + deduplicated references
+    context_parts: list[str] = []
+    seen_ids: set[str] = set()
+    references: list[dict] = []
+
+    for r in results:
+        meta = r["out_metadata"]
+        content = r["out_content"]
+        title = meta.get("source", meta.get("title", ""))
+        law_id = meta.get("law_id", "")
+        source_domain = meta.get("source_domain", "")
+
+        if content:
+            context_parts.append(f"### {title}\n{content}")
+
+        if law_id and law_id not in seen_ids:
+            seen_ids.add(law_id)
+            if "rada.gov.ua" in source_domain:
+                url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
+            elif "supreme.court" in source_domain:
+                url = meta.get("law_url", "")
+            else:
+                url = meta.get("law_url", "")
+            references.append({"id": law_id, "title": title, "url": url})
+
+    context = "\n\n".join(context_parts) if context_parts else "Контекст відсутній."
+
+    # 4. Call Gemini
+    try:
+        import vertexai
+        from vertexai.generative_models import GenerativeModel, GenerationConfig
+
+        creds    = settings_cache.get_credentials()
+        project  = settings_cache.get_vertex_project()
+        location = settings_cache.get_vertex_location()
+        vertexai.init(project=project, location=location, credentials=creds)
+
+        model_name    = settings_cache.get("ai_model", "gemini-2.0-flash-lite")
+        system_prompt = settings_cache.get(
+            "system_prompt",
+            "Ти — досвідчений український адвокат. Надавай точні відповіді виключно на основі наданого контексту.",
+        )
+        temperature = settings_cache.get_float("temperature", 0.1)
+
+        prompt = (
+            f"Контекст з українського законодавства:\n\n{context}\n\n"
+            f"---\nПитання: {question}\n\n"
+            "Надай точну, структуровану відповідь на основі наведеного контексту. "
+            "Якщо контекст не містить потрібної інформації — чесно повідом про це."
+        )
+
+        model = GenerativeModel(model_name, system_instruction=system_prompt)
+        response = await _asyncio.to_thread(
+            model.generate_content,
+            prompt,
+            generation_config=GenerationConfig(temperature=temperature),
+        )
+        answer = response.text
+    except Exception as e:
+        raise HTTPException(500, f"AI error: {e}")
+
+    elapsed_ms = int((time.time() - start_time) * 1000)
+
+    return {
+        "answer": answer,
+        "references": references,
+        "templates": [],
+        "_meta": {"processing_time_ms": elapsed_ms},
+    }
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
