@@ -827,32 +827,34 @@ async def ask(body: AskRequest):
 
     # 2. Search Qdrant
     from qdrant_storage import search_qdrant
-    results = await _asyncio.to_thread(search_qdrant, query_vector, 8, None, 0.35)
+    results = await _asyncio.to_thread(search_qdrant, query_vector, 8, None, 0.0)
 
-    # 3. Build context + deduplicated references
+    # 3. Build citations (Citation format expected by frontend)
+    citations: list[dict] = []
     context_parts: list[str] = []
-    seen_ids: set[str] = set()
-    references: list[dict] = []
 
-    for r in results:
+    for i, r in enumerate(results):
+        num = i + 1
         meta = r["out_metadata"]
         content = r["out_content"]
         title = meta.get("source", meta.get("title", ""))
         law_id = meta.get("law_id", "")
         source_domain = meta.get("source_domain", "")
+        law_url = meta.get("law_url", "")
+        if not law_url and "rada.gov.ua" in source_domain and law_id:
+            law_url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
+
+        citations.append({
+            "num": num,
+            "source_title": title,
+            "passage": content[:600].strip(),
+            "status": meta.get("status", ""),
+            "law_url": law_url,
+            "chunk_index": meta.get("chunk_index", 0),
+        })
 
         if content:
-            context_parts.append(f"### {title}\n{content}")
-
-        if law_id and law_id not in seen_ids:
-            seen_ids.add(law_id)
-            if "rada.gov.ua" in source_domain:
-                url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
-            elif "supreme.court" in source_domain:
-                url = meta.get("law_url", "")
-            else:
-                url = meta.get("law_url", "")
-            references.append({"id": law_id, "title": title, "url": url})
+            context_parts.append(f"[{num}] {title}\n{content}")
 
     context = "\n\n".join(context_parts) if context_parts else "Контекст відсутній."
 
@@ -874,9 +876,10 @@ async def ask(body: AskRequest):
         temperature = settings_cache.get_float("temperature", 0.1)
 
         prompt = (
-            f"Контекст з українського законодавства:\n\n{context}\n\n"
+            f"Контекст з українського законодавства (кожен фрагмент пронумерований):\n\n{context}\n\n"
             f"---\nПитання: {question}\n\n"
-            "Надай точну, структуровану відповідь на основі наведеного контексту. "
+            "Надай точну структуровану відповідь. "
+            "Посилайся на джерела у форматі [1], [2] одразу після твердження. "
             "Якщо контекст не містить потрібної інформації — чесно повідом про це."
         )
 
@@ -894,7 +897,7 @@ async def ask(body: AskRequest):
 
     return {
         "answer": answer,
-        "references": references,
+        "references": citations,
         "templates": [],
         "_meta": {"processing_time_ms": elapsed_ms},
     }

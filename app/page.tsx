@@ -386,7 +386,7 @@ function ChatPage() {
                                                     </div>
                                                 ) : msg.text}
                                             </Card>
-                                            <span className="text-[10px] font-bold text-[#BFA071]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Клієнт'}</span>
+                                            <span className="text-[10px] font-bold text-[#BFA071]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Ви'}</span>
                                         </div>
                                     </motion.div>
                                 ))}
