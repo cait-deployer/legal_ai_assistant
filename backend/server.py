@@ -694,6 +694,73 @@ async def templates_logs():
     }
 
 
+# ── /admin/base/docs ──────────────────────────────────────────────────────────
+
+@app.get("/admin/base/docs")
+async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = None):
+    """Список унікальних документів з Qdrant (chunk_index=0 = один запис на закон)."""
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_storage import get_client, COLLECTION_NAME
+
+        client = get_client()
+
+        domain_map = {
+            "rada": "zakon.rada.gov.ua",
+            "supreme": "supreme.court.gov.ua",
+            "wiki": "legalaid.wiki",
+        }
+
+        must = [FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+        if source and source in domain_map:
+            must.append(FieldCondition(key="source_domain", match=MatchValue(value=domain_map[source])))
+
+        scroll_filter = Filter(must=must)
+
+        total = client.count(
+            collection_name=COLLECTION_NAME,
+            count_filter=scroll_filter,
+            exact=True,
+        ).count
+
+        # Qdrant scroll не підтримує числовий offset → збираємо всі і нарізаємо
+        all_points: list = []
+        next_page_offset = None
+        while True:
+            batch, next_page_offset = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=scroll_filter,
+                with_payload=True,
+                limit=1000,
+                offset=next_page_offset,
+            )
+            all_points.extend(batch)
+            if next_page_offset is None:
+                break
+
+        start = (page - 1) * per_page
+        page_points = all_points[start: start + per_page]
+
+        docs = [
+            {
+                "id": str(p.id),
+                "law_id": p.payload.get("law_id", ""),
+                "title": p.payload.get("source", ""),
+                "category": p.payload.get("category", ""),
+                "status": p.payload.get("status", ""),
+                "law_url": p.payload.get("law_url", ""),
+                "source_domain": p.payload.get("source_domain", ""),
+                "scraped_at": p.payload.get("scraped_at", ""),
+            }
+            for p in page_points
+        ]
+
+        return {"total": total, "page": page, "per_page": per_page, "docs": docs}
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
