@@ -41,7 +41,7 @@ function GoogleIcon() {
 
 function RegisterForm() {
   const router = useRouter()
-  const supabase = createClient()
+  // supabase створюється всередині функцій, щоб не викликати помилок при білді
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -67,13 +67,12 @@ function RegisterForm() {
     }
 
     setLoading(true)
+    const supabase = createClient()
 
     try {
-      // 1. Збираємо дані про пристрій та IP паралельно з реєстрацією
       const geoPromise = fetch("https://ipapi.co/json/").then(res => res.json()).catch(() => ({}));
       const fingerprint = btoa(`${navigator.userAgent}-${screen.width}x${screen.height}`);
 
-      // 2. Реєстрація в Supabase Auth
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -93,10 +92,8 @@ function RegisterForm() {
         return
       }
 
-      // 3. Якщо юзер створений — миттєво записуємо всі дані в базу
       if (data.user) {
         const geoData = await geoPromise;
-
         await fetch("/api/auth/login-event", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -111,7 +108,6 @@ function RegisterForm() {
         }).catch(err => console.error("Geo recording failed:", err));
       }
 
-      // 4. Редирект на сторінку верифікації
       router.push(`/auth/verify-email?email=${encodeURIComponent(email)}`)
 
     } catch (err) {
@@ -122,6 +118,7 @@ function RegisterForm() {
 
   const handleGoogleRegister = async () => {
     setGoogleLoading(true)
+    const supabase = createClient()
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -221,7 +218,6 @@ function RegisterForm() {
               {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button>
           </div>
-          {/* Password strength indicator */}
           {passwordStrength && (
             <div className="flex items-center gap-2 mt-2">
               <div className="flex gap-1 flex-1">
