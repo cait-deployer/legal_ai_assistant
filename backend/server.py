@@ -265,36 +265,17 @@ def search_templates(query_vector: list, top_k: int = 3) -> list:
 
 def search_supabase(query_vector: list, top_k: int = 10, filter_domains: list | None = None, match_threshold: float = 0.4) -> list:
     """
-    Vector search in documents table.
+    Vector search — тепер використовує Qdrant замість Supabase documents table.
     filter_domains: list of domain strings (e.g. ['zakon.rada.gov.ua', 'ccu.gov.ua'])
                     None = no filter, return all sources.
     """
-    body: dict = {
-        "query_embedding": query_vector,
-        "match_threshold": match_threshold,
-        "match_count": top_k,
-        "filter_domains": filter_domains or [],
-    }
-
-    try:
-        with httpx.Client() as client:
-            response = client.post(
-                f"{SUPABASE_URL}/rest/v1/rpc/match_documents",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                timeout=10.0,
-            )
-            if response.status_code != 200:
-                print(f"❌ Supabase search error: {response.text}")
-                return []
-            return response.json()
-    except Exception as e:
-        print(f"❌ Connection error: {str(e)}")
-        return []
+    from qdrant_storage import search_qdrant
+    return search_qdrant(
+        query_vector=query_vector,
+        top_k=top_k,
+        filter_domains=filter_domains,
+        match_threshold=match_threshold,
+    )
 
 
 _SOURCE_FEATURE_MAP = {
@@ -757,7 +738,7 @@ METADATA: {{"category": "<одна з: ФОП/Бізнес | Трудове пр
 
         processing_time_ms = int((_time.time() - start_time) * 1000)
 
-        # ── 4. Формування references ────────────────────────────────────────
+        # ── 4. Формування references — кожен чанк = окремий номер (NotebookLM style)
         references = []
         for i, d in enumerate(docs):
             meta = d.get("out_metadata") or {}
@@ -767,7 +748,8 @@ METADATA: {{"category": "<одна з: ФОП/Бізнес | Трудове пр
                 "category": meta.get("category", "Невідомо"),
                 "law_url": meta.get("law_url", ""),
                 "status": meta.get("status", "Чинний"),
-                "passages": [d.get("out_content", "")],
+                "passage": d.get("out_content", ""),   # один уривок, не масив
+                "chunk_index": meta.get("chunk_index", i),
             })
 
         # ── 5. Оновлення last_active_at (тільки це залишаємо на Python) ────────

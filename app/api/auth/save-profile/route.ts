@@ -15,18 +15,18 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { segments, role, subRole } = body as {
+const { segments, roles, sub_roles } = body as {
     segments: string[]
-    role: string
-    subRole: string | null
+    roles: string
+    sub_roles: string
   }
 
-  if (!segments || segments.length === 0) {
-    return NextResponse.json({ error: "segments required" }, { status: 400 })
-  }
-  if (!role) {
-    return NextResponse.json({ error: "role required" }, { status: 400 })
-  }
+if (!segments || segments.length === 0) {
+    return NextResponse.json({ error: 'segments required' }, { status: 400 });
+}
+if (!roles) {
+    return NextResponse.json({ error: 'role required' }, { status: 400 });
+}
 
   // ── 2. Upsert with service role key — bypasses RLS ────────────────────────
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -47,8 +47,8 @@ export async function POST(request: Request) {
       email: user.email!,
       full_name: user.user_metadata?.full_name ?? null,
       segment:      segments,
-      role:         role,
-      sub_role:     subRole ? [subRole] : [],
+      role:         roles,
+      sub_role:     sub_roles ? [sub_roles] : [],
       is_onboarded: true,
       // Google OAuth: email_confirmed_at is set at sign-up; email/password: set after link click
       email_confirmed: !!user.email_confirmed_at,

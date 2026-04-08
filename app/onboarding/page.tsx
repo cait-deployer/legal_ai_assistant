@@ -1,6 +1,8 @@
 "use client"
 
-import { useState } from "react"
+export const dynamic = 'force-dynamic'
+
+import { useEffect, useState, Suspense } from "react"
 import {
   Scale,
   Loader2,
@@ -16,96 +18,269 @@ import {
   AlertCircle,
   type LucideIcon,
 } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 
-// ── Types ────────────────────────────────────────────────────────────────────
-type Segment =
-  | "legal_pro"
-  | "business_finance"
-  | "gov_sector"
-  | "military_theme"
-  | "social_vulnerable"
-  | "daily_life"
-  | "specialized_niche"
-
-type Role = "lawyer" | "accountant" | "tax_specialist" | "business_owner" | "private_person"
-
-// ── Data ─────────────────────────────────────────────────────────────────────
-const SEGMENTS: { value: Segment; label: string; desc: string; icon: LucideIcon }[] = [
-  { value: "legal_pro",         label: "Юридична сфера",      desc: "Адвокати, юристи, нотаріуси",         icon: Scale          },
-  { value: "business_finance",  label: "Бізнес і фінанси",    desc: "Підприємці, бухгалтери, фінансисти",  icon: Briefcase      },
-  { value: "gov_sector",        label: "Держсектор",          desc: "Держслужбовці, органи влади",         icon: Landmark       },
-  { value: "military_theme",    label: "Військова тематика",  desc: "Ветерани, військовозобов'язані",      icon: Shield         },
-  { value: "social_vulnerable", label: "Соціально вразливі",  desc: "Пенсіонери, особи з інвалідністю",   icon: HeartHandshake },
-  { value: "daily_life",        label: "Повсякденні питання", desc: "Права споживача, ЖКГ, трудові спори", icon: Home           },
-  { value: "specialized_niche", label: "Спеціалізована ніша", desc: "IT, медицина, нерухомість та інше",   icon: FlaskConical   },
-]
-
-const ROLES: { value: Role; label: string }[] = [
-  { value: "lawyer",          label: "Юрист / Адвокат" },
-  { value: "accountant",      label: "Бухгалтер" },
-  { value: "tax_specialist",  label: "Податковий консультант" },
-  { value: "business_owner",  label: "Підприємець / Власник бізнесу" },
-  { value: "private_person",  label: "Приватна особа" },
-]
-
-const SUB_ROLES: Record<Segment, string[]> = {
-  legal_pro:         ["Адвокат", "Нотаріус", "Юрисконсульт", "Суддя", "Прокурор", "Медіатор"],
-  business_finance:  ["ФОП", "ТОВ", "Бухгалтер", "Фінансовий директор", "Аудитор"],
-  gov_sector:        ["Держслужбовець", "Депутат місцевої ради", "Посадова особа"],
-  military_theme:    ["Ветеран", "Військовослужбовець", "Мобілізований", "Член сім'ї ветерана"],
-  social_vulnerable: ["Пенсіонер", "Особа з інвалідністю", "Малозабезпечений", "Внутрішньо переміщена особа"],
-  daily_life:        ["Орендар / Власник нерухомості", "Споживач", "Працівник", "Батько / Мати"],
-  specialized_niche: ["IT-спеціаліст", "Медичний працівник", "Ріелтор", "Страховий агент", "Інше"],
+// Мапа іконок для динамічного рендеру
+const ICON_MAP: Record<string, LucideIcon> = {
+  Scale, Briefcase, Landmark, Shield, HeartHandshake, Home, FlaskConical
 }
 
-const STEP_LABELS = ["Сфера", "Роль", "Спеціалізація"]
+interface OnboardingOption {
+  id: string
+  step_key: string
+  value: string
+  label: string
+  description: string | null
+  icon: string | null
+  parent_value: string | null
+}
 
-export default function OnboardingPage() {
-  const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [segments, setSegments] = useState<Segment[]>([])
-  const [role, setRole] = useState<Role | null>(null)
-  const [subRole, setSubRole] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+interface OnboardingStep {
+  step_key: string
+  title: string
+  subtitle: string
+  order_index: number
+}
+
+function OnboardingContent() {
+  // Дані з бази
+  const [steps, setSteps] = useState<OnboardingStep[]>([])
+  const [options, setOptions] = useState<OnboardingOption[]>([])
+
+  // Стан інтерфейсу
+  const [currentStepIdx, setCurrentStepIdx] = useState(0)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selections, setSelections] = useState<Record<string, any>>({})
+  const [loading, setLoading] = useState(true)
+  const [saveLoading, setSaveLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const toggleSegment = (value: Segment) => {
-    setSegments((prev) =>
-      prev.includes(value) ? prev.filter((s) => s !== value) : [...prev, value]
+  useEffect(() => {
+    async function fetchData() {
+      const supabase = createClient()
+      try {
+        // Завантажуємо структуру кроків та всі опції
+        const [stepsRes, optionsRes] = await Promise.all([
+          supabase.from("onboarding_steps").select("*").eq("is_active", true).order("order_index"),
+          supabase.from("onboarding_options").select("*").eq("is_active", true).order("order_index")
+        ])
+
+        if (stepsRes.error) throw stepsRes.error
+        if (optionsRes.error) throw optionsRes.error
+
+        setSteps(stepsRes.data || [])
+        setOptions(optionsRes.data || [])
+      } catch (err) {
+        setError("Помилка конфігурації. Перевірте з'єднання.")
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [])
+
+  const currentStep = steps[currentStepIdx]
+  if (!currentStep && !loading) return null
+
+  // Фільтрація опцій з урахуванням виборів на попередніх кроках
+  const currentOptions = options.filter(opt => {
+    if (opt.step_key !== currentStep.step_key) return false
+    if (!opt.parent_value) return true
+
+    // Перевіряємо залежність від попередніх кроків (наприклад, спеціалізація від ролі)
+    return Object.values(selections).some(val =>
+      Array.isArray(val) ? val.includes(opt.parent_value) : val === opt.parent_value
     )
+  })
+
+  const handleSelect = (val: string) => {
+    const key = currentStep.step_key
+    const isMulti = key === "segments"
+
+    setSelections(prev => {
+      if (isMulti) {
+        const current = prev[key] || []
+        return {
+          ...prev,
+          [key]: current.includes(val) ? current.filter((v: string) => v !== val) : [...current, val]
+        }
+      }
+      return { ...prev, [key]: val }
+    })
   }
 
-  const availableSubRoles = [...new Set(segments.flatMap((s) => SUB_ROLES[s]))]
-
   const handleFinish = async () => {
-    if (segments.length === 0 || !role) return
-    setLoading(true)
+    setSaveLoading(true)
     setError("")
     try {
       const res = await fetch("/api/auth/save-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ segments, role, subRole }),
+        body: JSON.stringify(selections),
       })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error ?? "save_failed")
-      }
+      if (!res.ok) throw new Error("save_failed")
+
+      // Record IP / geo / UA / fingerprint after onboarding (works for Google + email)
+      fetch("/api/auth/login-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fingerprint: btoa(`${navigator.userAgent}-${screen.width}x${screen.height}`).slice(0, 64),
+        }),
+      }).catch(() => {})
+
+      window.location.href = "/"
     } catch (err) {
-      const msg = err instanceof Error ? err.message : ""
-      setError(
-        msg === "Server configuration error"
-          ? "Помилка конфігурації сервера. Зверніться до підтримки."
-          : "Помилка збереження. Спробуйте ще раз."
-      )
-      setLoading(false)
-      return
+      setError("Помилка збереження. Спробуйте ще раз.")
+      setSaveLoading(false)
     }
-    window.location.href = "/"
   }
 
+  if (loading) return (
+    <div className="flex flex-col items-center gap-4">
+      <Loader2 className="w-12 h-12 animate-spin text-[#BFA071]" />
+      <p className="text-[#BFA071] font-black uppercase tracking-[0.3em] text-[10px]">Завантаження...</p>
+    </div>
+  )
+
+  const isLastStep = currentStepIdx === steps.length - 1
+  const hasSelection = selections[currentStep.step_key]?.length > 0
+
+  return (
+    <div className="relative z-10 w-full max-w-[500px]">
+      {/* ── Logo (З твого оригінального дизайну) ── */}
+      <div className="flex flex-col items-center gap-4 mb-8">
+        <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
+          <Scale className="w-8 h-8 text-[#0A0E1A]" />
+        </div>
+        <div className="text-center">
+          <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
+            Lawyer <span className="text-[#BFA071]">AI</span>
+          </h1>
+          <p className="text-sm text-[#E0E6ED]/60 mt-0.5">Налаштуємо під вас за хвилину</p>
+        </div>
+      </div>
+
+      {/* ── Step indicator (Твій оригінальний степер) ── */}
+      <div className="flex items-center justify-center gap-2 mb-7">
+        {steps.map((s, i) => {
+          const n = i + 1
+          const done = currentStepIdx > i
+          const active = currentStepIdx === i
+          return (
+            <div key={s.step_key} className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-300 ${done ? "bg-[#BFA071] text-[#0A0E1A]" : active ? "bg-[#BFA071]/20 border border-[#BFA071]/50 text-[#BFA071]" : "bg-[#BFA071]/5 border border-[#BFA071]/10 text-[#BFA071]/30"
+                  }`}>
+                  {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
+                </div>
+                <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${active ? "text-[#BFA071]" : done ? "text-[#BFA071]/60" : "text-[#BFA071]/20"
+                  }`}>
+                  {s.step_key === 'segments' ? 'Сфера' : s.step_key === 'roles' ? 'Роль' : 'Спеціалізація'}
+                </span>
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`w-8 h-px transition-colors ${currentStepIdx > i ? "bg-[#BFA071]/40" : "bg-[#BFA071]/10"}`} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Card (Твій оригінальний стиль) ── */}
+      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-7">
+        <div className="mb-5">
+          <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] mb-1">Крок {currentStepIdx + 1} з {steps.length}</p>
+          <h2 className="text-lg font-serif font-bold text-white">{currentStep.title}</h2>
+          <p className="text-sm text-[#E0E6ED]/50 mt-0.5">{currentStep.subtitle}</p>
+        </div>
+
+        {/* Динамічна сітка варіантів */}
+        <div className="grid grid-cols-1 gap-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
+          {currentOptions.length > 0 ? currentOptions.map((opt) => {
+            const Icon = ICON_MAP[opt.icon || ""] || Scale
+            const isSelected = Array.isArray(selections[currentStep.step_key])
+              ? selections[currentStep.step_key].includes(opt.value)
+              : selections[currentStep.step_key] === opt.value
+
+            return (
+              <button
+                key={opt.id}
+                onClick={() => handleSelect(opt.value)}
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl border text-left transition-all duration-150 ${isSelected
+                    ? "border-[#BFA071]/50 bg-[#BFA071]/8 ring-1 ring-[#BFA071]/20"
+                    : "border-[#BFA071]/10 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5"
+                  }`}
+              >
+                {opt.icon && (
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isSelected ? "bg-[#BFA071]/15 border border-[#BFA071]/30" : "bg-[#BFA071]/5 border border-[#BFA071]/10"
+                    }`}>
+                    <Icon className={`w-4 h-4 ${isSelected ? "text-[#BFA071]" : "text-[#BFA071]/40"}`} strokeWidth={1.75} />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className={`text-sm font-semibold transition-colors ${isSelected ? "text-white" : "text-[#E0E6ED]/70"}`}>
+                    {opt.label}
+                  </div>
+                  {opt.description && <div className="text-xs text-[#E0E6ED]/40 truncate">{opt.description}</div>}
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? "border-[#BFA071] bg-[#BFA071]" : "border-[#BFA071]/20"
+                  }`}>
+                  {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[#0A0E1A]" strokeWidth={2.5} />}
+                </div>
+              </button>
+            )
+          }) : (
+            <div className="py-10 text-center opacity-30 text-xs uppercase tracking-widest">Немає доступних варіантів</div>
+          )}
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm mt-4">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        {/* Навігація */}
+        <div className="flex gap-3 mt-5">
+          {currentStepIdx > 0 && (
+            <button
+              className="h-14 flex-1 rounded-2xl border border-[#BFA071]/20 text-[#BFA071]/70 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5 font-black uppercase tracking-[0.15em] text-[11px] transition-all active:scale-95 flex items-center justify-center gap-2"
+              onClick={() => setCurrentStepIdx(prev => prev - 1)}
+              disabled={saveLoading}
+            >
+              <ChevronLeft className="w-4 h-4" /> Назад
+            </button>
+          )}
+
+          <button
+            className="h-14 flex-[2] rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
+            disabled={!hasSelection || saveLoading}
+            onClick={isLastStep ? handleFinish : () => setCurrentStepIdx(prev => prev + 1)}
+          >
+            {saveLoading ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Збереження...</>
+            ) : isLastStep ? (
+              "Розпочати"
+            ) : (
+              <>Далі <ChevronRight className="w-4 h-4" /></>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <p className="text-center mt-6 text-[10px] font-black text-[#BFA071]/30 uppercase tracking-[0.2em]">
+        URAI · Юридичний асистент України
+      </p>
+    </div>
+  )
+}
+
+export default function OnboardingPage() {
   return (
     <div className="min-h-screen bg-[#0A0E1A] relative flex items-center justify-center overflow-hidden py-8 px-4">
-      {/* Background */}
+      {/* ── Background (Твій оригінальний фон) ── */}
       <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
         <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
@@ -121,218 +296,9 @@ export default function OnboardingPage() {
         </svg>
       </div>
 
-      <div className="relative z-10 w-full max-w-[500px]">
-        {/* Logo */}
-        <div className="flex flex-col items-center gap-4 mb-8">
-          <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
-            <Scale className="w-8 h-8 text-[#0A0E1A]" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
-              Lawyer <span className="text-[#BFA071]">AI</span>
-            </h1>
-            <p className="text-sm text-[#E0E6ED]/60 mt-0.5">Налаштуємо під вас за хвилину</p>
-          </div>
-        </div>
-
-        {/* Step indicator */}
-        <div className="flex items-center justify-center gap-2 mb-7">
-          {STEP_LABELS.map((label, i) => {
-            const n = i + 1
-            const done = step > n
-            const active = step === n
-            return (
-              <div key={n} className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-300 ${
-                    done ? "bg-[#BFA071] text-[#0A0E1A]" : active ? "bg-[#BFA071]/20 border border-[#BFA071]/50 text-[#BFA071]" : "bg-[#BFA071]/5 border border-[#BFA071]/10 text-[#BFA071]/30"
-                  }`}>
-                    {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
-                  </div>
-                  <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${
-                    active ? "text-[#BFA071]" : done ? "text-[#BFA071]/60" : "text-[#BFA071]/20"
-                  }`}>{label}</span>
-                </div>
-                {i < 2 && (
-                  <div className={`w-8 h-px transition-colors ${step > n ? "bg-[#BFA071]/40" : "bg-[#BFA071]/10"}`} />
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Card */}
-        <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-7">
-
-          {/* ── STEP 1 ───────────────────────────────────────────────────────── */}
-          {step === 1 && (
-            <>
-              <div className="mb-5">
-                <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] mb-1">Крок 1 з 3</p>
-                <h2 className="text-lg font-serif font-bold text-white">Яка ваша основна сфера?</h2>
-                <p className="text-sm text-[#E0E6ED]/50 mt-0.5">Можна обрати кілька варіантів</p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2">
-                {SEGMENTS.map((s) => {
-                  const Icon = s.icon
-                  const selected = segments.includes(s.value)
-                  return (
-                    <button
-                      key={s.value}
-                      onClick={() => toggleSegment(s.value)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-2xl border text-left transition-all duration-150 ${
-                        selected
-                          ? "border-[#BFA071]/50 bg-[#BFA071]/8 ring-1 ring-[#BFA071]/20"
-                          : "border-[#BFA071]/10 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5"
-                      }`}
-                    >
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                        selected ? "bg-[#BFA071]/15 border border-[#BFA071]/30" : "bg-[#BFA071]/5 border border-[#BFA071]/10"
-                      }`}>
-                        <Icon className={`w-4 h-4 ${selected ? "text-[#BFA071]" : "text-[#BFA071]/40"}`} strokeWidth={1.75} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className={`text-sm font-semibold transition-colors ${selected ? "text-white" : "text-[#E0E6ED]/70"}`}>
-                          {s.label}
-                        </div>
-                        <div className="text-xs text-[#E0E6ED]/40 truncate">{s.desc}</div>
-                      </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                        selected ? "border-[#BFA071] bg-[#BFA071]" : "border-[#BFA071]/20"
-                      }`}>
-                        {selected && <CheckCircle2 className="w-3.5 h-3.5 text-[#0A0E1A]" strokeWidth={2.5} />}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {segments.length > 0 && (
-                <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest mt-3 text-center">
-                  Обрано: {segments.length}
-                </p>
-              )}
-
-              <button
-                className="w-full h-14 mt-4 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
-                disabled={segments.length === 0}
-                onClick={() => setStep(2)}
-              >
-                Далі <ChevronRight className="w-4 h-4" />
-              </button>
-            </>
-          )}
-
-          {/* ── STEP 2 ───────────────────────────────────────────────────────── */}
-          {step === 2 && (
-            <>
-              <div className="mb-5">
-                <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] mb-1">Крок 2 з 3</p>
-                <h2 className="text-lg font-serif font-bold text-white">Ваша роль</h2>
-                <p className="text-sm text-[#E0E6ED]/50 mt-0.5">Відповіді будуть адаптовані до вашого рівня</p>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                {ROLES.map((r) => (
-                  <button
-                    key={r.value}
-                    onClick={() => setRole(r.value)}
-                    className={`flex items-center justify-between px-4 py-3.5 rounded-2xl border text-left transition-all duration-150 ${
-                      role === r.value
-                        ? "border-[#BFA071]/50 bg-[#BFA071]/8 ring-1 ring-[#BFA071]/20"
-                        : "border-[#BFA071]/10 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5"
-                    }`}
-                  >
-                    <span className={`text-sm font-semibold transition-colors ${role === r.value ? "text-white" : "text-[#E0E6ED]/70"}`}>
-                      {r.label}
-                    </span>
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                      role === r.value ? "border-[#BFA071] bg-[#BFA071]" : "border-[#BFA071]/20"
-                    }`}>
-                      {role === r.value && <CheckCircle2 className="w-3.5 h-3.5 text-[#0A0E1A]" strokeWidth={2.5} />}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex gap-3 mt-5">
-                <button
-                  className="h-14 flex-1 rounded-2xl border border-[#BFA071]/20 text-[#BFA071]/70 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5 font-black uppercase tracking-[0.15em] text-[11px] transition-all active:scale-95 flex items-center justify-center gap-2"
-                  onClick={() => setStep(1)}
-                >
-                  <ChevronLeft className="w-4 h-4" /> Назад
-                </button>
-                <button
-                  className="h-14 flex-1 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
-                  disabled={!role}
-                  onClick={() => setStep(3)}
-                >
-                  Далі <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ── STEP 3 ───────────────────────────────────────────────────────── */}
-          {step === 3 && (
-            <>
-              <div className="mb-5">
-                <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] mb-1">Крок 3 з 3</p>
-                <h2 className="text-lg font-serif font-bold text-white">Уточніть спеціалізацію</h2>
-                <p className="text-sm text-[#E0E6ED]/50 mt-0.5">Необов&apos;язково — але допоможе точніше відповідати</p>
-              </div>
-
-              <div className="flex flex-wrap gap-2 mb-4">
-                {availableSubRoles.map((sr) => (
-                  <button
-                    key={sr}
-                    onClick={() => setSubRole(subRole === sr ? null : sr)}
-                    className={`px-4 py-2 rounded-xl border text-sm font-semibold transition-all duration-150 ${
-                      subRole === sr
-                        ? "border-[#BFA071]/50 bg-[#BFA071]/10 text-[#BFA071] ring-1 ring-[#BFA071]/20"
-                        : "border-[#BFA071]/10 text-[#E0E6ED]/50 hover:border-[#BFA071]/30 hover:text-[#E0E6ED]"
-                    }`}
-                  >
-                    {sr}
-                  </button>
-                ))}
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-4">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  {error}
-                </div>
-              )}
-
-              <div className="flex gap-3 mt-5">
-                <button
-                  className="h-14 flex-1 rounded-2xl border border-[#BFA071]/20 text-[#BFA071]/70 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5 font-black uppercase tracking-[0.15em] text-[11px] transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
-                  onClick={() => setStep(2)}
-                  disabled={loading}
-                >
-                  <ChevronLeft className="w-4 h-4" /> Назад
-                </button>
-                <button
-                  className="h-14 flex-1 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
-                  onClick={handleFinish}
-                  disabled={loading}
-                >
-                  {loading
-                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Збереження...</>
-                    : "Розпочати"
-                  }
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        <p className="text-center mt-6 text-[10px] font-black text-[#BFA071]/30 uppercase tracking-[0.2em]">
-          Lawyer AI · Юридичний асистент України
-        </p>
-      </div>
+      <Suspense fallback={<Loader2 className="animate-spin text-[#BFA071]" />}>
+        <OnboardingContent />
+      </Suspense>
     </div>
   )
 }

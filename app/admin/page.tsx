@@ -67,7 +67,7 @@ export default function AdminDashboard() {
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Дашборд</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Огляд системи Lawyer AI</p>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Огляд системи URAI</p>
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">

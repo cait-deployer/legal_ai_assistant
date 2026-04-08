@@ -1,5 +1,7 @@
 "use client"
 
+export const dynamic = 'force-dynamic'
+
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -44,7 +46,6 @@ const RESEND_COOLDOWN = 60
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const supabase = createClient()
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -70,6 +71,7 @@ function LoginForm() {
     setError("")
     setLoading(true)
 
+    const supabase = createClient()
     const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
@@ -104,6 +106,7 @@ function LoginForm() {
     setResendLoading(true)
     setResendSuccess(false)
 
+    const supabase = createClient()
     const { error } = await supabase.auth.resend({
       type: "signup",
       email,
@@ -119,6 +122,7 @@ function LoginForm() {
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true)
+    const supabase = createClient()
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {

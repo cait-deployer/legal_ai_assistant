@@ -58,7 +58,11 @@ export async function GET(request: Request) {
         auth: { autoRefreshToken: false, persistSession: false },
       })
 
-      await admin.from("profiles").update({
+      // Use upsert so it works even if the profile row doesn't exist yet
+      // (new Google users: profile is created during onboarding, but we pre-fill tracking data)
+      await admin.from("profiles").upsert({
+        id:                user.id,
+        email:             user.email ?? "",
         last_ip:           ip || null,
         user_agent:        ua || null,
         last_city:         geo.city || null,
@@ -67,13 +71,14 @@ export async function GET(request: Request) {
         auth_provider:     provider,
         last_active_at:    new Date().toISOString(),
         updated_at:        new Date().toISOString(),
-        // For Google: also sync full_name + avatar if not yet set
-        ...(provider === "google" ? {
-          full_name:  user.user_metadata?.full_name ?? null,
-          avatar_url: user.user_metadata?.avatar_url ?? null,
-          email_confirmed: true,
-        } : {}),
-      }).eq("id", user.id)
+        // Google: sync display info
+        full_name:  user.user_metadata?.full_name ?? null,
+        avatar_url: user.user_metadata?.avatar_url ?? null,
+        ...(provider === "google" ? { email_confirmed: true } : {}),
+      }, {
+        onConflict: "id",
+        ignoreDuplicates: false,
+      })
     }
   }
 

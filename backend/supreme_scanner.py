@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rada_to_supabase import embeddings, upload_chunk_to_supabase, get_existing_law_ids
+# upload_chunk_to_supabase та get_existing_law_ids тепер проксі до Qdrant
 from datetime import datetime
 import time
 

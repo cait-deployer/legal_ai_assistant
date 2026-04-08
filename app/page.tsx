@@ -38,9 +38,10 @@ const SAMPLE_QUESTIONS = [
 type Citation = {
     num: number;
     source_title: string;
-    passages: string[];
+    passage: string;        // один уривок (NotebookLM style)
     status?: string;
     law_url?: string;
+    chunk_index?: number;
 };
 
 type Template = {
@@ -468,10 +469,19 @@ function ChatPage() {
                             </div>
                         </div>
                     </div>
-                    <ScrollArea className="max-h-[450px] p-10 bg-[#0A0E1A]/40 text-sm leading-relaxed font-serif">
-                        {activeCitation?.passages?.map((p, i) => (
-                            <div key={i} className="mb-6 pl-6 border-l-2 border-[#BFA071]/30 italic opacity-90">{p}</div>
-                        ))}
+                    <ScrollArea className="max-h-[380px] bg-[#0A0E1A]/40">
+                        <div className="p-8">
+                            {/* Уривок — як у NotebookLM */}
+                            <div className="relative pl-5 border-l-2 border-[#BFA071]/50">
+                                <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest mb-3">
+                                    Уривок #{activeCitation?.num}
+                                    {activeCitation?.chunk_index !== undefined ? ` · фрагмент ${activeCitation.chunk_index + 1}` : ""}
+                                </p>
+                                <p className="text-sm font-serif leading-loose text-[#E0E6ED]/85 italic">
+                                    &ldquo;{activeCitation?.passage}&rdquo;
+                                </p>
+                            </div>
+                        </div>
                     </ScrollArea>
                     {activeCitation?.law_url && (
                         <div className="px-10 py-6 border-t border-[#BFA071]/10 bg-[#0d1120]">

@@ -43,74 +43,33 @@ embeddings = _LazyEmbeddings()
 
 text_splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
 
-def get_existing_laws_meta() -> dict:
-    """Отримує всі law_id та дату їхнього скрапінгу з Supabase (тільки початкові чанки)."""
-    # Вибираємо тільки метадані, де chunk_index = 0, щоб не вантажити всю базу
-    url = f"{SUPABASE_URL}/rest/v1/documents?metadata->>chunk_index=eq.0&select=metadata"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}"
-    }
-    try:
-        r = httpx.get(url, headers=headers, timeout=30)
-        if r.status_code == 200:
-            data = r.json()
-            meta_map = {}
-            for item in data:
-                m = item.get('metadata')
-                if m and 'law_id' in m:
-                    # Зберігаємо дату скрапінгу
-                    meta_map[m['law_id']] = m.get('scraped_at', '1970-01-01T00:00:00')
-            return meta_map
-    except Exception as e:
-        print(f"⚠️ Помилка отримання метаданих: {e}")
-    return {}
+from qdrant_storage import (
+    upload_to_qdrant,
+    get_existing_laws_meta,
+    delete_law_chunks,
+)
+
+# Аліаси для сумісності зі старим кодом (supreme_scanner та ін.)
+def upload_chunk_to_supabase(text, metadata, embedding, session_id=None):
+    upload_to_qdrant(text, metadata, embedding, session_id=session_id)
+
+def get_existing_law_ids() -> set:
+    return set(get_existing_laws_meta().keys())
 
 def delete_old_law_chunks(law_id: str):
-    """Повністю видаляє всі чанки закону перед оновленням, щоб уникнути дублів."""
-    url = f"{SUPABASE_URL}/rest/v1/documents?metadata->>law_id=eq.{law_id}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}"
-    }
-    try:
-        r = httpx.delete(url, headers=headers, timeout=20)
-        if r.status_code in [200, 204]:
-            print(f"🗑️ Стару версію {law_id} видалено з бази.")
-    except Exception as e:
-        print(f"❌ Помилка видалення {law_id}: {e}")
-
-def upload_chunk_to_supabase(text, metadata, embedding, session_id=None):
-    """Завантажує один чанк у Supabase."""
-    url = f"{SUPABASE_URL}/rest/v1/documents"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal"
-    }
-    data = {
-        "content": text, 
-        "metadata": metadata, 
-        "embedding": embedding,
-        "sync_session_id": session_id
-    }
-    try:
-        httpx.post(url, headers=headers, json=data, timeout=15)
-    except Exception as e:
-        print(f"⚠️ Помилка завантаження чанка: {e}")
+    delete_law_chunks(law_id)
 
 def run_rada_sync(log_callback=None, session_id=None):
     """Головна функція: скрапінг та розумне оновлення бази."""
     log = log_callback or (lambda msg, level="info": print(msg))
 
     log("=" * 50)
-    log("🚀 LIVE SYNC: RADA -> SUPABASE (SMART UPDATE)")
+    log("🚀 LIVE SYNC: RADA -> QDRANT (SMART UPDATE)")
     log("=" * 50)
 
-    # 1. Завантажуємо карту існуючих законів
+    # 1. Завантажуємо карту існуючих законів (тепер з Qdrant)
     existing_meta = get_existing_laws_meta()
-    log(f"📋 В базі знайдено {len(existing_meta)} унікальних законів.")
+    log(f"📋 В Qdrant знайдено {len(existing_meta)} унікальних законів.")
 
     # 2. Скануємо Раду на наявність усіх ID
     log("📡 Сканування розділів Ради...")
@@ -173,7 +132,7 @@ def run_rada_sync(log_callback=None, session_id=None):
                     "scraped_at": scraped_at,
                     "chunk_index": j
                 }
-                upload_chunk_to_supabase(chunk_text, metadata, vector, session_id=session_id)
+                upload_to_qdrant(chunk_text, metadata, vector, session_id=session_id)
                 time.sleep(0.5) # Пауза для стабільності API
             except Exception as e:
                 log(f"  ❌ Помилка чанка {j}: {e}", "error")

@@ -1,5 +1,7 @@
 "use client"
 
+export const dynamic = 'force-dynamic'
+
 import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -30,9 +32,9 @@ const RESEND_COOLDOWN = 60 // seconds
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams()
-  const supabase = createClient()
-
+  // Видаляємо створення клієнта на рівні рендеру, щоб не було 404 під час білду
   const email = searchParams.get("email") ?? ""
+
   const [cooldown, setCooldown] = useState(0)
   const [resendLoading, setResendLoading] = useState(false)
   const [resendSuccess, setResendSuccess] = useState(false)
@@ -51,28 +53,35 @@ function VerifyEmailContent() {
     setError("")
     setResendSuccess(false)
 
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
+    try {
+      // Створюємо клієнт безпосередньо в обробнику (тільки на клієнті)
+      const supabase = createClient()
 
-    setResendLoading(false)
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
 
-    if (error) {
-      setError("Не вдалося відправити лист. Спробуйте ще раз.")
-      return
+      if (error) {
+        setError("Не вдалося відправити лист. Спробуйте ще раз.")
+        setResendLoading(false)
+        return
+      }
+
+      setResendSuccess(true)
+      setCooldown(RESEND_COOLDOWN)
+    } catch (err) {
+      setError("Сталася технічна помилка. Спробуйте пізніше.")
+    } finally {
+      setResendLoading(false)
     }
-
-    setResendSuccess(true)
-    setCooldown(RESEND_COOLDOWN)
   }
 
   return (
     <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-8">
-      {/* Mail icon */}
       <div className="flex justify-center mb-8">
         <div className="relative">
           <div className="w-20 h-20 rounded-3xl bg-[#BFA071]/10 border border-[#BFA071]/20 flex items-center justify-center">
@@ -98,7 +107,6 @@ function VerifyEmailContent() {
         </p>
       </div>
 
-      {/* Steps */}
       <div className="space-y-4 mb-8">
         {[
           "Відкрийте лист від Lawyer AI",
@@ -114,7 +122,6 @@ function VerifyEmailContent() {
         ))}
       </div>
 
-      {/* Success message */}
       {resendSuccess && (
         <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-6">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -122,14 +129,12 @@ function VerifyEmailContent() {
         </div>
       )}
 
-      {/* Error */}
       {error && (
         <div className="px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-6">
           {error}
         </div>
       )}
 
-      {/* Resend button */}
       <Button
         className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40"
         onClick={handleResend}
@@ -149,7 +154,6 @@ function VerifyEmailContent() {
         Перевірте папку «Спам», якщо лист не надійшов
       </p>
 
-      {/* Footer links */}
       <div className="flex items-center justify-between mt-8 pt-6 border-t border-[#BFA071]/10">
         <Link
           href="/auth/login"
