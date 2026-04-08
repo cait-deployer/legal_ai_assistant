@@ -358,7 +358,7 @@ function ChatPage() {
                                                 {msg.role === 'ai' ? (
                                                     <div className="space-y-4">
                                                         <MarkdownText text={msg.text} refs={msg.references ?? []} onCitationOpen={setActiveCitation} />
-                                                        {msg.references && msg.references.length > 0 && (
+                                                        {/* {msg.references && msg.references.length > 0 && (
                                                             <div className="mt-6 pt-4 border-t border-[#BFA071]/10 space-y-2">
                                                                 <p className="text-[10px] font-bold text-[#BFA071]/70 uppercase tracking-[0.2em]">Юридичні джерела:</p>
                                                                 <div className="flex flex-wrap gap-2">
@@ -370,7 +370,7 @@ function ChatPage() {
                                                                     ))}
                                                                 </div>
                                                             </div>
-                                                        )}
+                                                        )} */}
                                                         {msg.templates && msg.templates.length > 0 && (
                                                             <div className="mt-4 pt-4 border-t border-[#BFA071]/10 space-y-2">
                                                                 <p className="text-[10px] font-bold text-[#BFA071]/70 uppercase tracking-[0.2em]">Доступні бланки:</p>

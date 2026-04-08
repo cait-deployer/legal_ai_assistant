@@ -5,8 +5,10 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Settings, Play, Pause, RotateCcw, Loader2, RefreshCw,
-  CheckCircle, XCircle, Database, Scale, BookOpen,
+  CheckCircle, XCircle, Database, Scale, BookOpen, List, X,
 } from "lucide-react"
+
+type Theme = { code: string; label: string }
 
 type LogEntry = {
   ts: string
@@ -127,6 +129,11 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const Icon = source.icon
 
+  // Themes modal (only for Rada)
+  const [showThemesModal, setShowThemesModal] = useState(false)
+  const [themes, setThemes] = useState<Theme[]>([])
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set())
+
   const fetchLogs = async () => {
     try {
       const r = await fetch(source.logsUrl)
@@ -162,12 +169,32 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [state.logs])
 
-  const handleRun = async () => {
+  const openRunModal = async () => {
+    if (state.running) return
+    if (source.key !== "rada") { handleRun(null); return }
+    setError("")
+    if (themes.length === 0) {
+      try {
+        const r = await fetch("/backend/admin/rada/themes")
+        if (r.ok) setThemes(await r.json())
+      } catch { /* show modal anyway */ }
+    }
+    setSelectedCodes(new Set())
+    setShowThemesModal(true)
+  }
+
+  const handleRun = async (sectionCodes: string[] | null) => {
+    setShowThemesModal(false)
     if (state.running) return
     setError("")
     setState((s) => ({ ...s, running: true, logs: [], can_resume: false }))
     try {
-      const res = await fetch(source.triggerUrl, { method: "POST" })
+      const isRada = source.key === "rada"
+      const res = await fetch(source.triggerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: isRada ? JSON.stringify({ section_codes: sectionCodes }) : "{}",
+      })
       if (!res.ok) {
         const d = await res.json()
         setError(d.detail ?? d.error ?? "Помилка запуску")
@@ -179,6 +206,14 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
       setError("Не вдалося підключитися до бекенду")
       setState((s) => ({ ...s, running: false }))
     }
+  }
+
+  const toggleTheme = (code: string) => {
+    setSelectedCodes(prev => {
+      const next = new Set(prev)
+      next.has(code) ? next.delete(code) : next.add(code)
+      return next
+    })
   }
 
   const handlePause = async () => {
@@ -278,7 +313,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
             {/* Start / restart button */}
             <Button
               size="sm"
-              onClick={handleRun}
+              onClick={openRunModal}
               disabled={state.running}
               className="gap-1.5 h-9 rounded-xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#BFA071]/10 disabled:opacity-40"
             >
@@ -286,6 +321,8 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                 <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Йде...</>
               ) : state.can_resume ? (
                 <><RotateCcw className="w-3.5 h-3.5" /> З початку</>
+              ) : source.key === "rada" ? (
+                <><List className="w-3.5 h-3.5" /> Вибрати теми</>
               ) : (
                 <><Play className="w-3.5 h-3.5" /> Запустити</>
               )}
@@ -323,6 +360,54 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
 
         {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
       </div>
+
+      {/* Themes modal (Rada only) */}
+      {showThemesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowThemesModal(false)} />
+          <div className="relative w-full max-w-2xl bg-[#0d1120] border border-[#BFA071]/30 rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#BFA071]/10 shrink-0">
+              <div>
+                <h2 className="font-semibold text-[#E0E6ED]">Вибір розділів для скрапінгу</h2>
+                <p className="text-xs text-[#E0E6ED]/50 mt-0.5">Залиште порожнім щоб скрапити всі дефолтні розділи</p>
+              </div>
+              <button onClick={() => setShowThemesModal(false)} className="text-[#BFA071]/50 hover:text-[#BFA071]">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex gap-3 px-6 py-3 border-b border-[#BFA071]/10 shrink-0">
+              <button onClick={() => setSelectedCodes(new Set(themes.map(t => t.code)))} className="text-xs font-semibold text-[#BFA071] hover:underline">Вибрати всі</button>
+              <span className="text-[#BFA071]/30">·</span>
+              <button onClick={() => setSelectedCodes(new Set())} className="text-xs font-semibold text-[#BFA071] hover:underline">Зняти всі</button>
+              {selectedCodes.size > 0 && <span className="text-xs text-[#E0E6ED]/40 ml-auto">Вибрано: {selectedCodes.size} / {themes.length}</span>}
+            </div>
+            <div className="overflow-y-auto flex-1 px-6 py-4">
+              {themes.length === 0 ? (
+                <div className="flex items-center justify-center py-8 gap-2 text-[#E0E6ED]/40">
+                  <Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">Завантаження...</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {themes.map(t => (
+                    <label key={t.code} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${selectedCodes.has(t.code) ? "border-[#BFA071]/50 bg-[#BFA071]/5" : "border-[#BFA071]/10 hover:border-[#BFA071]/30"}`}>
+                      <input type="checkbox" checked={selectedCodes.has(t.code)} onChange={() => toggleTheme(t.code)} className="accent-[#BFA071] shrink-0" />
+                      <span className="font-mono text-[10px] text-[#BFA071]/40 shrink-0 w-8">{t.code}</span>
+                      <span className="text-xs text-[#E0E6ED]/80 leading-tight">{t.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 px-6 py-4 border-t border-[#BFA071]/10 shrink-0">
+              <Button variant="outline" onClick={() => setShowThemesModal(false)} className="flex-1 border-[#BFA071]/20 text-[#E0E6ED]/60 hover:text-[#E0E6ED]">Скасувати</Button>
+              <Button onClick={() => handleRun(selectedCodes.size > 0 ? [...selectedCodes] : null)} className="flex-1 gap-2 bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black">
+                <Play className="w-4 h-4" />
+                {selectedCodes.size === 0 ? "Всі розділи" : `Запустити (${selectedCodes.size})`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Live log terminal */}
       {showLogs && (
