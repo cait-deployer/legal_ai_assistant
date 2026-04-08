@@ -694,6 +694,47 @@ async def templates_logs():
     }
 
 
+# ── /admin/laws/text ──────────────────────────────────────────────────────────
+
+@app.get("/admin/laws/text")
+async def get_law_text_endpoint(law_id: str):
+    """Повертає повний текст закону з Qdrant (конкатенація всіх чанків)."""
+    if not law_id:
+        raise HTTPException(400, "law_id required")
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_storage import get_client, COLLECTION_NAME
+
+        client = get_client()
+        all_chunks: list = []
+        next_page_offset = None
+        while True:
+            batch, next_page_offset = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=Filter(must=[
+                    FieldCondition(key="law_id", match=MatchValue(value=law_id))
+                ]),
+                with_payload=True,
+                limit=500,
+                offset=next_page_offset,
+            )
+            all_chunks.extend(batch)
+            if next_page_offset is None:
+                break
+
+        if not all_chunks:
+            raise HTTPException(404, "Документ не знайдено")
+
+        all_chunks.sort(key=lambda p: p.payload.get("chunk_index", 0))
+        full_text = "\n\n".join(p.payload.get("content", "") for p in all_chunks)
+        return {"full_text": full_text, "chunk_count": len(all_chunks)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # ── /admin/base/docs ──────────────────────────────────────────────────────────
 
 @app.get("/admin/base/docs")
