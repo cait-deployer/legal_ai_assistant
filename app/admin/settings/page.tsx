@@ -141,7 +141,13 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     } catch { /* silently ignore network errors */ }
   }
 
-  useEffect(() => { fetchLogs() }, [])
+  useEffect(() => { 
+    const fetchData = async () => {
+      return await fetchLogs()
+    }
+    fetchData()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (state.running) {

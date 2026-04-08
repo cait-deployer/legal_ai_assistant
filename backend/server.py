@@ -214,10 +214,16 @@ def _clear_state() -> None:
 # Фонові задачі скрапінгу
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _do_rada(session_id: str, start_index: int = 0, all_laws_cached: list | None = None) -> None:
+def _do_rada(
+    session_id: str,
+    start_index: int = 0,
+    all_laws_cached: list | None = None,
+    section_codes: list[str] | None = None,
+) -> None:
     """
     Головна функція синхронізації Ради.
     Підтримує: старт з нуля, resume з індексу, пауза після поточного документа.
+    section_codes — вибрані розділи (None = всі дефолтні SECTIONS).
     """
     src = "rada"
     log = lambda m, lv="info": _log(src, m, lv)
@@ -226,6 +232,8 @@ def _do_rada(session_id: str, start_index: int = 0, all_laws_cached: list | None
     log(f"🚀 RADA SYNC (сесія {session_id[:8]}...)")
     if start_index > 0:
         log(f"▶️  Відновлення з індексу {start_index}")
+    if section_codes:
+        log(f"📂 Вибрані розділи: {', '.join(section_codes)}")
     log("=" * 50)
 
     _sb_insert_log(src, session_id)
@@ -245,7 +253,7 @@ def _do_rada(session_id: str, start_index: int = 0, all_laws_cached: list | None
             log(f"📋 Список завантажено з кешу: {len(all_laws)} законів")
         else:
             log("📡 Сканування розділів Ради...")
-            all_laws = get_all_legal_ids()
+            all_laws = get_all_legal_ids(section_codes=section_codes)
             log(f"📦 Знайдено: {len(all_laws)} унікальних законів")
 
         # 2. Метадані існуючих (завжди свіжі)
@@ -536,13 +544,25 @@ async def get_stats():
 
 # ── /admin/rada/* ──────────────────────────────────────────────────────────────
 
+class RadaTriggerBody(BaseModel):
+    section_codes: list[str] | None = None  # None = all default sections
+
+
+@app.get("/admin/rada/themes")
+async def get_rada_themes():
+    """Повертає список всіх тем Ради для вибору в UI."""
+    from rada_scanner import ALL_THEMES
+    return [{"code": code, "label": label} for code, label in ALL_THEMES]
+
+
 @app.post("/admin/rada/trigger")
-async def trigger_rada():
-    """Запуск синхронізації Ради з початку (видаляє збережений стан)."""
+async def trigger_rada(body: RadaTriggerBody = RadaTriggerBody()):
+    """Запуск синхронізації Ради з початку (видаляє збережений стан).
+    section_codes: список кодів розділів або null = всі дефолтні розділи."""
     session_id = str(uuid.uuid4())
     _clear_state()
     try:
-        _start_sync("rada", _do_rada, session_id)
+        _start_sync("rada", _do_rada, session_id, section_codes=body.section_codes)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"ok": True, "session_id": session_id}
@@ -806,6 +826,8 @@ async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = 
 
 class AskRequest(BaseModel):
     question: str
+    max_docs: int = 8          # max chunks from Qdrant (from user's plan)
+    filter_domains: list[str] | None = None  # allowed source domains (from plan features)
 
 
 @app.post("/ask")
@@ -825,9 +847,11 @@ async def ask(body: AskRequest):
     except Exception as e:
         raise HTTPException(500, f"Embedding error: {e}")
 
-    # 2. Search Qdrant
+    # 2. Search Qdrant (plan-based top_k and domain filter)
     from qdrant_storage import search_qdrant
-    results = await _asyncio.to_thread(search_qdrant, query_vector, 8, None, 0.0)
+    results = await _asyncio.to_thread(
+        search_qdrant, query_vector, body.max_docs, body.filter_domains or None, 0.0
+    )
 
     # 3. Build citations (Citation format expected by frontend)
     citations: list[dict] = []
@@ -844,10 +868,14 @@ async def ask(body: AskRequest):
         if not law_url and "rada.gov.ua" in source_domain and law_id:
             law_url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
 
+        # Clean passage: strip markdown code fences and excess whitespace
+        clean_passage = re.sub(r"```[a-z]*", "", content)
+        clean_passage = re.sub(r"\n{3,}", "\n\n", clean_passage).strip()[:600]
+
         citations.append({
             "num": num,
             "source_title": title,
-            "passage": content[:600].strip(),
+            "passage": clean_passage,
             "status": meta.get("status", ""),
             "law_url": law_url,
             "chunk_index": meta.get("chunk_index", 0),
@@ -883,21 +911,27 @@ async def ask(body: AskRequest):
             "Якщо контекст не містить потрібної інформації — чесно повідом про це."
         )
 
+        top_p = settings_cache.get_float("top_p", 0.8)
+
         model = GenerativeModel(model_name, system_instruction=system_prompt)
         response = await _asyncio.to_thread(
             model.generate_content,
             prompt,
-            generation_config=GenerationConfig(temperature=temperature),
+            generation_config=GenerationConfig(temperature=temperature, top_p=top_p),
         )
         answer = response.text
     except Exception as e:
         raise HTTPException(500, f"AI error: {e}")
 
+    # Filter citations — keep only those actually referenced in the answer
+    used_nums = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
+    used_citations = [c for c in citations if c["num"] in used_nums] or citations[:3]
+
     elapsed_ms = int((time.time() - start_time) * 1000)
 
     return {
         "answer": answer,
-        "references": citations,
+        "references": used_citations,
         "templates": [],
         "_meta": {"processing_time_ms": elapsed_ms},
     }

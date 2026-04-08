@@ -162,6 +162,51 @@ export default function PlanEditPage() {
     finally { setSavingFeatures(false) }
   }
 
+  // ── Feature toggle with benefit auto-sync ────────────────────────────
+  // Maps feature category → benefit category
+  const FEAT_TO_BENEFIT_CAT: Record<string, string> = {
+    sources: "sources", response: "response", access: "response",
+  }
+
+  const handleToggleFeature = async (def: FeatureDef) => {
+    const newVal = !featureMap[def.key]
+
+    // 1. Optimistic UI update
+    setFeatureMap(m => ({ ...m, [def.key]: newVal }))
+
+    // 2. Persist feature toggle immediately
+    try {
+      await fetch(`/api/admin/plans/${planId}/features`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ features: { [def.key]: newVal } }),
+      })
+    } catch { toast.error("Помилка збереження фічі") }
+
+    // 3. Sync benefit: add when enabled, remove when disabled
+    const benefitCat = FEAT_TO_BENEFIT_CAT[def.category] ?? "response"
+    const existing = benefits.find(b => b.text === def.label)
+
+    if (newVal && !existing) {
+      // Add benefit
+      try {
+        const res = await fetch(`/api/admin/plans/${planId}/benefits`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: def.label, category: benefitCat }),
+        })
+        if (res.ok) {
+          const newBenefit = await res.json()
+          setBenefits(prev => [...prev, newBenefit])
+        }
+      } catch { /* benefit sync not critical */ }
+    } else if (!newVal && existing) {
+      // Remove benefit
+      setBenefits(prev => prev.filter(b => b.id !== existing.id))
+      fetch(`/api/admin/plans/benefits/${existing.id}`, { method: "DELETE" }).catch(() => {})
+    }
+  }
+
   // ── Feature definition edit ───────────────────────────────────────────
   const openDefEdit = (def: FeatureDef) => {
     setEditingDef(def)
@@ -436,7 +481,7 @@ export default function PlanEditPage() {
                 <div key={def.key} className="flex items-center gap-4 px-4 py-3 rounded-xl border border-[#BFA071]/10 bg-[#0A0E1A]/40 group">
                   {/* Toggle */}
                   <button
-                    onClick={() => setFeatureMap(m => ({ ...m, [def.key]: !m[def.key] }))}
+                    onClick={() => handleToggleFeature(def)}
                     className="shrink-0"
                   >
                     {featureMap[def.key]

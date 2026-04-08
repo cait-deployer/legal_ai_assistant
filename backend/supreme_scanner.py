@@ -119,28 +119,30 @@ def process_supreme_pdf(review_url, title, session_id=None, existing_ids=None):
         print(f"❌ Помилка обробки PDF {title}: {e}")
 
 def run_supreme_sync(session_id=None, log_callback=None):
-    """Головна функція синхронізації судової практики з лімітом"""
+    """Головна функція повної синхронізації судової практики"""
     def log(msg):
         print(msg)
         if log_callback:
             log_callback(msg)
 
-    log("⚖️ Починаємо збір судової практики Верховного Суду...")
+    log("⚖️ Починаємо повний збір судової практики Верховного Суду...")
     reviews = get_supreme_reviews()
 
-    # СУВОРИЙ ЛІМІТ: Беремо тільки перші 2 посилання для тесту
-    test_reviews = reviews[:2]
-
-    log(f"🔎 Знайдено {len(reviews)} оглядів. Для тесту беремо {len(test_reviews)}.")
+    # ПРИБРАНО ЛІМІТ: тепер використовуємо весь список reviews
+    log(f"🔎 Всього знайдено оглядів: {len(reviews)}.")
 
     existing_ids = get_existing_law_ids()
     log(f"📋 Вже в базі: {len(existing_ids)} документів")
 
-    for review in test_reviews:
-        log(f"📥 Обробка: {review['title']}")
+    # Перебираємо всі знайдени огляди
+    for i, review in enumerate(reviews):
+        log(f"📥 [{i+1}/{len(reviews)}] Обробка: {review['title']}")
         process_supreme_pdf(review['url'], review['title'], session_id=session_id, existing_ids=existing_ids)
+        
+        # Додаємо невелику паузу між файлами, щоб сайт ВС не заблокував за агресивний скрапінг
+        time.sleep(2)
 
-    log("✅ Тестова синхронізація судової практики завершена.")
+    log(f"✅ Синхронізація завершена. Оброблено документів: {len(reviews)}")
 
 if __name__ == "__main__":
     run_supreme_sync()
