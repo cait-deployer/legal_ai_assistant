@@ -11,12 +11,13 @@ function admin() {
   )
 }
 
-const NAMING_PROMPT = `Ти — асистент з іменування юридичних чатів.
-На основі першого запитання користувача та відповіді асистента дай:
-1. Коротку назву чату (3-6 слів, українською)
-2. Категорію зі списку: Цивільне право, Кримінальне право, Трудове право, Сімейне право, Корпоративне право, Нерухомість, Адміністративне право, Податкове право, Виконавче провадження, Інше
+const NAMING_PROMPT = `Ти — асистент з іменування юридичних чатів. Відповідай ТІЛЬКИ чистим JSON без markdown, без \`\`\`, без пояснень.
 
-Відповідай ТІЛЬКИ у форматі JSON: {"title":"...","category":"..."}`
+На основі запитання та відповіді поверни JSON об'єкт з двома полями:
+- title: коротка назва чату (3-6 слів, українською)
+- category: галузь права українською (визнач самостійно на основі теми)
+
+Приклад відповіді: {"title":"Визнання права власності","category":"Цивільне право"}`
 
 async function getVertexToken(saJson: string): Promise<string | null> {
   try {
@@ -95,7 +96,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           role: "user",
           parts: [{ text: `${NAMING_PROMPT}\n\nЗапитання: ${question}\n\nВідповідь: ${answer.slice(0, 500)}` }],
         }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 100 },
+        generationConfig: { temperature: 0.2, maxOutputTokens: 500 },
       }),
       signal: AbortSignal.timeout(30000),
     })
