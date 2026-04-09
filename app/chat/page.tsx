@@ -181,9 +181,20 @@ function ChatPage() {
         }
         setHistoryLoading(true);
         fetch(`/api/chats/${currentChatId}`)
-            .then(r => r.json())
+            .then(r => {
+                if (r.status === 404) {
+                    // Chat not found (deleted or belongs to another user) — reset
+                    setCurrentChatId(null);
+                    setMessages([]);
+                    setIsFirstMessage(true);
+                    router.replace('/chat');
+                    return null;
+                }
+                return r.json();
+            })
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .then((rows: any[]) => {
+            .then((rows: any[] | null) => {
+                if (rows === null) return;
                 if (!Array.isArray(rows)) { setMessages([]); return; }
                 if (rows.length === 0 && newChatInProgressRef.current) {
                     setIsFirstMessage(true);
@@ -194,7 +205,7 @@ function ChatPage() {
             })
             .catch(() => toast.error('Не вдалося завантажити чат'))
             .finally(() => setHistoryLoading(false));
-    }, [currentChatId]);
+    }, [currentChatId, router]);
 
     const handleSend = async (text: string) => {
         if (!text.trim() || isLoading || limitExceeded) return;
