@@ -115,17 +115,18 @@ def parse_laws_from_page(html: str, category: str) -> list[dict]:
 
 # ─── ЗБІР ЗАКОНІВ З ОДНОГО РОЗДІЛУ (ПОСТОРІНКОВО) ────────────────────────────
 
-def get_laws_from_section(code: str, label: str, limit: int = None) -> list[dict]:
+def get_laws_from_section(code: str, label: str, limit: int = None, log=None) -> list[dict]:
     """
     Проходить всі сторінки розділу і збирає список законів.
     limit — обмеження для тест-режиму (None = качаємо все).
-    Пауза 0.8 сек між запитами щоб не отримати бан від сайту.
+    log — callback(message, level) для виводу в UI; якщо None — print.
     """
+    _log = log if log else (lambda m, lv="info": print(m))
+
     total_pages = get_total_pages(code)
-    print(f"\n📂 [{code}] {label}")
-    print(f"   Сторінок: {total_pages} (~{total_pages * 50} документів)")
+    _log(f"📂 Розділ [{code}] {label} — {total_pages} стор. (~{total_pages * 50} doc)")
     if limit:
-        print(f"   ⚠️  TEST MODE: беремо перші {limit} документів")
+        _log(f"   ⚠️  TEST MODE: беремо перші {limit} документів", "warning")
 
     all_laws = []
     seen_ids = set()
@@ -142,7 +143,7 @@ def get_laws_from_section(code: str, label: str, limit: int = None) -> list[dict
             r = requests.get(url, headers=HEADERS, timeout=15)
             r.raise_for_status()
         except requests.RequestException as e:
-            print(f"   ❌ Стор. {page}: {e}")
+            _log(f"   ❌ Стор. {page}: {e}", "error")
             time.sleep(3)
             continue
 
@@ -158,10 +159,10 @@ def get_laws_from_section(code: str, label: str, limit: int = None) -> list[dict
                 if limit and len(all_laws) >= limit:
                     break
 
-        print(f"   📄 Стор. {page}: всього зібрано {len(all_laws)}")
+        _log(f"   📄 Стор. {page}/{total_pages}: зібрано {len(all_laws)}")
         time.sleep(0.8)
 
-    print(f"   ✅ Зібрано з [{code}]: {len(all_laws)}")
+    _log(f"   ✅ [{code}] готово: {len(all_laws)} законів", "success")
     return all_laws
 
 
@@ -204,29 +205,34 @@ ALL_THEMES: list[tuple[str, str]] = [
 
 # ЗБІР ПО ВСІХ (або вибраних) РОЗДІЛАХ
 
-def get_all_legal_ids(section_codes: list[str] | None = None) -> list[dict]:
+def get_all_legal_ids(section_codes: list[str] | None = None, log=None) -> list[dict]:
     """
     Проходить по всіх (або вибраних) розділах і збирає список унікальних законів.
     section_codes — список кодів (наприклад ["h14", "h19"]); None = всі SECTIONS.
+    log — callback(message, level) для виводу в UI.
     Дедуплікація по law_id — один закон може бути в кількох розділах.
     """
+    _log = log if log else (lambda m, lv="info": print(m))
+
     code_to_label = dict(ALL_THEMES)
     if section_codes:
         sections_to_scan = [(code, code_to_label.get(code, code)) for code in section_codes]
     else:
         sections_to_scan = list(ALL_THEMES)
 
+    total_sections = len(sections_to_scan)
     all_laws = []
     seen_ids = set()
 
-    for code, label in sections_to_scan:
-        section_laws = get_laws_from_section(code, label, limit=TEST_DOCS_PER_SECTION)
+    for idx, (code, label) in enumerate(sections_to_scan, 1):
+        _log(f"📡 Сканування розділу {idx}/{total_sections}: [{code}] {label}")
+        section_laws = get_laws_from_section(code, label, limit=TEST_DOCS_PER_SECTION, log=_log)
         for law in section_laws:
             if law["id"] not in seen_ids:
                 seen_ids.add(law["id"])
                 all_laws.append(law)
 
-    print(f"\n📦 Разом унікальних документів: {len(all_laws)}")
+    _log(f"📦 Сканування завершено: {len(all_laws)} унікальних документів", "success")
     return all_laws
 
 

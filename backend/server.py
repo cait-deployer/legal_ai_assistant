@@ -254,7 +254,7 @@ def _do_rada(
             log(f"📋 Список завантажено з кешу: {len(all_laws)} законів")
         else:
             log("📡 Сканування розділів Ради...")
-            all_laws = get_all_legal_ids(section_codes=section_codes)
+            all_laws = get_all_legal_ids(section_codes=section_codes, log=log)
             log(f"📦 Знайдено: {len(all_laws)} унікальних законів")
 
         # 2. Метадані існуючих (завжди свіжі)
@@ -1157,7 +1157,7 @@ async def get_sync_stats():
             # Береємо більше між Supabase і in-memory
             sb_laws = rl.get("laws_processed") or 0 if rl else 0
             live_laws = max(in_mem, sb_laws)
-            if started_at and (l.get("started_at") or "") >= week_ago:
+            if started_at and started_at >= week_ago:
                 laws_7d += live_laws
             laws_30d += live_laws
             currently_running.append({
