@@ -273,6 +273,7 @@ function DocDetail({ law, onClose }: { law: Law; onClose: () => void }) {
     : "/api/admin/rada/laws/text"
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true); setError(null); setFull(null)
     fetch(`${textApiPath}?law_id=${encodeURIComponent(meta.law_id)}`)
       .then((r) => { if (!r.ok) throw new Error(`Помилка ${r.status}`); return r.json() })

@@ -129,4 +129,4 @@ def run_wiki_sync(limit=2, session_id=None, log_callback=None):
         time.sleep(1)
 
 if __name__ == "__main__":
-    run_wiki_sync(limit=2) # Зміни на None для повної синхронізації
+    run_wiki_sync(limit=None) # Зміни на None для повної синхронізації
