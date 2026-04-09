@@ -17,17 +17,19 @@ import {
 import {
   LayoutDashboard, Menu, X, LogOut, ChevronLeft,
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Settings, BookOpen, CreditCard, Bot, BarChart2,
+  Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
 const navigation = [
-  { name: "Дашборд", href: "/admin", icon: LayoutDashboard },
-  { name: "Аналітика", href: "/admin/analytics", icon: BarChart2 },
+  { name: "Огляд",         href: "/admin",          icon: LayoutDashboard },
+  { name: "Користувачі",   href: "/admin/users",     icon: Users           },
+  { name: "Аналітика",     href: "/admin/analytics", icon: BarChart2       },
   { name: "Тарифи", href: "/admin/plans", icon: CreditCard },
-  { name: "Налаштування", href: "/admin/settings", icon: Settings },
-  { name: "AI Налаштування", href: "/admin/ai-settings", icon: Bot },
-  { name: "Onboarding", href: "/admin/onboarding", icon: Scale },
+  { name: "Синхронізація", href: "/admin/settings", icon: Settings },
+  { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck },
+  { name: "AI Модель", href: "/admin/ai-settings", icon: Bot },
+  { name: "Онбординг", href: "/admin/onboarding", icon: Scale },
   { name: "База знань", href: "/admin/base", icon: BookOpen },
 ]
 

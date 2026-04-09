@@ -6,7 +6,50 @@ import { Button } from "@/components/ui/button"
 import {
   Settings, Play, Pause, RotateCcw, Loader2, RefreshCw,
   CheckCircle, XCircle, Database, Scale, BookOpen, List, X,
+  TrendingUp, Timer, AlertTriangle, Info,
 } from "lucide-react"
+
+type SyncRun = {
+  status: "success" | "error" | "paused"
+  laws_processed: number
+  duration_sec: number | null
+  started_at: string | null
+  source?: string
+}
+type SyncStats = {
+  reliability_30d: { total: number; success: number; error: number; paused: number; pct: number | null }
+  laws_30d: number
+  laws_7d: number
+  avg_duration_sec: number | null
+  last_success_at: string | null
+  last_14_runs: SyncRun[]
+  alerts: { level: "error" | "warning" | "info"; message: string }[]
+}
+
+function fmtDuration(sec: number | null): string {
+  if (sec == null) return "—"
+  if (sec < 60) return `${sec} с`
+  return `${Math.floor(sec / 60)} хв ${sec % 60} с`
+}
+
+function MiniSparkline({ runs }: { runs: SyncRun[] }) {
+  if (!runs.length) return null
+  const maxLaws = Math.max(...runs.map(r => r.laws_processed), 1)
+  return (
+    <div className="flex items-end gap-0.5 h-8">
+      {runs.map((r, i) => {
+        const h = Math.max(3, Math.round((r.laws_processed / maxLaws) * 32))
+        const color = r.status === "success" ? "bg-emerald-500" : r.status === "error" ? "bg-red-500" : "bg-blue-400"
+        return (
+          <div key={i} title={`${r.started_at ? new Date(r.started_at).toLocaleDateString("uk-UA") : ""} · ${r.laws_processed} законів`}
+            className="group relative flex-1 flex items-end cursor-default">
+            <div className={`w-full rounded-sm opacity-60 group-hover:opacity-100 transition-opacity ${color}`} style={{ height: `${h}px` }} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 type Theme = { code: string; label: string }
 
@@ -18,6 +61,7 @@ type LogEntry = {
 
 type HistoryEntry = {
   id?: number
+  source?: string
   status: string
   started_at: string
   finished_at?: string
@@ -88,9 +132,9 @@ const SOURCES = [
     iconBg: "bg-purple-500/10 border border-purple-500/20",
     triggerUrl: "/api/admin/supreme/trigger",
     logsUrl: "/api/admin/supreme/logs",
-    pauseUrl: null,
+    pauseUrl: "/api/admin/supreme/pause",
     resumeUrl: null,
-    supportsPause: false,
+    supportsPause: true,
   },
   {
     key: "wiki",
@@ -106,6 +150,23 @@ const SOURCES = [
     supportsPause: false,
   },
 ]
+
+const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
+  rada:      { label: "РАДА",    color: "text-blue-400" },
+  supreme:   { label: "ВС",     color: "text-purple-400" },
+  wiki:      { label: "Wiki",   color: "text-emerald-400" },
+  templates: { label: "Шаблони", color: "text-amber-400" },
+}
+
+function SourceBadge({ source }: { source?: string }) {
+  const info = SOURCE_LABELS[source ?? ""]
+  if (!info) return <span className="text-[#E0E6ED]/30 text-xs">—</span>
+  return (
+    <span className={`text-[10px] font-black uppercase tracking-wider ${info.color}`}>
+      {info.label}
+    </span>
+  )
+}
 
 function logColor(level: string) {
   switch (level) {
@@ -438,13 +499,18 @@ export default function SettingsPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [syncStats, setSyncStats] = useState<SyncStats | null>(null)
 
   const fetchHistory = async () => {
     setHistoryLoading(true)
     try {
-      const r = await fetch("/api/admin/rada/logs")
-      const d = await r.json()
-      setHistory(d.history ?? [])
+      const [logRes, statsRes] = await Promise.all([
+        fetch("/api/admin/logs"),
+        fetch("/api/admin/sync/stats"),
+      ])
+      const d = await logRes.json()
+      setHistory(Array.isArray(d) ? d : [])
+      if (statsRes.ok) setSyncStats(await statsRes.json())
       setLastUpdated(new Date())
     } catch { /* ignore */ }
     finally { setHistoryLoading(false) }
@@ -461,8 +527,8 @@ export default function SettingsPage() {
             <Settings className="w-8 h-8 text-[#BFA071]" />
           </div>
           <div>
-            <h1 className="text-3xl font-serif font-bold text-white">Налаштування</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Керування джерелами та синхронізацією</p>
+            <h1 className="text-3xl font-serif font-bold text-white">Синхронізація</h1>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Керування джерелами та запусками синхронізації</p>
           </div>
         </div>
         <Button
@@ -489,6 +555,82 @@ export default function SettingsPage() {
             ))}
           </div>
         </section>
+
+        {/* Sync analytics panel */}
+        {syncStats && (
+          <section>
+            <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4">
+              Аналітика
+            </h2>
+            <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5 space-y-4">
+              {/* Alerts */}
+              {syncStats.alerts.map((a, i) => (
+                <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${
+                  a.level === "error"   ? "bg-red-500/10 border-red-500/20 text-red-400"
+                  : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                  : "bg-[#BFA071]/5 border-[#BFA071]/15 text-[#BFA071]/80"
+                }`}>
+                  {a.level === "error"   && <XCircle className="w-4 h-4 shrink-0" />}
+                  {a.level === "warning" && <AlertTriangle className="w-4 h-4 shrink-0" />}
+                  {a.level === "info"    && <Info className="w-4 h-4 shrink-0" />}
+                  {a.message}
+                </div>
+              ))}
+
+              {/* Stats row */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-[#0A0E1A]/60 rounded-xl px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3" /> Надійність / 30 дн
+                  </p>
+                  <p className={`text-xl font-bold mt-1 ${
+                    syncStats.reliability_30d.pct == null ? "text-[#E0E6ED]/30"
+                    : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
+                    : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
+                    : "text-red-400"
+                  }`}>
+                    {syncStats.reliability_30d.pct != null ? `${syncStats.reliability_30d.pct}%` : "—"}
+                  </p>
+                  <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+                    {syncStats.reliability_30d.success} з {syncStats.reliability_30d.total} запусків
+                  </p>
+                </div>
+                <div className="bg-[#0A0E1A]/60 rounded-xl px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Законів додано
+                  </p>
+                  <p className="text-xl font-bold mt-1 text-white">
+                    {syncStats.laws_30d.toLocaleString("uk-UA")}
+                  </p>
+                  <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">{syncStats.laws_7d} за 7 днів</p>
+                </div>
+                <div className="bg-[#0A0E1A]/60 rounded-xl px-4 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                    <Timer className="w-3 h-3" /> Сер. тривалість
+                  </p>
+                  <p className="text-xl font-bold mt-1 text-white">{fmtDuration(syncStats.avg_duration_sec)}</p>
+                  <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">успішних запусків</p>
+                </div>
+              </div>
+
+              {/* Sparkline */}
+              {syncStats.last_14_runs.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/40 mb-2">
+                    Останні {syncStats.last_14_runs.length} запусків
+                    <span className="ml-2 font-normal normal-case text-[#E0E6ED]/30">· висота = кількість законів</span>
+                  </p>
+                  <MiniSparkline runs={syncStats.last_14_runs} />
+                  <div className="flex items-center gap-4 mt-2 text-[10px] text-[#E0E6ED]/40">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> успіх</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" /> помилка</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400 inline-block" /> призупинено</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* History */}
         <section>
@@ -520,6 +662,7 @@ export default function SettingsPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#BFA071]/10 bg-[#0A0E1A]/40">
+                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider w-20 hidden sm:table-cell">Джерело</th>
                         <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider w-32">Статус</th>
                         <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider">Початок</th>
                         <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider hidden sm:table-cell">Кінець</th>
@@ -533,6 +676,9 @@ export default function SettingsPage() {
                           key={h.id ?? i}
                           className="border-b border-[#BFA071]/5 last:border-0 hover:bg-[#BFA071]/3 transition-colors"
                         >
+                          <td className="px-4 py-3 hidden sm:table-cell">
+                            <SourceBadge source={h.source} />
+                          </td>
                           <td className="px-4 py-3">
                             <StatusBadge status={h.status} />
                           </td>

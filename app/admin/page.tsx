@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   LayoutDashboard, FileText, Clock,
   CheckCircle, XCircle, Loader2, RefreshCw,
   ArrowRight, Zap, Calendar, Settings, BookOpen, Pause,
+  AlertTriangle, Info, TrendingUp, Timer,
 } from "lucide-react"
 
 type Stats = {
@@ -25,8 +25,67 @@ type Stats = {
   resume_progress?: { next_index: number; total: number } | null
 }
 
+type SyncRun = {
+  status: "success" | "error" | "paused"
+  laws_processed: number
+  duration_sec: number | null
+  started_at: string | null
+  source?: string
+}
+
+type SyncStats = {
+  reliability_30d: { total: number; success: number; error: number; paused: number; pct: number | null }
+  laws_30d: number
+  laws_7d: number
+  avg_duration_sec: number | null
+  consecutive_failures: number
+  last_success_at: string | null
+  last_failure_at: string | null
+  last_14_runs: SyncRun[]
+  alerts: { level: "error" | "warning" | "info"; message: string }[]
+}
+
+function fmtDuration(sec: number | null): string {
+  if (sec == null) return "—"
+  if (sec < 60) return `${sec} с`
+  return `${Math.floor(sec / 60)} хв ${sec % 60} с`
+}
+
+function fmtRelative(iso: string | null): string {
+  if (!iso) return "—"
+  const diff = Date.now() - new Date(iso).getTime()
+  const d = Math.floor(diff / 86400000)
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return "щойно"
+  if (h < 1) return `${m} хв тому`
+  if (d < 1) return `${h} год тому`
+  if (d === 1) return "вчора"
+  return `${d} дн. тому`
+}
+
+function Sparkline({ runs }: { runs: SyncRun[] }) {
+  if (!runs.length) return null
+  const maxLaws = Math.max(...runs.map(r => r.laws_processed), 1)
+  return (
+    <div className="flex items-end gap-0.5 h-10">
+      {runs.map((r, i) => {
+        const h = Math.max(4, Math.round((r.laws_processed / maxLaws) * 40))
+        const color = r.status === "success" ? "bg-emerald-500" : r.status === "error" ? "bg-red-500" : "bg-blue-400"
+        const label = `${r.started_at ? new Date(r.started_at).toLocaleDateString("uk-UA") : ""} · ${r.laws_processed} законів · ${r.status}`
+        return (
+          <div key={i} title={label} className="group relative flex-1 flex items-end cursor-default">
+            <div className={`w-full rounded-sm opacity-70 group-hover:opacity-100 transition-opacity ${color}`} style={{ height: `${h}px` }} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const [stats, setStats] = useState<Stats | null>(null)
+  const [syncStats, setSyncStats] = useState<SyncStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [scheduleToggling, setScheduleToggling] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
@@ -34,9 +93,12 @@ export default function AdminDashboard() {
   const fetchStats = async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/admin/stats")
-      const data = await res.json()
-      setStats(data)
+      const [res, syncRes] = await Promise.all([
+        fetch("/api/admin/stats"),
+        fetch("/api/admin/sync/stats"),
+      ])
+      setStats(await res.json())
+      if (syncRes.ok) setSyncStats(await syncRes.json())
       setLastUpdated(new Date())
     } catch { }
     finally { setLoading(false) }
@@ -68,8 +130,8 @@ export default function AdminDashboard() {
             <LayoutDashboard className="w-8 h-8 text-[#BFA071]" />
           </div>
           <div>
-            <h1 className="text-3xl font-serif font-bold text-white">Дашборд</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Огляд системи URAI</p>
+            <h1 className="text-3xl font-serif font-bold text-white">Огляд</h1>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Загальний стан системи URAI</p>
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -193,15 +255,19 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Last sync */}
-      <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-[2rem] p-6">
+      {/* Sync health widget */}
+      <div className={`bg-[#0d1120]/60 border rounded-[2rem] p-6 transition-all ${
+        syncStats?.consecutive_failures >= 3 ? "border-red-500/30"
+        : syncStats?.consecutive_failures === 1 ? "border-amber-500/20"
+        : "border-[#BFA071]/10"
+      }`}>
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-[#BFA071]" />
-              <h2 className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Остання синхронізація</h2>
+              <h2 className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Аналітика синхронізації</h2>
             </div>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Результат останнього запуску скрапінгу</p>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Надійність та статистика за 30 днів</p>
           </div>
           <Link href="/admin/settings">
             <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5 rounded-xl">
@@ -209,53 +275,108 @@ export default function AdminDashboard() {
             </Button>
           </Link>
         </div>
+
         {loading ? (
-          <div className="space-y-2">
-            <div className="h-4 w-48 rounded bg-[#BFA071]/5 animate-pulse" />
-            <div className="h-4 w-32 rounded bg-[#BFA071]/5 animate-pulse" />
+          <div className="space-y-3">
+            <div className="h-10 w-full rounded-xl bg-[#BFA071]/5 animate-pulse" />
+            <div className="grid grid-cols-4 gap-3">
+              {[0,1,2,3].map(i => <div key={i} className="h-14 rounded-xl bg-[#BFA071]/5 animate-pulse" />)}
+            </div>
           </div>
-        ) : !stats?.last_sync ? (
-          <p className="text-sm text-[#E0E6ED]/70 py-2">Синхронізацій ще не було.</p>
         ) : (
-          <div className="flex flex-wrap items-start gap-4">
-            <div className="flex items-center gap-2">
-              {stats.last_sync.status === "success" && (
-                <Badge className="gap-1 text-emerald-400 border-emerald-500/30 bg-emerald-500/10 rounded-xl">
-                  <CheckCircle className="w-3 h-3" /> Успішно
-                </Badge>
-              )}
-              {stats.last_sync.status === "error" && (
-                <Badge className="gap-1 text-red-400 border-red-500/30 bg-red-500/10 rounded-xl">
-                  <XCircle className="w-3 h-3" /> Помилка
-                </Badge>
-              )}
-              {stats.last_sync.status === "running" && (
-                <Badge className="gap-1 text-amber-400 border-amber-500/30 bg-amber-500/10 rounded-xl">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Виконується
-                </Badge>
-              )}
-            </div>
-            <div className="text-sm text-[#E0E6ED]/70 space-y-1">
-              <p>
-                <span className="font-medium text-[#BFA071]/60">Початок:</span>{" "}
-                {new Date(stats.last_sync.started_at).toLocaleString("uk-UA")}
-              </p>
-              {stats.last_sync.finished_at && (
-                <p>
-                  <span className="font-medium text-[#BFA071]/60">Кінець:</span>{" "}
-                  {new Date(stats.last_sync.finished_at).toLocaleString("uk-UA")}
+          <div className="space-y-4">
+            {/* Alerts */}
+            {syncStats?.alerts.map((a, i) => (
+              <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${
+                a.level === "error"   ? "bg-red-500/10 border-red-500/20 text-red-400"
+                : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                : "bg-[#BFA071]/5 border-[#BFA071]/15 text-[#BFA071]/80"
+              }`}>
+                {a.level === "error"   && <XCircle className="w-4 h-4 shrink-0" />}
+                {a.level === "warning" && <AlertTriangle className="w-4 h-4 shrink-0" />}
+                {a.level === "info"    && <Info className="w-4 h-4 shrink-0" />}
+                {a.message}
+              </div>
+            ))}
+
+            {/* Stat row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Reliability */}
+              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                  <TrendingUp className="w-3 h-3" /> Надійність
                 </p>
-              )}
-              {stats.last_sync.laws_processed != null && (
-                <p>
-                  <span className="font-medium text-[#BFA071]/60">Оброблено:</span>{" "}
-                  {stats.last_sync.laws_processed} законів
+                <p className={`text-2xl font-bold mt-1 ${
+                  syncStats?.reliability_30d.pct == null ? "text-[#E0E6ED]/30"
+                  : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
+                  : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
+                  : "text-red-400"
+                }`}>
+                  {syncStats?.reliability_30d.pct != null ? `${syncStats.reliability_30d.pct}%` : "—"}
                 </p>
-              )}
-              {stats.last_sync.error_message && (
-                <p className="text-red-400">{stats.last_sync.error_message}</p>
-              )}
+                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+                  {syncStats ? `${syncStats.reliability_30d.success}/${syncStats.reliability_30d.total} запусків` : "—"}
+                </p>
+              </div>
+
+              {/* Laws 30d */}
+              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" /> Законів / міс
+                </p>
+                <p className="text-2xl font-bold mt-1 text-white">
+                  {syncStats?.laws_30d != null ? syncStats.laws_30d.toLocaleString("uk-UA") : "—"}
+                </p>
+                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+                  {syncStats?.laws_7d != null ? `${syncStats.laws_7d} за 7 днів` : ""}
+                </p>
+              </div>
+
+              {/* Avg duration */}
+              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                  <Timer className="w-3 h-3" /> Сер. тривалість
+                </p>
+                <p className="text-2xl font-bold mt-1 text-white">
+                  {fmtDuration(syncStats?.avg_duration_sec ?? null)}
+                </p>
+                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">успішних запусків</p>
+              </div>
+
+              {/* Last success */}
+              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Останній успіх
+                </p>
+                <p className={`text-xl font-bold mt-1 ${
+                  !syncStats?.last_success_at ? "text-[#E0E6ED]/30"
+                  : Date.now() - new Date(syncStats.last_success_at).getTime() > 7 * 86400000 ? "text-red-400"
+                  : Date.now() - new Date(syncStats.last_success_at).getTime() > 3 * 86400000 ? "text-amber-400"
+                  : "text-emerald-400"
+                }`}>
+                  {fmtRelative(syncStats?.last_success_at ?? null)}
+                </p>
+                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+                  {syncStats?.last_success_at ? new Date(syncStats.last_success_at).toLocaleDateString("uk-UA") : ""}
+                </p>
+              </div>
             </div>
+
+            {/* Sparkline */}
+            {syncStats && syncStats.last_14_runs.length > 0 && (
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/40 mb-2">
+                  Останні {syncStats.last_14_runs.length} запусків
+                  <span className="ml-2 font-normal normal-case text-[#E0E6ED]/30">(висота = кількість законів)</span>
+                </p>
+                <Sparkline runs={syncStats.last_14_runs} />
+                <div className="flex items-center gap-4 mt-2 text-[10px] text-[#E0E6ED]/40">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> успіх</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" /> помилка</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400 inline-block" /> призупинено</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

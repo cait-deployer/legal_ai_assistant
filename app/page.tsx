@@ -265,6 +265,7 @@ function ChatPage() {
                             complexity_score: data._meta?.complexity_score,
                             user_intent: data._meta?.user_intent,
                             processing_time_ms: data._meta?.processing_time_ms,
+                            tokens_used: data._meta?.tokens_used ?? 0,
                         },
                     }),
                 }).catch(() => { });

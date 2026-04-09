@@ -25,7 +25,7 @@ import json
 import uuid
 import time
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -315,6 +315,32 @@ def _do_rada(
             log(f"[{i + 1}/{total}] {law_title[:65]}")
 
             text = get_law_text(law_id)
+            if text == "__RESTRICTED__":
+                # Фіксуємо ДСК-документ в Qdrant (без тексту, для статистики покриття)
+                log(f"  🔒 ДСК — зберігаємо запис без тексту", "warning")
+                scraped_at = datetime.now(timezone.utc).isoformat()
+                try:
+                    title_vector = embeddings.embed_query(law_title)
+                    upload_to_qdrant(
+                        "",
+                        {
+                            "source": law_title,
+                            "law_id": law_id,
+                            "category": category,
+                            "status": "ДСК",
+                            "law_url": law_url,
+                            "source_domain": "zakon.rada.gov.ua",
+                            "scraped_at": scraped_at,
+                            "chunk_index": 0,
+                        },
+                        title_vector,
+                        session_id=session_id,
+                    )
+                    processed += 1
+                except Exception as e:
+                    log(f"  ❌ Помилка збереження ДСК: {e}", "error")
+                _save_state(src, all_laws, i + 1, session_id)
+                continue
             if not text:
                 log(f"  ⚠️ Порожній текст — пропускаємо", "warning")
                 _save_state(src, all_laws, i + 1, session_id)
@@ -383,28 +409,70 @@ def _do_rada(
 def _do_supreme(session_id: str) -> None:
     src = "supreme"
     log = lambda m, lv="info": _log(src, m, lv)
-    log("⚖️ Синхронізація Верховного Суду...")
+    log("=" * 50)
+    log(f"⚖️ SUPREME SYNC (сесія {session_id[:8]}...)")
+    log("=" * 50)
     _sb_insert_log(src, session_id)
+    processed = 0
     try:
-        from supreme_scanner import run_supreme_sync
-        run_supreme_sync(session_id=session_id, log_callback=lambda m: log(m))
+        from supreme_scanner import get_supreme_reviews, process_supreme_pdf
+        from rada_to_supabase import get_existing_law_ids
+
+        reviews = get_supreme_reviews()
+        log(f"🔎 Знайдено оглядів: {len(reviews)}")
+
+        existing_ids = get_existing_law_ids()
+        log(f"📋 Вже в базі: {len(existing_ids)} документів")
+
+        total = len(reviews)
+
+        for i, review in enumerate(reviews):
+            # ── Перевірка запиту на паузу ─────────────────────────────────
+            with _lock:
+                pause = _sync[src]["pause_requested"]
+            if pause:
+                log(f"⏸️  Призупинено на {i}/{total}. Оброблено: {processed}", "warning")
+                _sb_update_log(
+                    session_id,
+                    status="paused",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    laws_processed=processed,
+                    error_message=f"Призупинено на документі {i}/{total}",
+                )
+                with _lock:
+                    _sync[src]["running"] = False
+                    _sync[src]["pause_requested"] = False
+                return
+
+            log(f"📥 [{i + 1}/{total}] Обробка: {review['title']}")
+            process_supreme_pdf(
+                review["url"], review["title"],
+                session_id=session_id, existing_ids=existing_ids,
+            )
+            processed += 1
+            log(f"  ✅ Готово! (всього оброблено: {processed})", "success")
+            time.sleep(2)
+
         _sb_update_log(
             session_id,
             status="success",
             finished_at=datetime.now(timezone.utc).isoformat(),
+            laws_processed=processed,
         )
-        log("✅ Верховний Суд завершено.", "success")
+        log(f"✅ Верховний Суд завершено. Оброблено: {processed} документів.", "success")
     except Exception as e:
         log(f"❌ {e}", "error")
         _sb_update_log(
             session_id,
             status="error",
             finished_at=datetime.now(timezone.utc).isoformat(),
+            laws_processed=processed,
             error_message=str(e),
         )
     finally:
         with _lock:
             _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
 
 
 def _do_wiki(session_id: str) -> None:
@@ -655,13 +723,26 @@ async def trigger_supreme():
     return {"ok": True, "session_id": session_id}
 
 
+@app.post("/admin/supreme/pause")
+async def pause_supreme():
+    """Запрошує паузу. Поточний документ буде допрацьовано, потім зупинка."""
+    with _lock:
+        if not _sync["supreme"]["running"]:
+            raise HTTPException(400, "Синхронізація не виконується")
+        _sync["supreme"]["pause_requested"] = True
+    return {"ok": True, "message": "Пауза запрошена — поточний документ буде завершено"}
+
+
 @app.get("/admin/supreme/logs")
 async def supreme_logs():
     with _lock:
         running = _sync["supreme"]["running"]
+        pause_req = _sync["supreme"]["pause_requested"]
         logs = list(_sync["supreme"]["live_logs"])
     return {
         "running": running,
+        "pause_requested": pause_req,
+        "can_resume": False,
         "live_logs": logs,
         "history": _sb_get_logs("supreme", 20),
     }
@@ -715,6 +796,148 @@ async def templates_logs():
     }
 
 
+# ── /admin/logs (unified history across all sources) ─────────────────────────
+
+@app.get("/admin/logs")
+async def all_source_logs(limit: int = 20):
+    """Повертає останні N записів sync_logs по всіх джерелах."""
+    if not _SB_URL:
+        return []
+    try:
+        with httpx.Client(timeout=10) as c:
+            r = c.get(
+                f"{_SB_URL}/rest/v1/sync_logs",
+                headers=_sb_hdrs(),
+                params={"order": "started_at.desc", "limit": str(limit)},
+            )
+            if r.status_code == 200:
+                return r.json()
+    except Exception as e:
+        print(f"⚠️ all_source_logs: {e}")
+    return []
+
+
+# ── /admin/users ──────────────────────────────────────────────────────────────
+
+@app.get("/admin/users/stats")
+async def get_users_stats():
+    """Aggregate counts for the users page header cards."""
+    if not _SB_URL:
+        return {"total": 0, "active_7d": 0, "not_onboarded": 0, "trial_used": 0, "by_tier": {}}
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    try:
+        with httpx.Client(timeout=15) as c:
+            hdrs = {**_sb_hdrs(), "Prefer": "count=exact"}
+
+            def _count(**kw) -> int:
+                r = c.get(
+                    f"{_SB_URL}/rest/v1/profiles",
+                    headers=hdrs,
+                    params={"select": "id", "limit": "0", **kw},
+                )
+                cr = r.headers.get("content-range", "*/0")
+                try:
+                    v = cr.split("/")[-1]
+                    return int(v) if v != "*" else 0
+                except (ValueError, IndexError):
+                    return 0
+
+            return {
+                "total":         _count(),
+                "active_7d":     _count(**{"last_active_at": f"gte.{week_ago}"}),
+                "not_onboarded": _count(**{"is_onboarded": "eq.false"}),
+                "trial_used":    _count(**{"trial_used": "eq.true"}),
+                "by_tier": {t: _count(**{"subscription_tier": f"eq.{t}"})
+                            for t in ("free", "daily", "standard", "pro")},
+            }
+    except Exception as e:
+        print(f"⚠️ users_stats: {e}")
+        return {"total": 0, "active_7d": 0, "not_onboarded": 0, "trial_used": 0, "by_tier": {}}
+
+
+@app.get("/admin/users")
+async def get_users(
+    search: str = "",
+    tier: str = "",
+    onboarded: str = "",
+    confirmed: str = "",
+    activity: str = "",
+    provider: str = "",
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    page: int = 1,
+    per_page: int = 25,
+):
+    """Paginated, filtered, sorted list of users from profiles table."""
+    if not _SB_URL:
+        return {"users": [], "total": 0}
+
+    _ALLOWED_SORT = {
+        "created_at", "last_active_at", "requests_this_month",
+        "total_requests", "session_count", "subscription_tier",
+    }
+    if sort_by not in _ALLOWED_SORT:
+        sort_by = "created_at"
+    if sort_dir not in ("asc", "desc"):
+        sort_dir = "desc"
+
+    select_cols = (
+        "id,email,full_name,avatar_url,subscription_tier,"
+        "is_onboarded,email_confirmed,trial_used,"
+        "last_active_at,last_city,last_country,last_country_code,"
+        "auth_provider,requests_this_month,monthly_limit,"
+        "total_requests,session_count,avg_session_duration,"
+        "created_at,last_ip,user_agent,marketing_consent,limit_reset_at"
+    )
+
+    params: dict = {
+        "select": select_cols,
+        "order": f"{sort_by}.{sort_dir}.nullslast",
+        "limit": str(per_page),
+        "offset": str((page - 1) * per_page),
+    }
+
+    if search:
+        safe = search.replace("*", "").replace("(", "").replace(")", "").replace(";", "")
+        params["or"] = f"(email.ilike.*{safe}*,full_name.ilike.*{safe}*)"
+    if tier:
+        params["subscription_tier"] = f"eq.{tier}"
+    if onboarded in ("true", "false"):
+        params["is_onboarded"] = f"eq.{onboarded}"
+    if confirmed in ("true", "false"):
+        params["email_confirmed"] = f"eq.{confirmed}"
+    if provider:
+        params["auth_provider"] = f"eq.{provider}"
+
+    now = datetime.now(timezone.utc)
+    if activity == "today":
+        params["last_active_at"] = f"gte.{now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()}"
+    elif activity == "7d":
+        params["last_active_at"] = f"gte.{(now - timedelta(days=7)).isoformat()}"
+    elif activity == "30d":
+        params["last_active_at"] = f"gte.{(now - timedelta(days=30)).isoformat()}"
+    elif activity == "inactive":
+        params["last_active_at"] = f"lt.{(now - timedelta(days=30)).isoformat()}"
+
+    try:
+        with httpx.Client(timeout=15) as c:
+            hdrs = {**_sb_hdrs(), "Prefer": "count=exact"}
+            r = c.get(f"{_SB_URL}/rest/v1/profiles", headers=hdrs, params=params)
+            total = 0
+            cr = r.headers.get("content-range", "")
+            if "/" in cr:
+                try:
+                    v = cr.split("/")[-1]
+                    total = int(v) if v != "*" else 0
+                except (ValueError, IndexError):
+                    pass
+            users = r.json() if r.status_code == 200 else []
+            return {"users": users, "total": total}
+    except Exception as e:
+        print(f"⚠️ get_users: {e}")
+        return {"users": [], "total": 0}
+
+
 # ── /admin/laws/text ──────────────────────────────────────────────────────────
 
 @app.get("/admin/laws/text")
@@ -759,7 +982,13 @@ async def get_law_text_endpoint(law_id: str):
 # ── /admin/base/docs ──────────────────────────────────────────────────────────
 
 @app.get("/admin/base/docs")
-async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = None):
+async def get_base_docs(
+    page: int = 1,
+    per_page: int = 25,
+    source: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+):
     """Список унікальних документів з Qdrant (chunk_index=0 = один запис на закон)."""
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -776,14 +1005,10 @@ async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = 
         must = [FieldCondition(key="chunk_index", match=MatchValue(value=0))]
         if source and source in domain_map:
             must.append(FieldCondition(key="source_domain", match=MatchValue(value=domain_map[source])))
+        if category:
+            must.append(FieldCondition(key="category", match=MatchValue(value=category)))
 
         scroll_filter = Filter(must=must)
-
-        total = client.count(
-            collection_name=COLLECTION_NAME,
-            count_filter=scroll_filter,
-            exact=True,
-        ).count
 
         # Qdrant scroll не підтримує числовий offset → збираємо всі і нарізаємо
         all_points: list = []
@@ -800,6 +1025,16 @@ async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = 
             if next_page_offset is None:
                 break
 
+        # Python-рівень: пошук по назві або law_id (Qdrant не підтримує substring без індексу)
+        if search:
+            q = search.strip().lower()
+            all_points = [
+                p for p in all_points
+                if q in (p.payload.get("source") or "").lower()
+                or q in (p.payload.get("law_id") or "").lower()
+            ]
+
+        total = len(all_points)
         start = (page - 1) * per_page
         page_points = all_points[start: start + per_page]
 
@@ -823,12 +1058,296 @@ async def get_base_docs(page: int = 1, per_page: int = 25, source: str | None = 
         raise HTTPException(500, str(e))
 
 
+@app.get("/admin/base/categories")
+async def get_base_categories():
+    """Унікальні категорії з Qdrant для фільтра."""
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_storage import get_client, COLLECTION_NAME
+
+        client = get_client()
+        scroll_filter = Filter(must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))])
+
+        categories: set[str] = set()
+        next_page_offset = None
+        while True:
+            batch, next_page_offset = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=scroll_filter,
+                with_payload=["category"],
+                limit=1000,
+                offset=next_page_offset,
+            )
+            for p in batch:
+                cat = (p.payload or {}).get("category", "")
+                if cat:
+                    categories.add(cat)
+            if next_page_offset is None:
+                break
+
+        return sorted(categories)
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ── /admin/sync/stats — аналітика надійності автосинхронізації ───────────────
+
+@app.get("/admin/sync/stats")
+async def get_sync_stats():
+    """Надійність, sparkline і алерти для дашборда та сторінки синхронізації."""
+    import httpx as _httpx
+
+    now = datetime.now(timezone.utc)
+    month_ago = (now - timedelta(days=30)).isoformat()
+    week_ago  = (now - timedelta(days=7)).isoformat()
+
+    # Останні 100 запусків за 30 днів
+    try:
+        r = _httpx.get(
+            f"{_SB_URL}/rest/v1/sync_logs",
+            params={"started_at": f"gte.{month_ago}", "order": "started_at.desc", "limit": "100"},
+            headers={**_sb_hdrs(), "Prefer": "return=representation"},
+            timeout=8,
+        )
+        all_logs = r.json() if r.status_code == 200 else []
+    except Exception:
+        all_logs = []
+
+    terminal = [l for l in all_logs if l.get("status") in ("success", "error", "paused")]
+
+    # ── Надійність ─────────────────────────────────────────────────────────────
+    total   = len(terminal)
+    success = sum(1 for l in terminal if l["status"] == "success")
+    errors  = sum(1 for l in terminal if l["status"] == "error")
+    paused  = sum(1 for l in terminal if l["status"] == "paused")
+    pct     = round(success / total * 100, 1) if total > 0 else None
+
+    # ── Закони ─────────────────────────────────────────────────────────────────
+    laws_30d = sum(l.get("laws_processed") or 0 for l in terminal)
+    laws_7d  = sum(l.get("laws_processed") or 0 for l in terminal
+                   if (l.get("started_at") or "") >= week_ago)
+
+    # ── Середня тривалість (успішні) ───────────────────────────────────────────
+    durations: list[float] = []
+    for l in terminal:
+        if l["status"] == "success" and l.get("started_at") and l.get("finished_at"):
+            try:
+                s = datetime.fromisoformat(l["started_at"].replace("Z", "+00:00"))
+                f = datetime.fromisoformat(l["finished_at"].replace("Z", "+00:00"))
+                durations.append((f - s).total_seconds())
+            except Exception:
+                pass
+    avg_duration = round(sum(durations) / len(durations)) if durations else None
+
+    # ── Серія провалів ─────────────────────────────────────────────────────────
+    consecutive_failures = 0
+    for l in terminal:
+        if l["status"] == "error":
+            consecutive_failures += 1
+        else:
+            break
+
+    last_success = next((l for l in terminal if l["status"] == "success"), None)
+    last_failure = next((l for l in terminal if l["status"] == "error"),   None)
+
+    # ── Sparkline: останні 14 запусків (найстаріший → найновіший) ─────────────
+    last_14: list[dict] = []
+    for l in terminal[:14]:
+        dur = None
+        if l.get("started_at") and l.get("finished_at"):
+            try:
+                s = datetime.fromisoformat(l["started_at"].replace("Z", "+00:00"))
+                f = datetime.fromisoformat(l["finished_at"].replace("Z", "+00:00"))
+                dur = round((f - s).total_seconds())
+            except Exception:
+                pass
+        last_14.append({
+            "status":         l["status"],
+            "laws_processed": l.get("laws_processed") or 0,
+            "duration_sec":   dur,
+            "started_at":     l.get("started_at"),
+            "source":         l.get("source"),
+        })
+    last_14.reverse()
+
+    # ── Алерти ─────────────────────────────────────────────────────────────────
+    alerts: list[dict] = []
+    if consecutive_failures >= 3:
+        alerts.append({"level": "error", "message": f"{consecutive_failures} провали поспіль — перевірте логи синхронізації"})
+    elif consecutive_failures == 1:
+        alerts.append({"level": "warning", "message": "Останній запуск завершився помилкою"})
+
+    if last_success and last_success.get("finished_at"):
+        try:
+            fin = datetime.fromisoformat(last_success["finished_at"].replace("Z", "+00:00"))
+            days_since = (now - fin).days
+            if days_since >= 7:
+                alerts.append({"level": "error", "message": f"База не оновлювалась {days_since} днів!"})
+            elif days_since >= 3:
+                alerts.append({"level": "warning", "message": f"База не оновлювалась {days_since} дні"})
+        except Exception:
+            pass
+    elif not last_success and total > 0:
+        alerts.append({"level": "error", "message": "Жодної успішної синхронізації за 30 днів"})
+
+    if not any(a["level"] == "error" for a in alerts):
+        last5 = terminal[:5]
+        if len(last5) == 5 and all((l.get("laws_processed") or 0) == 0 for l in last5):
+            alerts.append({"level": "info", "message": "База актуальна — нових законів не з'явилось"})
+
+    return {
+        "reliability_30d": {"total": total, "success": success, "error": errors, "paused": paused, "pct": pct},
+        "laws_30d":              laws_30d,
+        "laws_7d":               laws_7d,
+        "avg_duration_sec":      avg_duration,
+        "consecutive_failures":  consecutive_failures,
+        "last_success_at":       last_success.get("finished_at") if last_success else None,
+        "last_failure_at":       last_failure.get("finished_at") if last_failure else None,
+        "last_14_runs":          last_14,
+        "alerts":                alerts,
+    }
+
+
+# ── /admin/rada/coverage — покриття бази знань по розділах ────────────────────
+
+# Кеш Ради (щоб не довбати сайт при кожному запиті)
+_rada_totals_cache: dict[str, int] = {}   # code -> total_docs_on_rada
+_rada_cache_time: float = 0.0
+_RADA_CACHE_TTL = 24 * 60 * 60  # 24 год
+
+
+@app.get("/admin/rada/coverage")
+async def get_rada_coverage(refresh: bool = False):
+    """
+    Покриття бази знань: для кожного розділу Ради порівнює
+    кількість документів на сайті vs у нас в Qdrant.
+    Повертає масив секцій з health-індикатором.
+    """
+    import asyncio as _asyncio
+    import time as _time
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from qdrant_storage import get_client, COLLECTION_NAME
+    from rada_scanner import ALL_THEMES, get_total_pages
+
+    # ── 1. Qdrant: одним scrollом збираємо всі chunk_index=0 записи Ради ──
+    client = get_client()
+    qdrant_filter = Filter(must=[
+        FieldCondition(key="chunk_index",     match=MatchValue(value=0)),
+        FieldCondition(key="source_domain",   match=MatchValue(value="zakon.rada.gov.ua")),
+    ])
+
+    all_points: list = []
+    next_offset = None
+    while True:
+        batch, next_offset = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qdrant_filter,
+            with_payload=["category", "status", "scraped_at"],
+            limit=2000,
+            offset=next_offset,
+        )
+        all_points.extend(batch)
+        if next_offset is None:
+            break
+
+    # Групуємо по category
+    qdrant: dict[str, dict] = {}
+    for p in all_points:
+        cat = (p.payload or {}).get("category", "")
+        if not cat:
+            continue
+        if cat not in qdrant:
+            qdrant[cat] = {"total": 0, "restricted": 0, "last_scraped_at": None}
+        qdrant[cat]["total"] += 1
+        if (p.payload or {}).get("status") == "ДСК":
+            qdrant[cat]["restricted"] += 1
+        sat = (p.payload or {}).get("scraped_at")
+        if sat and (not qdrant[cat]["last_scraped_at"] or sat > qdrant[cat]["last_scraped_at"]):
+            qdrant[cat]["last_scraped_at"] = sat
+
+    # ── 2. Rada totals — з кешу або свіжий запит ──────────────────────────
+    global _rada_totals_cache, _rada_cache_time
+    now = _time.time()
+    if refresh or not _rada_totals_cache or (now - _rada_cache_time) > _RADA_CACHE_TTL:
+        # Паралельний запит до Ради (max 5 одночасно)
+        sem = _asyncio.Semaphore(5)
+        async def _fetch(code: str) -> tuple[str, int]:
+            async with sem:
+                pages = await _asyncio.to_thread(get_total_pages, code)
+                return code, pages * 50
+        results = await _asyncio.gather(*[_fetch(code) for code, _ in ALL_THEMES])
+        _rada_totals_cache = dict(results)
+        _rada_cache_time = now
+
+    # ── 3. Останній синк Ради з sync_logs ─────────────────────────────────
+    last_sync_at: str | None = None
+    try:
+        import httpx as _httpx
+        r = _httpx.get(
+            f"{_SB_URL}/rest/v1/sync_logs",
+            params={"source": "eq.rada", "order": "finished_at.desc", "limit": "1"},
+            headers={**_sb_hdrs(), "Prefer": "return=representation"},
+            timeout=5,
+        )
+        rows = r.json()
+        if rows:
+            last_sync_at = rows[0].get("finished_at")
+    except Exception:
+        pass
+
+    # ── 4. Будуємо відповідь ───────────────────────────────────────────────
+    sections = []
+    for code, label in ALL_THEMES:
+        our  = qdrant.get(code, {"total": 0, "restricted": 0, "last_scraped_at": None})
+        rada = _rada_totals_cache.get(code)
+
+        our_total      = our["total"]
+        our_restricted = our["restricted"]
+        our_public     = our_total - our_restricted
+
+        coverage_pct: float | None = None
+        if rada and rada > 0:
+            coverage_pct = round(our_total / rada * 100, 1)
+
+        # Колір здоров'я
+        if coverage_pct is None:
+            health = "unknown"
+        elif coverage_pct >= 80:
+            health = "good"
+        elif coverage_pct >= 40:
+            health = "warning"
+        else:
+            health = "critical"
+
+        sections.append({
+            "code":            code,
+            "label":           label,
+            "rada_total":      rada,
+            "our_total":       our_total,
+            "our_restricted":  our_restricted,
+            "our_public":      our_public,
+            "coverage_pct":    coverage_pct,
+            "last_scraped_at": our["last_scraped_at"],
+            "health":          health,
+        })
+
+    return {
+        "sections":      sections,
+        "last_sync_at":  last_sync_at,
+        "cache_age_sec": int(now - _rada_cache_time) if _rada_cache_time else None,
+    }
+
+
 # ── /ask — основний чат-ендпоінт ──────────────────────────────────────────────
 
 class AskRequest(BaseModel):
     question: str
     max_docs: int = 8          # max chunks from Qdrant (from user's plan)
     filter_domains: list[str] | None = None  # allowed source domains (from plan features)
+
+
+_CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
 
 
 @app.post("/ask")
@@ -887,8 +1406,9 @@ async def ask(body: AskRequest):
 
     context = "\n\n".join(context_parts) if context_parts else "Контекст відсутній."
 
-    # 4. Call Gemini
+    # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
+        import json as _json
         import vertexai
         from vertexai.generative_models import GenerativeModel, GenerationConfig
 
@@ -903,6 +1423,7 @@ async def ask(body: AskRequest):
             "Ти — досвідчений український адвокат. Надавай точні відповіді виключно на основі наданого контексту.",
         )
         temperature = settings_cache.get_float("temperature", 0.1)
+        top_p       = settings_cache.get_float("top_p", 0.8)
 
         prompt = (
             f"Контекст з українського законодавства (кожен фрагмент пронумерований):\n\n{context}\n\n"
@@ -912,21 +1433,66 @@ async def ask(body: AskRequest):
             "Якщо контекст не містить потрібної інформації — чесно повідом про це."
         )
 
-        top_p = settings_cache.get_float("top_p", 0.8)
+        clf_prompt = (
+            f"Питання: {question}\n\n"
+            "Проаналізуй і поверни JSON:\n"
+            '{"sentiment": "neutral"|"urgent"|"frustrated", '
+            '"complexity_score": 1|2|3, '
+            '"user_intent": "консультація"|"документи"|"захист прав"|"роз\'яснення"}\n\n'
+            "sentiment — емоційний стан: neutral (спокійний), urgent (терміново), frustrated (незадоволений).\n"
+            "complexity_score — складність: 1 просте, 2 середнє, 3 складне/комплексне.\n"
+            "user_intent — мета: консультація (загальне питання), документи (потрібен шаблон/форма), "
+            "захист прав (суперечка/скарга), роз'яснення (просить пояснити поняття/закон)."
+        )
 
-        model = GenerativeModel(model_name, system_instruction=system_prompt)
-        response = await _asyncio.to_thread(
-            model.generate_content,
-            prompt,
-            generation_config=GenerationConfig(temperature=temperature, top_p=top_p),
+        main_model = GenerativeModel(model_name, system_instruction=system_prompt)
+        clf_model  = GenerativeModel("gemini-2.0-flash-lite")
+
+        response, clf_response = await _asyncio.gather(
+            _asyncio.to_thread(
+                main_model.generate_content,
+                prompt,
+                generation_config=GenerationConfig(temperature=temperature, top_p=top_p),
+            ),
+            _asyncio.to_thread(
+                clf_model.generate_content,
+                clf_prompt,
+                generation_config=GenerationConfig(
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                ),
+            ),
         )
         answer = response.text
+
+        tokens_used = 0
+        try:
+            tokens_used = response.usage_metadata.total_token_count or 0
+        except Exception:
+            pass
+
     except Exception as e:
         raise HTTPException(500, f"AI error: {e}")
+
+    # Parse AI classification; fall back to defaults if model returns garbage
+    try:
+        classification = _json.loads(clf_response.text)
+        if classification.get("sentiment") not in ("neutral", "urgent", "frustrated"):
+            classification["sentiment"] = "neutral"
+        if classification.get("complexity_score") not in (1, 2, 3):
+            classification["complexity_score"] = 1
+        if classification.get("user_intent") not in ("консультація", "документи", "захист прав", "роз'яснення"):
+            classification["user_intent"] = "консультація"
+    except Exception:
+        classification = dict(_CLF_FALLBACK)
 
     # Filter citations — keep only those actually referenced in the answer
     used_nums = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
     used_citations = [c for c in citations if c["num"] in used_nums] or citations[:3]
+
+    # Category — most common category from retrieved Qdrant chunks
+    cats = [r["out_metadata"].get("category", "") for r in results if r["out_metadata"].get("category")]
+    category = max(set(cats), key=cats.count) if cats else "Загальне"
 
     elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -934,7 +1500,12 @@ async def ask(body: AskRequest):
         "answer": answer,
         "references": used_citations,
         "templates": [],
-        "_meta": {"processing_time_ms": elapsed_ms},
+        "_meta": {
+            "processing_time_ms": elapsed_ms,
+            "tokens_used": tokens_used,
+            "category": category,
+            **classification,
+        },
     }
 
 

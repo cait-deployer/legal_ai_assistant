@@ -267,8 +267,8 @@ export default function AiSettingsPage() {
             <Bot className="w-8 h-8 text-[#BFA071]" />
           </div>
           <div>
-            <h1 className="text-3xl font-serif font-bold text-white">AI Налаштування</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Service Account, моделі, промпт — все зберігається в БД</p>
+            <h1 className="text-3xl font-serif font-bold text-white">AI Модель</h1>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Service Account, модель, системний промпт</p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">

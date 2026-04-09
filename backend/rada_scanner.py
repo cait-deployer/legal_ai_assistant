@@ -358,8 +358,8 @@ def get_law_text(law_id: str) -> str:
                 md = re.sub(r'\n{3,}', '\n\n', md).strip()
                 if len(md) > 100:
                     if _is_restricted(md):
-                        print(f"🔒 {law_id}: службового використання — пропускаємо")
-                        return ""
+                        print(f"🔒 {law_id}: службового використання — фіксуємо як ДСК")
+                        return "__RESTRICTED__"
                     return md
     except Exception as e:
         print(f"⚠️  get_law_text /print ({law_id}): {e}")
@@ -387,8 +387,8 @@ def get_law_text(law_id: str) -> str:
         md = re.sub(r'\n{3,}', '\n\n', md).strip()
         if len(md) > 100:
             if _is_restricted(md):
-                print(f"🔒 {law_id}: службового використання — пропускаємо")
-                return ""
+                print(f"🔒 {law_id}: службового використання — фіксуємо як ДСК")
+                return "__RESTRICTED__"
             return md
         return ""
 

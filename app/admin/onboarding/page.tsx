@@ -173,7 +173,7 @@ export default function OnboardingAdminPage() {
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Онбординг</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Кроки, варіанти відповідей та аналітика</p>
+            <p className="text-sm text-[#E0E6ED]/70 mt-1">Вступний опитувальник — кроки та варіанти відповідей</p>
           </div>
         </div>
       </div>

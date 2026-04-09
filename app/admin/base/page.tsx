@@ -36,15 +36,6 @@ const SOURCE_OPTIONS = [
   { value: "wiki", label: "Wiki" },
 ]
 
-const CATEGORY_OPTIONS = [
-  { value: "", label: "Всі категорії" },
-  { value: "Судова практика", label: "Судова практика" },
-  { value: "Роз'яснення та шаблони", label: "Роз'яснення" },
-  { value: "h14", label: "Збройні сили" },
-  { value: "h25", label: "Кримінальне право" },
-  { value: "h19", label: "Трудові відносини" },
-  { value: "h20", label: "Соціальний захист" },
-]
 
 const PER_PAGE_OPTIONS = [12, 25, 50, 100]
 
@@ -300,6 +291,7 @@ export default function BasePage() {
 
   const [displayMode, setDisplayMode] = useState<"cards" | "table">("table")
   const [activeDoc, setActiveDoc] = useState<Law | null>(null)
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchInput = (val: string) => {
@@ -355,6 +347,13 @@ export default function BasePage() {
   }, [search, sourceFilter, categoryFilter, currentPage, itemsPerPage])
 
   useEffect(() => { fetchDocs() }, [fetchDocs])
+
+  useEffect(() => {
+    fetch("/api/admin/base/categories")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setCategoryOptions(data) })
+      .catch(() => {})
+  }, [])
 
   const hasFilters = searchInput || sourceFilter || categoryFilter
   const from = total === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1
@@ -449,14 +448,17 @@ export default function BasePage() {
               </div>
 
               {/* Category filter */}
-              <div className="relative h-10 shrink-0">
-                <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
-                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#BFA071]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#BFA071]/40 appearance-none cursor-pointer">
-                  {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
-              </div>
+              {categoryOptions.length > 0 && (
+                <div className="relative h-10 shrink-0">
+                  <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
+                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+                    className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#BFA071]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#BFA071]/40 appearance-none cursor-pointer">
+                    <option value="">Всі категорії</option>
+                    {categoryOptions.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
+                </div>
+              )}
 
               {/* Clear */}
               {hasFilters && (

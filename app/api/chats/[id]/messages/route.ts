@@ -10,6 +10,12 @@ function admin() {
   )
 }
 
+function extractIp(request: Request): string | null {
+  const fwd = request.headers.get("x-forwarded-for")
+  if (fwd) return fwd.split(",")[0].trim()
+  return request.headers.get("x-real-ip") ?? request.headers.get("cf-connecting-ip") ?? null
+}
+
 // POST /api/chats/[id]/messages — save a message + optional analytics row
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: chatId } = await params
@@ -17,6 +23,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
+  const clientIp = extractIp(request)
   const body = await request.json()
   const { role, content, analytics } = body as {
     role: "user" | "assistant"
@@ -29,7 +36,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       complexity_score?: number
       user_intent?: string
       processing_time_ms?: number
-      user_ip?: string
+      tokens_used?: number
     }
   }
 
@@ -117,7 +124,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         complexity_score:   analytics.complexity_score ?? null,
         user_intent:        analytics.user_intent ?? null,
         processing_time_ms: analytics.processing_time_ms ?? null,
-        user_ip:            analytics.user_ip ?? null,
+        tokens_used:        analytics.tokens_used ?? 0,
+        user_ip:            clientIp,   // read from server headers, not from client body
       })
     }
   }
