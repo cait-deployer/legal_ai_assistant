@@ -107,8 +107,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     const vd = await vertexRes.json()
-    const raw = vd?.candidates?.[0]?.content?.parts?.[0]?.text ?? ""
-    console.log("[name] raw response:", raw)
+    // gemini-2.5 thinking models have multiple parts: [thinking, actual_response]
+    const parts: { text?: string }[] = vd?.candidates?.[0]?.content?.parts ?? []
+    const raw = parts.map((p) => p.text ?? "").filter(Boolean).at(-1) ?? ""
+    console.log("[name] raw response:", raw.slice(0, 200))
     const match = raw.match(/\{[\s\S]*\}/)
     if (match) {
       const parsed = JSON.parse(match[0])
