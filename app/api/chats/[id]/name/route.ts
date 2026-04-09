@@ -61,51 +61,66 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const modelName  = settingsMap["ai_model"]             ?? "gemini-2.0-flash-lite"
   const location   = settingsMap["vertex_location"]      ?? "us-central1"
 
+  console.log("[name] settings loaded:", { hasSa: !!saJson, modelName, location })
+
   let title    = ""
   let category = ""
 
-  if (saJson) {
-    try {
-      const saObj   = JSON.parse(saJson)
-      const project = saObj.project_id as string
-      const token   = await getVertexToken(saJson)
-
-      if (token && project) {
-        const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${modelName}:generateContent`
-
-        const vertexRes = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            contents: [{
-              role: "user",
-              parts: [{ text: `${NAMING_PROMPT}\n\nЗапитання: ${question}\n\nВідповідь: ${answer.slice(0, 500)}` }],
-            }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 100 },
-          }),
-          signal: AbortSignal.timeout(10000),
-        })
-
-        if (vertexRes.ok) {
-          const vd = await vertexRes.json()
-          const raw = vd?.candidates?.[0]?.content?.parts?.[0]?.text ?? ""
-          const match = raw.match(/\{[\s\S]*\}/)
-          if (match) {
-            const parsed = JSON.parse(match[0])
-            title    = parsed.title    ?? ""
-            category = parsed.category ?? ""
-          }
-        }
-      }
-    } catch {
-      // naming failed — leave title empty
-    }
+  if (!saJson) {
+    console.error("[name] service_account_json not found in app_settings")
+    return NextResponse.json({ ok: false, error: "no_service_account" })
   }
 
-  if (!title) return NextResponse.json({ ok: false })
+  try {
+    const saObj   = JSON.parse(saJson)
+    const project = saObj.project_id as string
+    const token   = await getVertexToken(saJson)
+
+    console.log("[name] vertex token:", token ? "ok" : "FAILED", "project:", project)
+
+    if (!token) return NextResponse.json({ ok: false, error: "token_failed" })
+    if (!project) return NextResponse.json({ ok: false, error: "no_project_id" })
+
+    const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${modelName}:generateContent`
+    console.log("[name] calling:", endpoint)
+
+    const vertexRes = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [{ text: `${NAMING_PROMPT}\n\nЗапитання: ${question}\n\nВідповідь: ${answer.slice(0, 500)}` }],
+        }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 100 },
+      }),
+      signal: AbortSignal.timeout(10000),
+    })
+
+    if (!vertexRes.ok) {
+      const errText = await vertexRes.text()
+      console.error("[name] vertex error:", vertexRes.status, errText)
+      return NextResponse.json({ ok: false, error: `vertex_${vertexRes.status}`, detail: errText })
+    }
+
+    const vd = await vertexRes.json()
+    const raw = vd?.candidates?.[0]?.content?.parts?.[0]?.text ?? ""
+    console.log("[name] raw response:", raw)
+    const match = raw.match(/\{[\s\S]*\}/)
+    if (match) {
+      const parsed = JSON.parse(match[0])
+      title    = parsed.title    ?? ""
+      category = parsed.category ?? ""
+    }
+  } catch (e) {
+    console.error("[name] exception:", e)
+    return NextResponse.json({ ok: false, error: String(e) })
+  }
+
+  if (!title) return NextResponse.json({ ok: false, error: "empty_title" })
 
   // Update chat title
   await admin()
