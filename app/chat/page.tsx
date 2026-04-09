@@ -22,6 +22,7 @@ import {
     Plus,
     Lock,
     Sparkles,
+    Menu,
 } from 'lucide-react';
 import { ChatSidebar } from '@/components/chat-sidebar';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -94,7 +95,7 @@ function MarkdownText({ text, refs, onCitationOpen }: {
                         <button
                             key={`${i}-${j}`}
                             onClick={() => citation && onCitationOpen(citation)}
-                            className="inline-flex items-center justify-center align-top mt-0.5 mx-0.5 min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-[#0A0E1A] bg-[#C9A84C] rounded-sm hover:bg-[#E2C47A] shadow-[0_0_10px_rgba(201,168,76,0.3)] transition-all active:scale-90"
+                            className="inline-flex items-center justify-center align-middle mx-0.5 min-w-[22px] h-[22px] px-1.5 text-[10px] font-bold text-[#0A0E1A] bg-[#C9A84C] rounded hover:bg-[#E2C47A] shadow-[0_0_10px_rgba(201,168,76,0.3)] transition-all active:scale-90 touch-manipulation"
                         >
                             {num}
                         </button>
@@ -130,6 +131,7 @@ function ChatPage() {
     const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
     const [isFirstMessage, setIsFirstMessage] = useState(true);
     const [limitExceeded, setLimitExceeded] = useState(false);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -309,23 +311,32 @@ function ChatPage() {
                 currentChatId={currentChatId}
                 onNewChat={() => router.push('/chat')}
                 onSelectChat={(id) => router.push(`/chat?chat=${id}`)}
+                isOpen={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
             />
 
-            <main className="flex-1 flex flex-col relative z-10 bg-[#0d1120]/40 backdrop-blur-sm border-l border-[#C9A84C]/10">
+            <main className="flex-1 flex flex-col relative z-10 bg-[#0d1120]/40 backdrop-blur-sm border-l border-[#C9A84C]/10 min-w-0">
                 {/* Header */}
-                <header className="h-16 border-b border-[#C9A84C]/10 flex items-center px-6 justify-between bg-[#0A0E1A]/60 backdrop-blur-md shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-[#C9A84C]/10 p-2 rounded-lg border border-[#C9A84C]/20">
-                            <Scale className="h-5 w-5 text-[#C9A84C]" />
+                <header className="h-14 md:h-16 border-b border-[#C9A84C]/10 flex items-center px-3 md:px-6 gap-3 justify-between bg-[#0A0E1A]/60 backdrop-blur-md shrink-0">
+                    <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                        {/* Hamburger — mobile only */}
+                        <button
+                            onClick={() => setSidebarOpen(true)}
+                            className="md:hidden w-9 h-9 flex items-center justify-center rounded-xl text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-all shrink-0"
+                        >
+                            <Menu className="w-5 h-5" />
+                        </button>
+                        <div className="bg-[#C9A84C]/10 p-1.5 md:p-2 rounded-lg border border-[#C9A84C]/20 shrink-0">
+                            <Scale className="h-4 w-4 md:h-5 md:w-5 text-[#C9A84C]" />
                         </div>
-                        <h1 className="font-serif text-lg font-bold tracking-tight">
-                            <span className="text-[#C9A84C]">URAI</span> — Юридичний асистент
+                        <h1 className="font-serif text-base md:text-lg font-bold tracking-tight truncate">
+                            <span className="text-[#C9A84C]">URAI</span><span className="hidden sm:inline"> — Юридичний асистент</span>
                         </h1>
                     </div>
                 </header>
 
                 {/* Chat Area */}
-                <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-8 scroll-smooth">
+                <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-8 scroll-smooth">
                     <div className="max-w-3xl mx-auto">
                         {historyLoading ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 pt-20">
@@ -333,33 +344,33 @@ function ChatPage() {
                                 <p className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em]">Відновлення історії...</p>
                             </div>
                         ) : messages.length === 0 ? (
-                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center pt-10">
-                                <div className="w-20 h-20 rounded-full bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(201,168,76,0.1)]">
-                                    <Scale className="h-10 w-10 text-[#C9A84C]" />
+                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center pt-6 md:pt-10">
+                                <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center mx-auto mb-4 md:mb-6 shadow-[0_0_30px_rgba(201,168,76,0.1)]">
+                                    <Scale className="h-8 w-8 md:h-10 md:w-10 text-[#C9A84C]" />
                                 </div>
-                                <h2 className="font-serif text-3xl font-bold mb-4 text-white">Привіт! Я <span className="text-[#C9A84C]">URAI</span></h2>
-                                <p className="text-[#E0E6ED]/60 text-sm max-w-md mx-auto mb-10 leading-relaxed">
+                                <h2 className="font-serif text-2xl md:text-3xl font-bold mb-3 md:mb-4 text-white">Привіт! Я <span className="text-[#C9A84C]">URAI</span></h2>
+                                <p className="text-[#E0E6ED]/60 text-sm max-w-md mx-auto mb-6 md:mb-10 leading-relaxed px-2">
                                     Задайте будь-яке юридичне запитання. Я проаналізую законодавство України та надам відповідь з посиланнями.
                                 </p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 text-left">
                                     {SAMPLE_QUESTIONS.map((q, i) => (
-                                        <button key={i} onClick={() => handleSend(q.text)} className="flex items-center gap-3 p-4 rounded-2xl border border-[#C9A84C]/10 bg-[#0d1120]/50 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 transition-all group">
-                                            <div className="text-[#C9A84C] group-hover:scale-110 transition-transform">{q.icon}</div>
+                                        <button key={i} onClick={() => handleSend(q.text)} className="flex items-center gap-3 p-3.5 md:p-4 rounded-2xl border border-[#C9A84C]/10 bg-[#0d1120]/50 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 active:scale-[0.98] transition-all group text-left">
+                                            <div className="text-[#C9A84C] group-hover:scale-110 transition-transform shrink-0">{q.icon}</div>
                                             <span className="text-xs font-medium text-[#E0E6ED]/80">{q.text}</span>
                                         </button>
                                     ))}
                                 </div>
                             </motion.div>
                         ) : (
-                            <div className="space-y-8 pb-10">
+                            <div className="space-y-5 md:space-y-8 pb-6 md:pb-10">
                                 {messages.map(msg => (
-                                    <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                                        <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xl ${msg.role === 'ai' ? 'bg-[#0d1120] border border-[#C9A84C]/30 text-[#C9A84C]' : 'bg-[#C9A84C] text-[#0A0E1A]'
+                                    <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex gap-2 md:gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                                        <div className={`h-8 w-8 md:h-10 md:w-10 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0 shadow-xl ${msg.role === 'ai' ? 'bg-[#0d1120] border border-[#C9A84C]/30 text-[#C9A84C]' : 'bg-[#C9A84C] text-[#0A0E1A]'
                                             }`}>
-                                            {msg.role === 'ai' ? <Scale className="h-6 w-6" /> : <User className="h-6 w-6" />}
+                                            {msg.role === 'ai' ? <Scale className="h-4 w-4 md:h-6 md:w-6" /> : <User className="h-4 w-4 md:h-6 md:w-6" />}
                                         </div>
-                                        <div className={`max-w-[85%] space-y-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                                            <Card className={`p-5 text-sm leading-relaxed border-none shadow-2xl ${msg.role === 'user'
+                                        <div className={`max-w-[88%] md:max-w-[85%] space-y-1.5 md:space-y-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                                            <Card className={`p-3.5 md:p-5 text-sm leading-relaxed border-none shadow-2xl ${msg.role === 'user'
                                                 ? 'bg-[#C9A84C]/10 text-[#E0E6ED] rounded-3xl rounded-tr-none'
                                                 : 'bg-[#0d1120]/90 text-[#E0E6ED] rounded-3xl rounded-tl-none border-l-2 border-l-[#C9A84C] font-serif tracking-wide'
                                                 }`}>
@@ -400,7 +411,7 @@ function ChatPage() {
                 </div>
 
                 {/* Input Area */}
-                <footer className="p-4 sm:p-8 bg-[#0A0E1A]/80 backdrop-blur-md border-t border-[#C9A84C]/10 shrink-0">
+                <footer className="p-3 md:p-6 lg:p-8 bg-[#0A0E1A]/80 backdrop-blur-md border-t border-[#C9A84C]/10 shrink-0 safe-area-pb">
                     <div className="max-w-3xl mx-auto space-y-3">
                         {limitExceeded && (
                             <div className="flex items-center gap-4 px-5 py-4 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/30 shadow-lg shadow-[#C9A84C]/5">

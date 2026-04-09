@@ -2,6 +2,16 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* iOS safe area support */
+.safe-area-pb {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* Prevent iOS double-tap zoom on buttons */
+button, a {
+  touch-action: manipulation;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

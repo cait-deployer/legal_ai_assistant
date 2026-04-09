@@ -507,17 +507,84 @@ def _do_supreme(session_id: str) -> None:
 
 def _do_wiki(session_id: str) -> None:
     src = "wiki"
-    _log(src, "📚 Wiki — синхронізація поки не реалізована (заглушка)", "warning")
+    log = lambda m, lv="info": _log(src, m, lv)
+    log("=" * 50)
+    log(f"📚 WIKI SYNC (сесія {session_id[:8]}...)")
+    log("=" * 50)
     _sb_insert_log(src, session_id)
-    time.sleep(1)
-    _sb_update_log(
-        session_id,
-        status="success",
-        finished_at=datetime.now(timezone.utc).isoformat(),
-        laws_processed=0,
-    )
-    with _lock:
-        _sync[src]["running"] = False
+    processed = 0
+    try:
+        from wiki_scanner import get_all_wiki_articles, scrape_wiki_article
+        from rada_to_supabase import get_existing_laws_meta
+
+        articles = get_all_wiki_articles()
+        log(f"🔎 Знайдено статей: {len(articles)}")
+
+        existing_meta = get_existing_laws_meta()
+        log(f"📋 Вже в базі: {len(existing_meta)} документів")
+
+        total = len(articles)
+
+        for i, art in enumerate(articles):
+            # ── Перевірка запиту на паузу ─────────────────────────────────
+            with _lock:
+                pause = _sync[src]["pause_requested"]
+            if pause:
+                log(f"⏸️  Призупинено на {i}/{total}. Оброблено: {processed}", "warning")
+                _sb_update_log(
+                    session_id,
+                    status="paused",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    laws_processed=processed,
+                    error_message=f"Призупинено на статті {i}/{total}",
+                )
+                with _lock:
+                    _sync[src]["running"] = False
+                    _sync[src]["pause_requested"] = False
+                return
+
+            log(f"📖 [{i + 1}/{total}] {art['title']}")
+            try:
+                ok = scrape_wiki_article(
+                    art["url"], art["title"],
+                    session_id=session_id, existing_meta=existing_meta,
+                )
+                if ok:
+                    processed += 1
+                    log(f"  ✅ Готово: {art['title']}", "success")
+                else:
+                    log(f"  ⏭ Пропущено (актуальна або порожня): {art['title']}")
+            except Exception as e:
+                log(f"  ❌ Помилка ({art['title']}): {e}", "error")
+
+            with _lock:
+                _sync[src]["laws_processed"] = processed
+            if (i + 1) % 10 == 0:
+                _sb_update_log(session_id, laws_processed=processed)
+
+            time.sleep(1)
+
+        _sb_update_log(
+            session_id,
+            status="success",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            laws_processed=processed,
+        )
+        log(f"✅ Wiki завершено! Оброблено: {processed}/{total} статей.", "success")
+
+    except Exception as e:
+        log(f"❌ Критична помилка: {e}", "error")
+        _sb_update_log(
+            session_id,
+            status="error",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            laws_processed=processed,
+            error_message=str(e),
+        )
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
 
 
 def _do_templates(session_id: str) -> None:
@@ -788,6 +855,15 @@ async def trigger_wiki():
         _start_sync("wiki", _do_wiki, session_id)
     except ValueError as e:
         raise HTTPException(409, str(e))
+    return {"ok": True}
+
+
+@app.post("/admin/wiki/pause")
+async def pause_wiki():
+    with _lock:
+        if not _sync["wiki"]["running"]:
+            raise HTTPException(409, "Wiki sync is not running")
+        _sync["wiki"]["pause_requested"] = True
     return {"ok": True}
 
 

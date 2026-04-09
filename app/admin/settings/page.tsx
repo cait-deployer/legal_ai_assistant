@@ -145,9 +145,9 @@ const SOURCES = [
     iconBg: "bg-emerald-500/10 border border-emerald-500/20",
     triggerUrl: "/api/admin/wiki/trigger",
     logsUrl: "/api/admin/wiki/logs",
-    pauseUrl: null,
+    pauseUrl: "/api/admin/wiki/pause",
     resumeUrl: null,
-    supportsPause: false,
+    supportsPause: true,
   },
 ]
 

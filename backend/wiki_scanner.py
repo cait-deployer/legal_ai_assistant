@@ -11,6 +11,36 @@ WIKI_API_URL = "https://legalaid.wiki/api.php"
 WIKI_BASE_URL = "https://legalaid.wiki"
 HEADERS = {"User-Agent": "LawyerAssistantBot/1.0 (Mariia Project)"}
 
+def get_all_wiki_articles():
+    """Отримує ВСІ статті з legalaid.wiki через API allpages (з пагінацією)."""
+    articles = []
+    params = {
+        "action": "query",
+        "list": "allpages",
+        "aplimit": "max",   # max = 500 за запит
+        "apnamespace": 0,   # Тільки основні статті
+        "format": "json",
+    }
+    try:
+        while True:
+            r = httpx.get(WIKI_API_URL, params=params, headers=HEADERS, timeout=30)
+            data = r.json()
+            for page in data.get("query", {}).get("allpages", []):
+                title = page["title"]
+                articles.append({
+                    "title": title,
+                    "url": f"{WIKI_BASE_URL}/index.php/{title.replace(' ', '_')}",
+                })
+            cont = data.get("continue", {})
+            if not cont:
+                break
+            params.update(cont)
+            time.sleep(0.3)
+    except Exception as e:
+        print(f"❌ Помилка отримання списку allpages: {e}")
+    return articles
+
+
 def get_wiki_latest_articles(limit=2):
     """Отримує список нових сторінок через API (набагато надійніше)"""
     params = {
