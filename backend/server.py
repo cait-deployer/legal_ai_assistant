@@ -377,6 +377,12 @@ def _do_rada(
             processed += 1
             log(f"  ✅ Готово! (всього оброблено: {processed})", "success")
 
+            # Оновлюємо in-memory лічильник і Supabase кожні 10 законів
+            with _lock:
+                _sync[src]["laws_processed"] = processed
+            if processed % 10 == 0:
+                _sb_update_log(session_id, laws_processed=processed)
+
             # Зберігаємо прогрес після кожного закону
             _save_state(src, all_laws, i + 1, session_id)
             time.sleep(0.5)
@@ -451,6 +457,13 @@ def _do_supreme(session_id: str) -> None:
             )
             processed += 1
             log(f"  ✅ Готово! (всього оброблено: {processed})", "success")
+
+            # Оновлюємо in-memory лічильник і Supabase кожні 10 законів
+            with _lock:
+                _sync["supreme"]["laws_processed"] = processed
+            if processed % 10 == 0:
+                _sb_update_log(session_id, laws_processed=processed)
+
             time.sleep(2)
 
         _sb_update_log(
@@ -515,6 +528,7 @@ def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
             "pause_requested": False,
             "live_logs": [],
             "session_id": session_id,
+            "laws_processed": 0,
         })
     threading.Thread(
         target=fn,
@@ -1021,8 +1035,8 @@ async def get_base_docs(
             if next_page_offset is None:
                 break
 
-        # Python-рівень: фільтр по джерелу (supreme/wiki по префіксу law_id)
-        if source == "supreme":
+        # Python-рівень: фільтр по джерелу (court/wiki по префіксу law_id)
+        if source == "court":
             all_points = [p for p in all_points if (p.payload.get("law_id") or "").startswith("sc_")]
         elif source == "wiki":
             all_points = [p for p in all_points if (p.payload.get("law_id") or "").startswith("wiki_")]
@@ -1117,6 +1131,7 @@ async def get_sync_stats():
         all_logs = []
 
     terminal = [l for l in all_logs if l.get("status") in ("success", "error", "paused")]
+    running_logs = [l for l in all_logs if l.get("status") == "running"]
 
     # ── Надійність ─────────────────────────────────────────────────────────────
     total   = len(terminal)
@@ -1125,10 +1140,31 @@ async def get_sync_stats():
     paused  = sum(1 for l in terminal if l["status"] == "paused")
     pct     = round(success / total * 100, 1) if total > 0 else None
 
-    # ── Закони ─────────────────────────────────────────────────────────────────
+    # ── Закони (включаємо running — реальний прогрес з in-memory лічильника) ───
     laws_30d = sum(l.get("laws_processed") or 0 for l in terminal)
     laws_7d  = sum(l.get("laws_processed") or 0 for l in terminal
                    if (l.get("started_at") or "") >= week_ago)
+
+    # Додаємо законів з поточних running-сесій (з in-memory _sync)
+    currently_running = []
+    for src in _SOURCES:
+        if _sync.get(src, {}).get("running"):
+            in_mem = _sync[src].get("laws_processed", 0)
+            sid = _sync[src].get("session_id", "")
+            # Шукаємо відповідний running_log щоб взяти started_at
+            rl = next((l for l in running_logs if l.get("session_id") == sid), None)
+            started_at = rl.get("started_at") if rl else None
+            # Береємо більше між Supabase і in-memory
+            sb_laws = rl.get("laws_processed") or 0 if rl else 0
+            live_laws = max(in_mem, sb_laws)
+            if started_at and (l.get("started_at") or "") >= week_ago:
+                laws_7d += live_laws
+            laws_30d += live_laws
+            currently_running.append({
+                "source": src,
+                "laws_processed": live_laws,
+                "started_at": started_at,
+            })
 
     # ── Середня тривалість (успішні) ───────────────────────────────────────────
     durations: list[float] = []
@@ -1153,20 +1189,31 @@ async def get_sync_stats():
     last_success = next((l for l in terminal if l["status"] == "success"), None)
     last_failure = next((l for l in terminal if l["status"] == "error"),   None)
 
-    # ── Sparkline: останні 14 запусків (найстаріший → найновіший) ─────────────
+    # ── Sparkline: останні 14 запусків + поточні running (найстаріший → найновіший) ──
+    sparkline_src = (running_logs + terminal)[:14]  # running — найновіші, йдуть першими
     last_14: list[dict] = []
-    for l in terminal[:14]:
+    for l in sparkline_src:
         dur = None
-        if l.get("started_at") and l.get("finished_at"):
-            try:
-                s = datetime.fromisoformat(l["started_at"].replace("Z", "+00:00"))
-                f = datetime.fromisoformat(l["finished_at"].replace("Z", "+00:00"))
-                dur = round((f - s).total_seconds())
-            except Exception:
-                pass
+        try:
+            s = datetime.fromisoformat(l["started_at"].replace("Z", "+00:00")) if l.get("started_at") else None
+            if s:
+                if l.get("finished_at"):
+                    f = datetime.fromisoformat(l["finished_at"].replace("Z", "+00:00"))
+                    dur = round((f - s).total_seconds())
+                elif l.get("status") == "running":
+                    # Для поточного запуску — тривалість до зараз
+                    dur = round((now - s).total_seconds())
+        except Exception:
+            pass
+        # Для running — laws_processed беремо з in-memory якщо більше
+        laws_val = l.get("laws_processed") or 0
+        if l.get("status") == "running":
+            src_name = l.get("source", "")
+            in_mem = _sync.get(src_name, {}).get("laws_processed", 0)
+            laws_val = max(laws_val, in_mem)
         last_14.append({
             "status":         l["status"],
-            "laws_processed": l.get("laws_processed") or 0,
+            "laws_processed": laws_val,
             "duration_sec":   dur,
             "started_at":     l.get("started_at"),
             "source":         l.get("source"),
@@ -1204,6 +1251,7 @@ async def get_sync_stats():
         "laws_7d":               laws_7d,
         "avg_duration_sec":      avg_duration,
         "consecutive_failures":  consecutive_failures,
+        "currently_running":     currently_running,
         "last_success_at":       last_success.get("finished_at") if last_success else None,
         "last_failure_at":       last_failure.get("finished_at") if last_failure else None,
         "last_14_runs":          last_14,
