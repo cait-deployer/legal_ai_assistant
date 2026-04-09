@@ -39,6 +39,9 @@ export async function POST() {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error("[chats/POST] insert error:", error.code, error.message, "user_id:", user.id)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
   return NextResponse.json(data)
 }

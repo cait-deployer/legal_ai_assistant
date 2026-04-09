@@ -96,7 +96,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           role: "user",
           parts: [{ text: `${NAMING_PROMPT}\n\nЗапитання: ${question}\n\nВідповідь: ${answer.slice(0, 500)}` }],
         }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 500 },
+        generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 200,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
       }),
       signal: AbortSignal.timeout(30000),
     })

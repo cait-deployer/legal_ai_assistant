@@ -210,11 +210,16 @@ function ChatPage() {
                 newChatInProgressRef.current = true;
                 const res = await fetch('/api/chats', { method: 'POST' });
                 const data = await res.json();
+                if (!data.id) {
+                    console.error('[chat] create failed:', data);
+                    toast.error('Не вдалося створити чат: ' + (data.error ?? 'невідома помилка'));
+                    setMessages(prev => prev.slice(0, -1)); setIsLoading(false); newChatInProgressRef.current = false; return;
+                }
                 chatId = data.id;
                 setCurrentChatId(chatId);
                 router.push(`/chat?chat=${chatId}`);
                 mutate('/api/chats');
-            } catch { toast.error('Не вдалося створити чат'); setMessages(prev => prev.slice(0, -1)); setIsLoading(false); newChatInProgressRef.current = false; return; }
+            } catch (e) { console.error('[chat] create exception:', e); toast.error('Не вдалося створити чат'); setMessages(prev => prev.slice(0, -1)); setIsLoading(false); newChatInProgressRef.current = false; return; }
         }
 
         fetch(`/api/chats/${chatId}/messages`, {
