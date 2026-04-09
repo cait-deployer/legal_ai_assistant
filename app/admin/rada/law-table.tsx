@@ -12,14 +12,14 @@ type Props = {
 
 export function LawTable({ laws, activeId, onOpen }: Props) {
   return (
-    <div className="rounded-2xl border border-[#BFA071]/10 overflow-hidden">
+    <div className="rounded-2xl border border-[#C9A84C]/10 overflow-hidden">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-[#BFA071]/10 bg-[#0A0E1A]/60">
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider w-[40%]">Назва</th>
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider w-28">Статус</th>
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider hidden sm:table-cell">Категорія</th>
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider hidden md:table-cell">ID закону</th>
+          <tr className="border-b border-[#C9A84C]/10 bg-[#0A0E1A]/60">
+            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-[40%]">Назва</th>
+            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-28">Статус</th>
+            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Категорія</th>
+            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden md:table-cell">ID закону</th>
             <th className="px-4 py-3 w-[90px]" />
           </tr>
         </thead>
@@ -31,9 +31,9 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
               <tr
                 key={law.id}
                 onClick={() => onOpen(law)}
-                className={`border-b border-[#BFA071]/5 last:border-0 transition-colors cursor-pointer ${isActive
-                  ? "bg-[#BFA071]/8 border-l-2 border-l-[#BFA071]"
-                  : "hover:bg-[#BFA071]/5"
+                className={`border-b border-[#C9A84C]/5 last:border-0 transition-colors cursor-pointer ${isActive
+                  ? "bg-[#C9A84C]/8 border-l-2 border-l-[#C9A84C]"
+                  : "hover:bg-[#C9A84C]/5"
                   }`}
               >
                 <td className="px-4 py-3">
@@ -53,11 +53,11 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                     <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap ${getCategoryStyle(meta.category)}`}>
                       {getCategoryLabel(meta.category)}
                     </span>
-                  ) : <span className="text-[#BFA071]/50">—</span>}
+                  ) : <span className="text-[#C9A84C]/50">—</span>}
                 </td>
 
                 <td className="px-4 py-3 hidden md:table-cell">
-                  <div className="flex items-center gap-1 text-xs text-[#BFA071]/70">
+                  <div className="flex items-center gap-1 text-xs text-[#C9A84C]/70">
                     <Hash className="w-3 h-3 shrink-0" />
                     <span className="font-mono truncate max-w-[120px]">{meta.law_id}</span>
                   </div>
@@ -67,7 +67,7 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                   <div className="flex gap-0.5 justify-end">
                     <button
                       title="Читати текст"
-                      className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-[#BFA071]/50 hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors"
+                      className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors"
                       onClick={() => onOpen(law)}
                     >
                       <FileText className="w-3.5 h-3.5" />
@@ -79,14 +79,14 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                         rel="noopener noreferrer"
                         title="zakon.rada.gov.ua"
                         onClick={(e) => e.stopPropagation()}
-                        className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-[#BFA071]/50 hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors"
+                        className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     )}
                     <button
                       title="Деталі"
-                      className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-[#BFA071]/50 hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors"
+                      className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors"
                       onClick={() => onOpen(law)}
                     >
                       <ChevronRight className="w-3.5 h-3.5" />

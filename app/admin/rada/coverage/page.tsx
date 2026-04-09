@@ -57,15 +57,15 @@ function healthConfig(h: SectionHealth) {
     case "good":     return { icon: CheckCircle2,    cls: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: "Добре" }
     case "warning":  return { icon: AlertTriangle,   cls: "text-amber-400",   bg: "bg-amber-500/10 border-amber-500/20",   label: "Неповне" }
     case "critical": return { icon: XCircle,         cls: "text-red-400",     bg: "bg-red-500/10 border-red-500/20",       label: "Критично" }
-    default:         return { icon: HelpCircle,      cls: "text-[#BFA071]/50", bg: "bg-[#BFA071]/5 border-[#BFA071]/10", label: "Невідомо" }
+    default:         return { icon: HelpCircle,      cls: "text-[#C9A84C]/50", bg: "bg-[#C9A84C]/5 border-[#C9A84C]/10", label: "Невідомо" }
   }
 }
 
 function CoverageBar({ pct }: { pct: number | null }) {
-  if (pct == null) return <div className="h-1.5 rounded-full bg-[#BFA071]/10 w-full" />
+  if (pct == null) return <div className="h-1.5 rounded-full bg-[#C9A84C]/10 w-full" />
   const color = pct >= 80 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-red-500"
   return (
-    <div className="h-1.5 rounded-full bg-[#BFA071]/10 w-full overflow-hidden">
+    <div className="h-1.5 rounded-full bg-[#C9A84C]/10 w-full overflow-hidden">
       <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(pct, 100)}%` }} />
     </div>
   )
@@ -75,12 +75,12 @@ function StatCard({ icon: Icon, label, value, sub }: {
   icon: React.ElementType; label: string; value: string; sub?: string
 }) {
   return (
-    <div className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl px-5 py-4 flex items-center gap-4">
-      <div className="w-10 h-10 rounded-xl bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-        <Icon className="w-5 h-5 text-[#BFA071]" />
+    <div className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl px-5 py-4 flex items-center gap-4">
+      <div className="w-10 h-10 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+        <Icon className="w-5 h-5 text-[#C9A84C]" />
       </div>
       <div className="min-w-0">
-        <p className="text-[11px] font-black uppercase tracking-widest text-[#BFA071]/60">{label}</p>
+        <p className="text-[11px] font-black uppercase tracking-widest text-[#C9A84C]/60">{label}</p>
         <p className="text-xl font-bold text-white mt-0.5 truncate">{value}</p>
         {sub && <p className="text-xs text-[#E0E6ED]/50 mt-0.5">{sub}</p>}
       </div>
@@ -143,8 +143,8 @@ export default function CoveragePage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <ShieldCheck className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <ShieldCheck className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Покриття бази</h1>
@@ -155,7 +155,7 @@ export default function CoveragePage() {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {data?.cache_age_sec != null && (
-            <span className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/40 hidden sm:block">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/40 hidden sm:block">
               Дані Ради: {Math.round(data.cache_age_sec / 3600)} год. тому
             </span>
           )}
@@ -163,7 +163,7 @@ export default function CoveragePage() {
             variant="ghost" size="sm"
             onClick={() => load(true)}
             disabled={loading || refreshing}
-            className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
           >
             {(loading || refreshing) ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             {refreshing ? "Оновлюємо з Ради…" : "Оновити з Ради"}
@@ -194,7 +194,7 @@ export default function CoveragePage() {
       {loading && (
         <div className="grid gap-3">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-16 rounded-2xl bg-[#BFA071]/5 animate-pulse" style={{ animationDelay: `${i * 50}ms` }} />
+            <div key={i} className="h-16 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i * 50}ms` }} />
           ))}
         </div>
       )}
@@ -213,14 +213,14 @@ export default function CoveragePage() {
                   onClick={() => setFilter(f.key)}
                   className={`h-8 px-3.5 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
                     isActive
-                      ? "bg-[#BFA071]/15 border-[#BFA071]/40 text-[#BFA071]"
-                      : "border-[#BFA071]/15 text-[#E0E6ED]/60 hover:border-[#BFA071]/30 hover:text-[#E0E6ED]"
+                      ? "bg-[#C9A84C]/15 border-[#C9A84C]/40 text-[#C9A84C]"
+                      : "border-[#C9A84C]/15 text-[#E0E6ED]/60 hover:border-[#C9A84C]/30 hover:text-[#E0E6ED]"
                   }`}
                 >
                   {hc && <hc.icon className={`w-3.5 h-3.5 ${isActive ? hc.cls : ""}`} />}
                   {f.label}
                   {f.count != null && (
-                    <span className={`ml-0.5 ${isActive ? "text-[#BFA071]" : "text-[#E0E6ED]/40"}`}>({f.count})</span>
+                    <span className={`ml-0.5 ${isActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/40"}`}>({f.count})</span>
                   )}
                 </button>
               )
@@ -228,14 +228,14 @@ export default function CoveragePage() {
           </div>
 
           {/* Note about Rada refresh */}
-          <p className="text-xs text-[#BFA071]/40 -mt-2">
+          <p className="text-xs text-[#C9A84C]/40 -mt-2">
             Дані з сайту Ради кешуються на 24 год. Натисніть «Оновити з Ради» щоб отримати свіжі числа.
           </p>
 
           {/* Sections table */}
-          <div className="rounded-2xl border border-[#BFA071]/15 overflow-hidden">
+          <div className="rounded-2xl border border-[#C9A84C]/15 overflow-hidden">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_repeat(4,auto)_auto] gap-4 px-5 py-2.5 bg-[#BFA071]/5 border-b border-[#BFA071]/10 text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50">
+            <div className="grid grid-cols-[1fr_repeat(4,auto)_auto] gap-4 px-5 py-2.5 bg-[#C9A84C]/5 border-b border-[#C9A84C]/10 text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50">
               <span>Розділ</span>
               <span className="text-right w-20">На Раді</span>
               <span className="text-right w-16">У нас</span>
@@ -245,14 +245,14 @@ export default function CoveragePage() {
             </div>
 
             {/* Rows */}
-            <div className="divide-y divide-[#BFA071]/8">
+            <div className="divide-y divide-[#C9A84C]/8">
               {visible.map((s) => {
                 const hc = healthConfig(s.health)
                 const HIcon = hc.icon
                 return (
                   <div
                     key={s.code}
-                    className="grid grid-cols-[1fr_repeat(4,auto)_auto] gap-4 px-5 py-3.5 hover:bg-[#BFA071]/3 transition-colors items-center"
+                    className="grid grid-cols-[1fr_repeat(4,auto)_auto] gap-4 px-5 py-3.5 hover:bg-[#C9A84C]/3 transition-colors items-center"
                   >
                     {/* Section name */}
                     <div className="flex items-center gap-3 min-w-0">
@@ -262,7 +262,7 @@ export default function CoveragePage() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-[#E0E6ED] truncate">{s.label}</p>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] font-mono text-[#BFA071]/40">{s.code}</span>
+                          <span className="text-[10px] font-mono text-[#C9A84C]/40">{s.code}</span>
                           <CoverageBar pct={s.coverage_pct} />
                         </div>
                       </div>
@@ -289,7 +289,7 @@ export default function CoveragePage() {
 
                     {/* Coverage % */}
                     <span className={`text-right w-20 text-sm font-bold ${
-                      s.coverage_pct == null ? "text-[#BFA071]/40"
+                      s.coverage_pct == null ? "text-[#C9A84C]/40"
                         : s.coverage_pct >= 80 ? "text-emerald-400"
                         : s.coverage_pct >= 40 ? "text-amber-400"
                         : "text-red-400"

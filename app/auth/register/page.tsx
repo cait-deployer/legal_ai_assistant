@@ -8,20 +8,21 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Eye, EyeOff, Scale, Loader2, AlertCircle } from "lucide-react"
+import Image from "next/image"
+import { Eye, EyeOff, Loader2, AlertCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 
 function AuthBg() {
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#BFA071]/5" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#BFA071]/[0.03]" />
+      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#C9A84C]/5 blur-[120px]" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#C9A84C]/3 blur-[140px]" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#C9A84C]/5" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#C9A84C]/[0.03]" />
       <svg className="absolute inset-0 w-full h-full opacity-[0.015]">
         <defs>
           <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-            <circle cx="1.5" cy="1.5" r="1.5" fill="#BFA071" />
+            <circle cx="1.5" cy="1.5" r="1.5" fill="#C9A84C" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#dots)" />
@@ -134,7 +135,7 @@ function RegisterForm() {
   }
 
   return (
-    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-8">
+    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-8">
       <div className="mb-7">
         <h2 className="text-2xl font-serif font-bold text-white">Реєстрація</h2>
         <p className="text-sm text-[#E0E6ED]/60 mt-1">
@@ -144,7 +145,7 @@ function RegisterForm() {
 
       <button
         type="button"
-        className="w-full h-12 flex items-center justify-center gap-2.5 mb-5 rounded-2xl border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#E0E6ED] text-sm font-medium transition-all disabled:opacity-50"
+        className="w-full h-12 flex items-center justify-center gap-2.5 mb-5 rounded-2xl border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#E0E6ED] text-sm font-medium transition-all disabled:opacity-50"
         onClick={handleGoogleRegister}
         disabled={googleLoading || loading}
       >
@@ -154,10 +155,10 @@ function RegisterForm() {
 
       <div className="relative mb-5">
         <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t border-[#BFA071]/10" />
+          <span className="w-full border-t border-[#C9A84C]/10" />
         </div>
         <div className="relative flex justify-center text-xs">
-          <span className="bg-[#0d1120] px-3 text-[#BFA071]/70 font-black uppercase tracking-[0.2em]">або з email</span>
+          <span className="bg-[#0d1120] px-3 text-[#C9A84C]/70 font-black uppercase tracking-[0.2em]">або з email</span>
         </div>
       </div>
 
@@ -170,7 +171,7 @@ function RegisterForm() {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="fullName" className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Повне ім&apos;я</Label>
+          <Label htmlFor="fullName" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Повне ім&apos;я</Label>
           <Input
             id="fullName"
             type="text"
@@ -179,13 +180,13 @@ function RegisterForm() {
             autoComplete="name"
             autoFocus
             onChange={(e) => { setFullName(e.target.value); setError("") }}
-            className="h-14 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/50 focus-visible:ring-0"
+            className="h-14 bg-[#0A0E1A] border-[#C9A84C]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/50 focus-visible:ring-0"
             required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Email</Label>
+          <Label htmlFor="email" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
           <Input
             id="email"
             type="email"
@@ -193,13 +194,13 @@ function RegisterForm() {
             value={email}
             autoComplete="email"
             onChange={(e) => { setEmail(e.target.value); setError("") }}
-            className="h-14 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/50 focus-visible:ring-0"
+            className="h-14 bg-[#0A0E1A] border-[#C9A84C]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/50 focus-visible:ring-0"
             required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Пароль</Label>
+          <Label htmlFor="password" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
           <div className="relative">
             <Input
               id="password"
@@ -208,12 +209,12 @@ function RegisterForm() {
               value={password}
               autoComplete="new-password"
               onChange={(e) => { setPassword(e.target.value); setError("") }}
-              className="h-14 pr-12 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/50 focus-visible:ring-0"
+              className="h-14 pr-12 bg-[#0A0E1A] border-[#C9A84C]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/50 focus-visible:ring-0"
               required
             />
             <button
               type="button"
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#BFA071]/50 hover:text-[#BFA071] transition-colors"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#C9A84C]/50 hover:text-[#C9A84C] transition-colors"
               onClick={() => setShowPassword((v) => !v)}
               tabIndex={-1}
             >
@@ -232,7 +233,7 @@ function RegisterForm() {
                         ? "bg-amber-500"
                         : passwordStrength === "strong"
                           ? "bg-emerald-500"
-                          : "bg-[#BFA071]/10"
+                          : "bg-[#C9A84C]/10"
                       }`}
                   />
                 ))}
@@ -249,7 +250,7 @@ function RegisterForm() {
         <Button
           type="submit"
           disabled={loading || googleLoading || !email || !password || !fullName}
-          className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 mt-2"
+          className="w-full h-14 rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-40 mt-2"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -261,8 +262,19 @@ function RegisterForm() {
 
       <p className="text-center text-sm text-[#E0E6ED]/70 mt-6">
         Вже є акаунт?{" "}
-        <Link href="/auth/login" className="text-[#BFA071] font-semibold hover:text-[#d4b78a] transition-colors underline-offset-4 hover:underline">
+        <Link href="/auth/login" className="text-[#C9A84C] font-semibold hover:text-[#E2C47A] transition-colors underline-offset-4 hover:underline">
           Увійти
+        </Link>
+      </p>
+
+      <p className="text-center text-[10px] text-white/25 mt-4 leading-relaxed">
+        Реєструючись, ви погоджуєтесь із{" "}
+        <Link href="/terms" className="text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors underline-offset-2 hover:underline">
+          Умовами користування
+        </Link>{" "}
+        та{" "}
+        <Link href="/privacy" className="text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors underline-offset-2 hover:underline">
+          Політикою конфіденційності
         </Link>
       </p>
     </div>
@@ -275,20 +287,16 @@ export default function RegisterPage() {
       <AuthBg />
       <div className="relative z-10 w-full max-w-[420px]">
         <div className="flex flex-col items-center gap-4 mb-10">
-          <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
-            <Scale className="w-8 h-8 text-[#0A0E1A]" />
-          </div>
+          <Image src="/logo.jpg" alt="URAI" width={72} height={72} className="rounded-2xl object-cover shadow-2xl shadow-[#C9A84C]/20" />
           <div className="text-center">
-            <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
-              Lawyer <span className="text-[#BFA071]">AI</span>
-            </h1>
+            <h1 className="text-3xl font-serif font-bold tracking-tight text-[#C9A84C]">URAI</h1>
             <p className="text-sm text-[#E0E6ED]/70 mt-0.5">Юридичний асистент на базі AI</p>
           </div>
         </div>
 
         <Suspense fallback={
-          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[460px]">
-            <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]" />
+          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[460px]">
+            <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]" />
           </div>
         }>
           <RegisterForm />

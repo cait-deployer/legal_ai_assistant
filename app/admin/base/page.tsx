@@ -95,22 +95,22 @@ function Pagination({ currentPage, totalPages, onChange }: {
   return (
     <nav className="flex items-center gap-1">
       <button
-        className="h-8 px-2.5 text-xs rounded-lg border border-[#BFA071]/20 text-[#BFA071]/50 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5 disabled:opacity-30 transition-all"
+        className="h-8 px-2.5 text-xs rounded-lg border border-[#C9A84C]/20 text-[#C9A84C]/50 hover:border-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 disabled:opacity-30 transition-all"
         onClick={() => onChange(currentPage - 1)} disabled={currentPage === 1}
       >‹</button>
       {pages.map((p, i) => p === "…"
-        ? <span key={`e${i}`} className="w-8 h-8 flex items-center justify-center text-xs text-[#BFA071]/50">…</span>
+        ? <span key={`e${i}`} className="w-8 h-8 flex items-center justify-center text-xs text-[#C9A84C]/50">…</span>
         : <button
           key={p}
           className={`h-8 w-8 text-xs rounded-lg border transition-all ${currentPage === p
-            ? "bg-[#BFA071] border-[#BFA071] text-[#0A0E1A] font-bold"
-            : "border-[#BFA071]/20 text-[#BFA071]/50 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5"
+            ? "bg-[#C9A84C] border-[#C9A84C] text-[#0A0E1A] font-bold"
+            : "border-[#C9A84C]/20 text-[#C9A84C]/50 hover:border-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"
             }`}
           onClick={() => onChange(p as number)}
         >{p}</button>
       )}
       <button
-        className="h-8 px-2.5 text-xs rounded-lg border border-[#BFA071]/20 text-[#BFA071]/50 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5 disabled:opacity-30 transition-all"
+        className="h-8 px-2.5 text-xs rounded-lg border border-[#C9A84C]/20 text-[#C9A84C]/50 hover:border-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 disabled:opacity-30 transition-all"
         onClick={() => onChange(currentPage + 1)} disabled={currentPage === totalPages}
       >›</button>
     </nav>
@@ -137,11 +137,11 @@ function DocDetailContent({
   return (
     <div className={`flex flex-col h-full bg-[#0d1120] ${expanded ? "rounded-[2rem] overflow-hidden" : ""}`}>
       {/* Header */}
-      <div className="px-5 py-4 border-b border-[#BFA071]/10 shrink-0">
+      <div className="px-5 py-4 border-b border-[#C9A84C]/10 shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-              <FileText className="w-5 h-5 text-[#BFA071]" />
+            <div className="w-10 h-10 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+              <FileText className="w-5 h-5 text-[#C9A84C]" />
             </div>
             <p className={`font-semibold leading-snug min-w-0 text-[#E0E6ED] ${expanded ? "text-base line-clamp-1" : "text-sm line-clamp-2"}`}>
               {meta.source || `Документ ${meta.law_id}`}
@@ -149,14 +149,14 @@ function DocDetailContent({
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button
-              className="h-7 w-7 rounded-lg flex items-center justify-center text-[#BFA071]/50 hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors"
+              className="h-7 w-7 rounded-lg flex items-center justify-center text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors"
               onClick={onToggleExpand}
               title={expanded ? "Згорнути" : "Розгорнути"}
             >
               {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
             <button
-              className="h-7 w-7 rounded-lg flex items-center justify-center text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors"
+              className="h-7 w-7 rounded-lg flex items-center justify-center text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors"
               onClick={onClose}
               title="Закрити"
             >
@@ -169,7 +169,7 @@ function DocDetailContent({
             {getSourceLabel(meta.law_id)}
           </span>
           {meta.category && (
-            <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border bg-[#BFA071]/5 text-[#BFA071]/50 border-[#BFA071]/10">
+            <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border bg-[#C9A84C]/5 text-[#C9A84C]/50 border-[#C9A84C]/10">
               {meta.category}
             </span>
           )}
@@ -181,45 +181,45 @@ function DocDetailContent({
         {/* Metadata column */}
         <div className={`space-y-3 ${expanded ? "w-64 shrink-0" : ""}`}>
           <div className="flex items-start gap-3">
-            <div className="w-7 h-7 rounded-lg bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-              <Hash className="w-3.5 h-3.5 text-[#BFA071]/50" />
+            <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+              <Hash className="w-3.5 h-3.5 text-[#C9A84C]/50" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider">ID</p>
+              <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">ID</p>
               <p className="text-xs mt-0.5 font-mono break-all text-[#E0E6ED]/70">{meta.law_id}</p>
             </div>
           </div>
           {scrapedAt && (
             <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-                <Calendar className="w-3.5 h-3.5 text-[#BFA071]/50" />
+              <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+                <Calendar className="w-3.5 h-3.5 text-[#C9A84C]/50" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider">Завантажено</p>
+                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Завантажено</p>
                 <p className="text-xs mt-0.5 text-[#E0E6ED]/70">{scrapedAt}</p>
               </div>
             </div>
           )}
           {full?.chunk_count != null && (
             <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-                <Layers className="w-3.5 h-3.5 text-[#BFA071]/50" />
+              <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+                <Layers className="w-3.5 h-3.5 text-[#C9A84C]/50" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider">Частин тексту</p>
+                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Частин тексту</p>
                 <p className="text-xs mt-0.5 text-[#E0E6ED]/70">{full.chunk_count}</p>
               </div>
             </div>
           )}
           {meta.law_url && (
             <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-                <ExternalLink className="w-3.5 h-3.5 text-[#BFA071]/50" />
+              <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+                <ExternalLink className="w-3.5 h-3.5 text-[#C9A84C]/50" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider">Джерело</p>
+                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Джерело</p>
                 <a href={meta.law_url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs mt-0.5 text-[#BFA071] hover:text-[#d4b78a] hover:underline underline-offset-2 flex items-center gap-1 break-all transition-colors">
+                  className="text-xs mt-0.5 text-[#C9A84C] hover:text-[#E2C47A] hover:underline underline-offset-2 flex items-center gap-1 break-all transition-colors">
                   {(() => { try { return new URL(meta.law_url).hostname } catch { return meta.law_url } })()}
                   <ExternalLink className="w-3 h-3 shrink-0" />
                 </a>
@@ -227,21 +227,21 @@ function DocDetailContent({
             </div>
           )}
 
-          {!expanded && <div className="h-px bg-[#BFA071]/10" />}
+          {!expanded && <div className="h-px bg-[#C9A84C]/10" />}
         </div>
 
         {/* Divider (expanded horizontal layout) */}
-        {expanded && <div className="w-px bg-[#BFA071]/10 shrink-0" />}
+        {expanded && <div className="w-px bg-[#C9A84C]/10 shrink-0" />}
 
         {/* Full text column */}
         <div className={`space-y-2 ${expanded ? "flex-1 min-w-0" : ""}`}>
-          <p className="text-[10px] font-black uppercase tracking-wider text-[#BFA071]/70 flex items-center gap-1.5">
+          <p className="text-[10px] font-black uppercase tracking-wider text-[#C9A84C]/70 flex items-center gap-1.5">
             <BookOpen className="w-3.5 h-3.5" /> Повний текст
           </p>
           {loading && (
             <div className="space-y-2 pt-1">
               {Array.from({ length: expanded ? 12 : 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-3 rounded bg-[#BFA071]/5" style={{ width: `${80 + (i % 4) * 5}%` }} />
+                <Skeleton key={i} className="h-3 rounded bg-[#C9A84C]/5" style={{ width: `${80 + (i % 4) * 5}%` }} />
               ))}
             </div>
           )}
@@ -251,7 +251,7 @@ function DocDetailContent({
             </div>
           )}
           {!loading && !error && full?.full_text && (
-            <div className={`bg-[#0A0E1A]/80 rounded-xl border border-[#BFA071]/10 p-4 text-xs leading-relaxed text-[#E0E6ED]/60 whitespace-pre-wrap font-mono overflow-y-auto ${expanded ? "h-full max-h-[calc(100%-2rem)]" : "max-h-[50vh]"}`}>
+            <div className={`bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 p-4 text-xs leading-relaxed text-[#E0E6ED]/60 whitespace-pre-wrap font-mono overflow-y-auto ${expanded ? "h-full max-h-[calc(100%-2rem)]" : "max-h-[50vh]"}`}>
               {full.full_text}
             </div>
           )}
@@ -301,7 +301,7 @@ function DocDetail({ law, onClose }: { law: Law; onClose: () => void }) {
           onClick={() => setExpanded(false)}
         />
         {/* Modal panel */}
-        <div className="relative w-full max-w-5xl h-[90vh] shadow-2xl shadow-black/60 ring-1 ring-[#BFA071]/20 rounded-[2rem] overflow-hidden">
+        <div className="relative w-full max-w-5xl h-[90vh] shadow-2xl shadow-black/60 ring-1 ring-[#C9A84C]/20 rounded-[2rem] overflow-hidden">
           <DocDetailContent {...sharedProps} />
         </div>
       </div>
@@ -412,10 +412,10 @@ export default function BasePage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10 shrink-0">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <BookOpen className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <BookOpen className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">База знань</h1>
@@ -423,13 +423,13 @@ export default function BasePage() {
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {lastUpdated && <span className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest hidden sm:block">{lastUpdated.toLocaleTimeString()}</span>}
+          {lastUpdated && <span className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">{lastUpdated.toLocaleTimeString()}</span>}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => fetchDocs()}
             disabled={loading}
-            className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Оновити
@@ -442,20 +442,20 @@ export default function BasePage() {
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
           {/* Sticky toolbar */}
-          <div className="shrink-0 pt-5 pb-3 space-y-3 border-b border-[#BFA071]/10">
+          <div className="shrink-0 pt-5 pb-3 space-y-3 border-b border-[#C9A84C]/10">
 
             {/* Total info */}
             <div className="flex flex-wrap gap-2 items-center">
-              <span className="inline-flex items-center px-3 py-1.5 text-sm rounded-xl bg-[#BFA071]/10 border border-[#BFA071]/20 text-[#BFA071] font-semibold">
+              <span className="inline-flex items-center px-3 py-1.5 text-sm rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 text-[#C9A84C] font-semibold">
                 {total.toLocaleString()} документів
               </span>
               {hasFilters && !loading && (
-                <span className="inline-flex items-center px-3 py-1.5 text-sm rounded-xl bg-[#0d1120] border border-[#BFA071]/10 text-[#E0E6ED]/70">
+                <span className="inline-flex items-center px-3 py-1.5 text-sm rounded-xl bg-[#0d1120] border border-[#C9A84C]/10 text-[#E0E6ED]/70">
                   {total} знайдено
                 </span>
               )}
               {loading && (
-                <Loader2 className="w-4 h-4 animate-spin text-[#BFA071]/70" />
+                <Loader2 className="w-4 h-4 animate-spin text-[#C9A84C]/70" />
               )}
             </div>
 
@@ -463,17 +463,17 @@ export default function BasePage() {
             <div className="flex gap-2 flex-wrap items-center">
               {/* Search */}
               <div className="relative flex-1 min-w-[200px] h-10">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#BFA071]/50 pointer-events-none" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C9A84C]/50 pointer-events-none" />
                 <Input
                   placeholder="Пошук за назвою або ID документа..."
                   type="search"
                   value={searchInput}
                   onChange={(e) => handleSearchInput(e.target.value)}
-                  className="pl-9 h-10 bg-[#0d1120] border-[#BFA071]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/40 focus-visible:ring-0"
+                  className="pl-9 h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
                 />
                 {searchInput && (
                   <button onClick={() => { setSearchInput(""); setSearch(""); setCurrentPage(1) }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#BFA071]/50 hover:text-[#BFA071] transition-colors">
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#C9A84C]/50 hover:text-[#C9A84C] transition-colors">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -481,31 +481,31 @@ export default function BasePage() {
 
               {/* Source filter */}
               <div className="relative h-10 shrink-0">
-                <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
+                <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
                 <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
-                  className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#BFA071]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#BFA071]/40 appearance-none cursor-pointer">
+                  className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
                   {SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
               </div>
 
               {/* Category filter */}
               {categoryOptions.length > 0 && (
                 <div className="relative h-10 shrink-0">
-                  <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
+                  <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
                   <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-                    className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#BFA071]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#BFA071]/40 appearance-none cursor-pointer">
+                    className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
                     <option value="">Всі категорії</option>
                     {categoryOptions.map((cat) => <option key={cat} value={cat}>{categoryLabel(cat)}</option>)}
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#BFA071]/50 pointer-events-none" />
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
                 </div>
               )}
 
               {/* Clear */}
               {hasFilters && (
                 <button
-                  className="h-10 px-3 flex items-center gap-1.5 text-xs text-[#BFA071]/70 hover:text-[#BFA071] shrink-0 transition-colors"
+                  className="h-10 px-3 flex items-center gap-1.5 text-xs text-[#C9A84C]/70 hover:text-[#C9A84C] shrink-0 transition-colors"
                   onClick={clearFilters}
                 >
                   <X className="w-3.5 h-3.5" /> Скинути
@@ -513,15 +513,15 @@ export default function BasePage() {
               )}
 
               {/* View toggle */}
-              <div className="hidden sm:flex rounded-xl border border-[#BFA071]/20 overflow-hidden shrink-0">
+              <div className="hidden sm:flex rounded-xl border border-[#C9A84C]/20 overflow-hidden shrink-0">
                 <button
-                  className={`h-10 px-3 flex items-center gap-1.5 text-xs transition-colors border-r border-[#BFA071]/20 ${displayMode === "cards" ? "bg-[#BFA071]/10 text-[#BFA071]" : "text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5"}`}
+                  className={`h-10 px-3 flex items-center gap-1.5 text-xs transition-colors border-r border-[#C9A84C]/20 ${displayMode === "cards" ? "bg-[#C9A84C]/10 text-[#C9A84C]" : "text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"}`}
                   onClick={() => setDisplayMode("cards")}
                 >
                   <LayoutGrid className="w-4 h-4" /><span className="hidden md:inline">Картки</span>
                 </button>
                 <button
-                  className={`h-10 px-3 flex items-center gap-1.5 text-xs transition-colors ${displayMode === "table" ? "bg-[#BFA071]/10 text-[#BFA071]" : "text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5"}`}
+                  className={`h-10 px-3 flex items-center gap-1.5 text-xs transition-colors ${displayMode === "table" ? "bg-[#C9A84C]/10 text-[#C9A84C]" : "text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"}`}
                   onClick={() => setDisplayMode("table")}
                 >
                   <Table2 className="w-4 h-4" /><span className="hidden md:inline">Таблиця</span>
@@ -543,15 +543,15 @@ export default function BasePage() {
             {loading && (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-48 rounded-2xl bg-[#BFA071]/5 animate-pulse" style={{ animationDelay: `${i * 70}ms` }} />
+                  <div key={i} className="h-48 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i * 70}ms` }} />
                 ))}
               </div>
             )}
 
             {!loading && !error && docs.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center gap-4">
-                <div className="p-5 bg-[#BFA071]/5 rounded-2xl border border-[#BFA071]/10">
-                  <BookOpen className="w-12 h-12 text-[#BFA071]/20" />
+                <div className="p-5 bg-[#C9A84C]/5 rounded-2xl border border-[#C9A84C]/10">
+                  <BookOpen className="w-12 h-12 text-[#C9A84C]/20" />
                 </div>
                 <div>
                   <p className="text-lg font-serif font-bold text-white">{hasFilters ? "Нічого не знайдено" : "База порожня"}</p>
@@ -561,7 +561,7 @@ export default function BasePage() {
                 </div>
                 {hasFilters && (
                   <button
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#BFA071]/20 text-[#BFA071]/60 hover:text-[#BFA071] hover:border-[#BFA071]/40 text-sm transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#C9A84C]/20 text-[#C9A84C]/60 hover:text-[#C9A84C] hover:border-[#C9A84C]/40 text-sm transition-colors"
                     onClick={clearFilters}
                   >
                     <X className="w-4 h-4" /> Скинути фільтри
@@ -597,13 +597,13 @@ export default function BasePage() {
 
           {/* Pinned pagination */}
           {!loading && !error && total > 0 && (
-            <div className="shrink-0 border-t border-[#BFA071]/10 py-3">
+            <div className="shrink-0 border-t border-[#C9A84C]/10 py-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-[#E0E6ED]/70 text-center sm:text-left">
                   Показано{" "}
-                  <span className="font-semibold text-[#BFA071]">{from}–{to}</span>
+                  <span className="font-semibold text-[#C9A84C]">{from}–{to}</span>
                   {" "}з{" "}
-                  <span className="font-semibold text-[#BFA071]">{total.toLocaleString()}</span>
+                  <span className="font-semibold text-[#C9A84C]">{total.toLocaleString()}</span>
                   {" "}документів
                 </p>
                 <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-4">
@@ -612,12 +612,12 @@ export default function BasePage() {
                     <select
                       value={itemsPerPage}
                       onChange={(e) => setItemsPerPage(Number(e.target.value))}
-                      className="h-8 w-[70px] text-xs rounded-xl border border-[#BFA071]/20 bg-[#0d1120] text-[#E0E6ED] px-2 focus:outline-none focus:border-[#BFA071]/40"
+                      className="h-8 w-[70px] text-xs rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] px-2 focus:outline-none focus:border-[#C9A84C]/40"
                     >
                       {PER_PAGE_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                     </select>
                   </div>
-                  <div className="hidden sm:block w-px h-5 bg-[#BFA071]/10" />
+                  <div className="hidden sm:block w-px h-5 bg-[#C9A84C]/10" />
                   <Pagination
                     currentPage={currentPage}
                     totalPages={totalPages}
@@ -631,7 +631,7 @@ export default function BasePage() {
 
         {/* Right detail panel */}
         {activeDoc && (
-          <div className="w-[380px] shrink-0 border-l border-[#BFA071]/10 overflow-y-auto mt-5">
+          <div className="w-[380px] shrink-0 border-l border-[#C9A84C]/10 overflow-y-auto mt-5">
             <DocDetail law={activeDoc} onClose={() => setActiveDoc(null)} />
           </div>
         )}

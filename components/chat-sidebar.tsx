@@ -88,15 +88,15 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
     .split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()
 
   return (
-    <aside className="w-[270px] shrink-0 h-screen flex flex-col bg-[#0d1120] text-[#E0E6ED] border-r border-[#BFA071]/20 select-none z-40">
+    <aside className="w-[270px] shrink-0 h-screen flex flex-col bg-[#0d1120] text-[#E0E6ED] border-r border-[#C9A84C]/20 select-none z-40">
       {/* Logo Section */}
-      <div className="h-16 flex items-center px-5 gap-3 border-b border-[#BFA071]/10 bg-[#0A0E1A]/40 backdrop-blur-sm">
-        <div className="w-8 h-8 rounded-lg bg-[#BFA071] flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(191,160,113,0.2)]">
+      <div className="h-16 flex items-center px-5 gap-3 border-b border-[#C9A84C]/10 bg-[#0A0E1A]/40 backdrop-blur-sm">
+        <div className="w-8 h-8 rounded-lg bg-[#C9A84C] flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(201,168,76,0.2)]">
           <Scale className="w-5 h-5 text-[#0A0E1A]" />
         </div>
-        <span className="font-serif font-bold text-lg tracking-tight text-[#BFA071]">URAI</span>
+        <span className="font-serif font-bold text-lg tracking-tight text-[#C9A84C]">URAI</span>
         {profile?.subscription_tier === 'pro' && (
-          <span className="ml-auto text-[9px] font-black px-2 py-0.5 rounded-full bg-[#BFA071]/10 text-[#BFA071] border border-[#BFA071]/30 tracking-widest">
+          <span className="ml-auto text-[9px] font-black px-2 py-0.5 rounded-full bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/30 tracking-widest">
             PRO
           </span>
         )}
@@ -106,7 +106,7 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
       <div className="px-4 pt-5 pb-3">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl border border-[#BFA071]/30 bg-[#BFA071]/5 text-[#BFA071] hover:bg-[#BFA071]/10 hover:border-[#BFA071] transition-all duration-300 text-sm font-semibold shadow-inner shadow-black/10"
+          className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl border border-[#C9A84C]/30 bg-[#C9A84C]/5 text-[#C9A84C] hover:bg-[#C9A84C]/10 hover:border-[#C9A84C] transition-all duration-300 text-sm font-semibold shadow-inner shadow-black/10"
         >
           <Plus className="w-4 h-4" />
           Новий чат
@@ -114,44 +114,44 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
       </div>
 
       {/* Chat History List */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-5 scrollbar-thin scrollbar-thumb-[#BFA071]/20 scrollbar-track-transparent">
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-5 scrollbar-thin scrollbar-thumb-[#C9A84C]/20 scrollbar-track-transparent">
         {chatsLoading && (
           <div className="flex flex-col items-center justify-center pt-10 gap-3">
-            <Loader2 className="w-5 h-5 animate-spin text-[#BFA071]/50" />
-            <span className="text-[10px] text-[#BFA071]/70 uppercase tracking-widest">Завантаження...</span>
+            <Loader2 className="w-5 h-5 animate-spin text-[#C9A84C]/50" />
+            <span className="text-[10px] text-[#C9A84C]/70 uppercase tracking-widest">Завантаження...</span>
           </div>
         )}
 
         {!chatsLoading && chats.length === 0 && (
           <div className="text-center pt-10 px-6 opacity-40">
-            <MessageSquare className="w-8 h-8 mx-auto mb-3 text-[#BFA071]/70" />
+            <MessageSquare className="w-8 h-8 mx-auto mb-3 text-[#C9A84C]/70" />
             <p className="text-xs text-[#A0AEC0]">Розпочніть свій перший юридичний запит</p>
           </div>
         )}
 
         {groups.map(group => (
           <div key={group.label} className="space-y-1">
-            <p className="text-[10px] font-bold text-[#BFA071]/70 uppercase tracking-[0.2em] px-3 mb-2">
+            <p className="text-[10px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.2em] px-3 mb-2">
               {group.label}
             </p>
             {group.items.map(chat => (
               <button
                 key={chat.id}
-                onClick={() => navigateOnSelect ? router.push(`/?chat=${chat.id}`) : onSelectChat(chat.id)}
+                onClick={() => navigateOnSelect ? router.push(`/chat?chat=${chat.id}`) : onSelectChat(chat.id)}
                 onMouseEnter={() => setHovered(chat.id)}
                 onMouseLeave={() => setHovered(null)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all duration-200 group relative ${currentChatId === chat.id
-                  ? "bg-[#BFA071]/10 text-[#BFA071] border border-[#BFA071]/20 shadow-lg shadow-black/20"
-                  : "text-[#A0AEC0] hover:bg-[#BFA071]/5 hover:text-[#E0E6ED]"
+                  ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20 shadow-lg shadow-black/20"
+                  : "text-[#A0AEC0] hover:bg-[#C9A84C]/5 hover:text-[#E0E6ED]"
                   }`}
               >
-                <div className={`w-1.5 h-1.5 rounded-full transition-all ${currentChatId === chat.id ? "bg-[#BFA071]" : "bg-transparent group-hover:bg-[#BFA071]/30"}`} />
+                <div className={`w-1.5 h-1.5 rounded-full transition-all ${currentChatId === chat.id ? "bg-[#C9A84C]" : "bg-transparent group-hover:bg-[#C9A84C]/30"}`} />
                 <span className="flex-1 text-xs font-medium truncate">{chat.title}</span>
 
                 {(hovered === chat.id || currentChatId === chat.id) && (
                   <button
                     onClick={e => handleDelete(e, chat.id)}
-                    className="shrink-0 p-1.5 rounded-lg hover:bg-red-500/10 text-[#BFA071]/70 hover:text-red-400 transition-all active:scale-90"
+                    className="shrink-0 p-1.5 rounded-lg hover:bg-red-500/10 text-[#C9A84C]/70 hover:text-red-400 transition-all active:scale-90"
                     title="Видалити чат"
                   >
                     {deleting === chat.id
@@ -167,10 +167,10 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
       </div>
 
       {/* Bottom User Section */}
-      <div className="border-t border-[#BFA071]/10 bg-[#0A0E1A]/40 p-3 space-y-1">
+      <div className="border-t border-[#C9A84C]/10 bg-[#0A0E1A]/40 p-3 space-y-1">
         <Link
           href="/settings"
-          className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-[#A0AEC0] hover:bg-[#BFA071]/5 hover:text-[#E0E6ED] transition-all text-xs font-medium group"
+          className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-[#A0AEC0] hover:bg-[#C9A84C]/5 hover:text-[#E0E6ED] transition-all text-xs font-medium group"
         >
           <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-500" />
           Налаштування
@@ -183,13 +183,13 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
           Вийти
         </button>
 
-        <div className="flex items-center gap-3 px-3 py-3 mt-2 border-t border-[#BFA071]/10 pt-4">
-          <div className="w-9 h-9 rounded-xl bg-[#BFA071] border border-[#BFA071]/20 flex items-center justify-center text-[12px] font-bold text-[#0A0E1A] shrink-0 shadow-lg shadow-black/20">
+        <div className="flex items-center gap-3 px-3 py-3 mt-2 border-t border-[#C9A84C]/10 pt-4">
+          <div className="w-9 h-9 rounded-xl bg-[#C9A84C] border border-[#C9A84C]/20 flex items-center justify-center text-[12px] font-bold text-[#0A0E1A] shrink-0 shadow-lg shadow-black/20">
             {initials}
           </div>
           <div className="min-w-0">
             <p className="text-sm font-bold text-[#E0E6ED] truncate leading-none mb-1">{displayName}</p>
-            <p className="text-[10px] text-[#BFA071]/50 truncate font-medium">{profile?.email}</p>
+            <p className="text-[10px] text-[#C9A84C]/50 truncate font-medium">{profile?.email}</p>
           </div>
         </div>
       </div>

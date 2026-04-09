@@ -58,7 +58,6 @@ export async function proxy(request: NextRequest) {
   const isAuthPage =
     pathname.startsWith("/auth") && !pathname.startsWith("/auth/callback")
   const isProtected =
-    pathname === "/" ||
     pathname.startsWith("/chat") ||
     pathname.startsWith("/settings") ||
     pathname === "/onboarding"
@@ -108,7 +107,7 @@ export async function proxy(request: NextRequest) {
     if (
       pathname !== "/onboarding" &&
       !profile?.is_onboarded &&
-      (pathname === "/" || pathname.startsWith("/chat") || pathname.startsWith("/settings"))
+      (pathname.startsWith("/chat") || pathname.startsWith("/settings"))
     ) {
       const redirect = NextResponse.redirect(new URL("/onboarding", request.url))
       redirect.cookies.delete("_ob")
@@ -127,7 +126,7 @@ export async function proxy(request: NextRequest) {
 
   // ── Вже залогінений → не показувати auth-сторінки ─────────────────────────
   if (user && isAuthPage) {
-    return NextResponse.redirect(new URL("/", request.url))
+    return NextResponse.redirect(new URL("/chat", request.url))
   }
 
   return supabaseResponse

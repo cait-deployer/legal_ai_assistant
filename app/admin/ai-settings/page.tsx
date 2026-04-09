@@ -49,7 +49,7 @@ function parseSaInfo(json: string): SaInfo {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-black uppercase tracking-wider text-[#BFA071]/80">{label}</label>
+      <label className="text-xs font-black uppercase tracking-wider text-[#C9A84C]/80">{label}</label>
       {children}
       {hint && <p className="text-[11px] text-[#E0E6ED]/40">{hint}</p>}
     </div>
@@ -63,7 +63,7 @@ function TextInput({ value, onChange, placeholder, mono }: { value: string; onCh
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full bg-[#0A0E1A]/80 border border-[#BFA071]/15 hover:border-[#BFA071]/30 focus:border-[#BFA071]/50 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] placeholder:text-[#E0E6ED]/30 outline-none transition-colors ${mono ? "font-mono" : ""}`}
+      className={`w-full bg-[#0A0E1A]/80 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 focus:border-[#C9A84C]/50 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] placeholder:text-[#E0E6ED]/30 outline-none transition-colors ${mono ? "font-mono" : ""}`}
     />
   )
 }
@@ -74,7 +74,7 @@ function TextareaInput({ value, onChange, rows = 4 }: { value: string; onChange:
       value={value}
       onChange={e => onChange(e.target.value)}
       rows={rows}
-      className="w-full bg-[#0A0E1A]/80 border border-[#BFA071]/15 hover:border-[#BFA071]/30 focus:border-[#BFA071]/50 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] placeholder:text-[#E0E6ED]/30 outline-none transition-colors resize-none font-mono"
+      className="w-full bg-[#0A0E1A]/80 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 focus:border-[#C9A84C]/50 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] placeholder:text-[#E0E6ED]/30 outline-none transition-colors resize-none font-mono"
     />
   )
 }
@@ -85,9 +85,9 @@ function SliderInput({ value, onChange, min, max, step }: { value: number; onCha
       <input
         type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="flex-1 accent-[#BFA071] h-1.5 rounded-full cursor-pointer"
+        className="flex-1 accent-[#C9A84C] h-1.5 rounded-full cursor-pointer"
       />
-      <span className="w-12 text-right font-mono text-sm font-bold text-[#BFA071]">{value}</span>
+      <span className="w-12 text-right font-mono text-sm font-bold text-[#C9A84C]">{value}</span>
     </div>
   )
 }
@@ -148,15 +148,15 @@ function ServiceAccountUploader({
         onClick={() => fileRef.current?.click()}
         className={`relative flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-8 cursor-pointer transition-colors
           ${dragging
-            ? "border-[#BFA071]/60 bg-[#BFA071]/5"
-            : "border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5"
+            ? "border-[#C9A84C]/60 bg-[#C9A84C]/5"
+            : "border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5"
           }`}
       >
         <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={onInputChange} />
         {uploading ? (
-          <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]/60" />
+          <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]/60" />
         ) : (
-          <Upload className="w-8 h-8 text-[#BFA071]/40" />
+          <Upload className="w-8 h-8 text-[#C9A84C]/40" />
         )}
         <div className="text-center">
           <p className="text-sm text-[#E0E6ED]/70">
@@ -175,7 +175,7 @@ function ServiceAccountUploader({
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">Активний Service Account</p>
             <p className="text-sm text-[#E0E6ED]/80 font-mono truncate">{saInfo.client_email}</p>
-            <p className="text-xs text-[#E0E6ED]/40 mt-0.5">Project: <span className="text-[#BFA071]/70">{saInfo.project_id}</span></p>
+            <p className="text-xs text-[#E0E6ED]/40 mt-0.5">Project: <span className="text-[#C9A84C]/70">{saInfo.project_id}</span></p>
           </div>
         </div>
       ) : (
@@ -253,7 +253,7 @@ export default function AiSettingsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]/50" />
+        <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]/50" />
       </div>
     )
   }
@@ -261,10 +261,10 @@ export default function AiSettingsPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10 shrink-0">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <Bot className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <Bot className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">AI Модель</h1>
@@ -274,7 +274,7 @@ export default function AiSettingsPage() {
         <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="ghost" size="sm" onClick={handleRefreshCache} disabled={refreshing}
-            className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
             title="Примусово перезавантажити кеш бекенду"
           >
             {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -282,13 +282,13 @@ export default function AiSettingsPage() {
           </Button>
           <Button
             variant="ghost" size="sm" onClick={handleReset}
-            className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
           >
             <RotateCcw className="w-4 h-4" /> Скинути
           </Button>
           <Button
             size="sm" onClick={handleSave} disabled={saving}
-            className="gap-2 h-9 rounded-xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#BFA071]/10 disabled:opacity-40"
+            className="gap-2 h-9 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#C9A84C]/10 disabled:opacity-40"
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             Зберегти
@@ -300,8 +300,8 @@ export default function AiSettingsPage() {
 
         {/* Service Account */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4">Google Vertex AI — Service Account</h2>
-          <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Google Vertex AI — Service Account</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
             <ServiceAccountUploader
               saInfo={saInfo}
               onUploaded={info => setSaInfo(info)}
@@ -314,8 +314,8 @@ export default function AiSettingsPage() {
 
         {/* Vertex location */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4">Vertex AI Регіон</h2>
-          <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Vertex AI Регіон</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
             <Field
               label="Location"
               hint="Регіон Vertex AI. Напр.: us-central1, europe-west1, europe-west4"
@@ -332,8 +332,8 @@ export default function AiSettingsPage() {
 
         {/* Models */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4">Моделі</h2>
-          <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5 space-y-5">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Моделі</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-5">
             <Field
               label="AI Модель (генерація відповідей)"
               hint="Напр.: gemini-2.0-flash-lite, gemini-1.5-pro, gemini-2.0-flash"
@@ -361,8 +361,8 @@ export default function AiSettingsPage() {
 
         {/* Generation params */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4">Параметри генерації</h2>
-          <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5 space-y-6">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри генерації</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-6">
             <Field label="Temperature" hint="0.0 = детермінований, 1.0 = творчий. Для юридичних відповідей: 0.1">
               <SliderInput value={settings.temperature} onChange={v => set("temperature", v)} min={0} max={1} step={0.05} />
             </Field>
@@ -374,16 +374,16 @@ export default function AiSettingsPage() {
 
         {/* System prompt */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4">Системний промпт</h2>
-          <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5 space-y-4">
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Системний промпт</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-4">
             <Field
               label="Системний промпт"
               hint="Базова інструкція для AI. Сюди НЕ входять: правила тарифу, профіль користувача, контекст пошуку — вони додаються автоматично."
             >
               <TextareaInput value={settings.system_prompt} onChange={v => set("system_prompt", v)} rows={12} />
             </Field>
-            <div className="bg-[#0A0E1A]/60 border border-[#BFA071]/10 rounded-xl p-3 text-[11px] text-[#E0E6ED]/40 space-y-1">
-              <p className="font-bold text-[#BFA071]/50 uppercase tracking-wider text-[10px]">Що додається автоматично до промпту:</p>
+            <div className="bg-[#0A0E1A]/60 border border-[#C9A84C]/10 rounded-xl p-3 text-[11px] text-[#E0E6ED]/40 space-y-1">
+              <p className="font-bold text-[#C9A84C]/50 uppercase tracking-wider text-[10px]">Що додається автоматично до промпту:</p>
               <p>• <span className="text-[#E0E6ED]/60">Профіль користувача</span> — роль, спеціалізація, сфери (з онбордингу)</p>
               <p>• <span className="text-[#E0E6ED]/60">Правила відповіді</span> — по тарифу (детальність, кроки, сценарії)</p>
               <p>• <span className="text-[#E0E6ED]/60">Контекст</span> — знайдені документи з бази знань</p>
@@ -393,8 +393,8 @@ export default function AiSettingsPage() {
         </section>
 
         {/* Info */}
-        <div className="bg-[#0d1120]/40 border border-[#BFA071]/10 rounded-2xl p-4 text-xs text-[#E0E6ED]/40 space-y-1">
-          <p>Кількість чанків на тариф керується в розділі <strong className="text-[#BFA071]/60">Тарифи → поля top_k</strong>.</p>
+        <div className="bg-[#0d1120]/40 border border-[#C9A84C]/10 rounded-2xl p-4 text-xs text-[#E0E6ED]/40 space-y-1">
+          <p>Кількість чанків на тариф керується в розділі <strong className="text-[#C9A84C]/60">Тарифи → поля top_k</strong>.</p>
           <p>Service Account JSON зберігається окремо через кнопку завантаження — не через «Зберегти».</p>
           <p>Після збереження бекенд автоматично перезавантажує кеш. Кнопка «Оновити кеш» — примусове оновлення без збереження.</p>
         </div>

@@ -27,8 +27,8 @@ const STEP_TABS: { key: string; label: string }[] = [
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5 flex flex-col gap-1">
-      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/60">{label}</p>
+    <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 flex flex-col gap-1">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60">{label}</p>
       <p className="text-2xl font-serif font-bold text-white">{value}</p>
       {sub && <p className="text-xs text-[#E0E6ED]/40">{sub}</p>}
     </div>
@@ -158,7 +158,7 @@ export default function OnboardingAdminPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]/50" />
+        <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]/50" />
       </div>
     )
   }
@@ -166,10 +166,10 @@ export default function OnboardingAdminPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10 shrink-0">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <ClipboardList className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <ClipboardList className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Онбординг</h1>
@@ -179,15 +179,15 @@ export default function OnboardingAdminPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-[#0d1120] p-1.5 rounded-2xl border border-[#BFA071]/10 w-fit mt-6 mb-6 shrink-0">
+      <div className="flex gap-1 bg-[#0d1120] p-1.5 rounded-2xl border border-[#C9A84C]/10 w-fit mt-6 mb-6 shrink-0">
         {([["config", "Налаштування"], ["stats", "Статистика"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
             className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-[0.15em] transition-all ${
               activeTab === key
-                ? "bg-[#BFA071]/10 text-[#BFA071] border border-[#BFA071]/30"
-                : "text-[#BFA071]/50 hover:text-[#BFA071]/70"
+                ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/30"
+                : "text-[#C9A84C]/50 hover:text-[#C9A84C]/70"
             }`}
           >
             {label}
@@ -208,8 +208,8 @@ export default function OnboardingAdminPage() {
                   onClick={() => setActiveStep(tab.key)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
                     activeStep === tab.key
-                      ? "bg-[#BFA071]/10 text-[#BFA071] border-[#BFA071]/30"
-                      : "text-[#E0E6ED]/50 border-[#BFA071]/10 hover:border-[#BFA071]/20 hover:text-[#E0E6ED]/70"
+                      ? "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/30"
+                      : "text-[#E0E6ED]/50 border-[#C9A84C]/10 hover:border-[#C9A84C]/20 hover:text-[#E0E6ED]/70"
                   }`}
                 >
                   {tab.label} ({options.filter(o => o.step_key === tab.key).length})
@@ -219,7 +219,7 @@ export default function OnboardingAdminPage() {
 
             {/* Step title */}
             {steps.find(s => s.step_key === activeStep) && (
-              <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-4">
+              <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4">
                 <p className="text-sm font-bold text-white">
                   {steps.find(s => s.step_key === activeStep)?.title}
                 </p>
@@ -230,15 +230,15 @@ export default function OnboardingAdminPage() {
             )}
 
             {/* Options list */}
-            <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-[#BFA071]/10">
+            <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-[#C9A84C]/10">
                 <p className="text-xs font-bold text-[#E0E6ED]/70">
                   Варіанти відповідей ({currentOptions.length})
                 </p>
                 <Button
                   size="sm"
                   onClick={openAdd}
-                  className="gap-1.5 h-8 rounded-xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px]"
+                  className="gap-1.5 h-8 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px]"
                 >
                   <Plus className="w-3.5 h-3.5" /> Додати
                 </Button>
@@ -247,16 +247,16 @@ export default function OnboardingAdminPage() {
               {currentOptions.length === 0 ? (
                 <p className="text-sm text-[#E0E6ED]/30 py-10 text-center">Варіантів немає</p>
               ) : (
-                <div className="divide-y divide-[#BFA071]/5">
+                <div className="divide-y divide-[#C9A84C]/5">
                   {currentOptions.map(opt => (
                     <div
                       key={opt.id}
-                      className={`flex items-center gap-3 px-5 py-3.5 group transition-colors ${!opt.is_active ? "opacity-40" : "hover:bg-[#BFA071]/3"}`}
+                      className={`flex items-center gap-3 px-5 py-3.5 group transition-colors ${!opt.is_active ? "opacity-40" : "hover:bg-[#C9A84C]/3"}`}
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-[#E0E6ED]">{opt.label}</span>
-                          <span className="text-[10px] font-mono text-[#BFA071]/40 bg-[#BFA071]/5 px-1.5 py-0.5 rounded-md">{opt.value}</span>
+                          <span className="text-[10px] font-mono text-[#C9A84C]/40 bg-[#C9A84C]/5 px-1.5 py-0.5 rounded-md">{opt.value}</span>
                           {opt.icon && (
                             <span className="text-[10px] text-[#E0E6ED]/30">{opt.icon}</span>
                           )}
@@ -265,21 +265,21 @@ export default function OnboardingAdminPage() {
                           <p className="text-xs text-[#E0E6ED]/40 mt-0.5 truncate">{opt.description}</p>
                         )}
                         {opt.parent_value && (
-                          <p className="text-[10px] text-[#BFA071]/50 mt-0.5">→ {opt.parent_value}</p>
+                          <p className="text-[10px] text-[#C9A84C]/50 mt-0.5">→ {opt.parent_value}</p>
                         )}
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                         <button
                           onClick={() => handleToggle(opt)}
-                          className="text-[#BFA071]/40 hover:text-[#BFA071] transition-colors p-1"
+                          className="text-[#C9A84C]/40 hover:text-[#C9A84C] transition-colors p-1"
                           title={opt.is_active ? "Деактивувати" : "Активувати"}
                         >
                           {opt.is_active
-                            ? <ToggleRight className="w-5 h-5 text-[#BFA071]" />
+                            ? <ToggleRight className="w-5 h-5 text-[#C9A84C]" />
                             : <ToggleLeft className="w-5 h-5" />
                           }
                         </button>
-                        <button onClick={() => openEdit(opt)} className="text-[#BFA071]/40 hover:text-[#BFA071] transition-colors p-1">
+                        <button onClick={() => openEdit(opt)} className="text-[#C9A84C]/40 hover:text-[#C9A84C] transition-colors p-1">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => handleDelete(opt.id)} className="text-red-400/40 hover:text-red-400 transition-colors p-1">
@@ -305,8 +305,8 @@ export default function OnboardingAdminPage() {
             </div>
 
             {/* Segment breakdown */}
-            <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-5">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#BFA071]/70 mb-4 flex items-center gap-2">
+            <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4 flex items-center gap-2">
                 <BarChart3 className="w-4 h-4" /> Розподіл по сегментах
               </h3>
               <div className="space-y-2.5">
@@ -316,10 +316,10 @@ export default function OnboardingAdminPage() {
                   return (
                     <div key={seg} className="flex items-center gap-3">
                       <span className="text-xs text-[#E0E6ED]/70 w-40 truncate shrink-0">{opt?.label ?? seg}</span>
-                      <div className="flex-1 h-2 bg-[#BFA071]/5 rounded-full overflow-hidden">
-                        <div className="h-full bg-[#BFA071]/40 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      <div className="flex-1 h-2 bg-[#C9A84C]/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-[#C9A84C]/40 rounded-full transition-all" style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="text-xs font-bold text-[#BFA071] w-8 text-right shrink-0">{count}</span>
+                      <span className="text-xs font-bold text-[#C9A84C] w-8 text-right shrink-0">{count}</span>
                     </div>
                   )
                 })}
@@ -330,15 +330,15 @@ export default function OnboardingAdminPage() {
             </div>
 
             {/* Recent responses */}
-            <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-4 border-b border-[#BFA071]/10">
-                <Users className="w-4 h-4 text-[#BFA071]/60" />
+            <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-4 border-b border-[#C9A84C]/10">
+                <Users className="w-4 h-4 text-[#C9A84C]/60" />
                 <p className="text-xs font-bold text-[#E0E6ED]/70">Останні відповіді</p>
               </div>
               {responses.length === 0 ? (
                 <p className="text-sm text-[#E0E6ED]/30 py-10 text-center">Відповідей ще немає</p>
               ) : (
-                <div className="divide-y divide-[#BFA071]/5">
+                <div className="divide-y divide-[#C9A84C]/5">
                   {responses.slice(0, 50).map((r, i) => (
                     <div key={i} className="flex items-start gap-4 px-5 py-3 text-xs">
                       <span className="text-[#E0E6ED]/30 shrink-0 tabular-nums w-28">
@@ -348,7 +348,7 @@ export default function OnboardingAdminPage() {
                         {(r.segments ?? []).map(s => {
                           const opt = options.find(o => o.value === s)
                           return (
-                            <span key={s} className="px-2 py-0.5 rounded-lg bg-[#BFA071]/8 text-[#BFA071]/70 border border-[#BFA071]/10 text-[10px] font-bold">
+                            <span key={s} className="px-2 py-0.5 rounded-lg bg-[#C9A84C]/8 text-[#C9A84C]/70 border border-[#C9A84C]/10 text-[10px] font-bold">
                               {opt?.label ?? s}
                             </span>
                           )
@@ -377,12 +377,12 @@ export default function OnboardingAdminPage() {
       {modal !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setModal(null)} />
-          <div className="relative w-full max-w-md bg-[#0d1120] border border-[#BFA071]/30 rounded-[2rem] p-6 space-y-4 shadow-2xl">
+          <div className="relative w-full max-w-md bg-[#0d1120] border border-[#C9A84C]/30 rounded-[2rem] p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">
+              <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">
                 {modal === "add" ? "Новий варіант" : "Редагувати варіант"}
               </p>
-              <button onClick={() => setModal(null)} className="text-[#BFA071]/40 hover:text-[#BFA071]">
+              <button onClick={() => setModal(null)} className="text-[#C9A84C]/40 hover:text-[#C9A84C]">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -390,53 +390,53 @@ export default function OnboardingAdminPage() {
             <div className="space-y-3">
               {modal === "add" && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-wider">Value (key)</label>
+                  <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Value (key)</label>
                   <input
                     value={form.value}
                     onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
                     placeholder="legal_pro"
-                    className="w-full bg-[#0A0E1A] border border-[#BFA071]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#BFA071]/50 font-mono"
+                    className="w-full bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#C9A84C]/50 font-mono"
                   />
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-wider">Label (назва)</label>
+                <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Label (назва)</label>
                 <input
                   value={form.label}
                   onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
                   placeholder="Юридична сфера"
-                  className="w-full bg-[#0A0E1A] border border-[#BFA071]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#BFA071]/50"
+                  className="w-full bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#C9A84C]/50"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-wider">Опис</label>
+                <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Опис</label>
                 <input
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="Адвокати, юристи, нотаріуси"
-                  className="w-full bg-[#0A0E1A] border border-[#BFA071]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#BFA071]/50"
+                  className="w-full bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#C9A84C]/50"
                 />
               </div>
               {activeStep === "segments" && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-wider">Іконка Lucide</label>
+                  <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Іконка Lucide</label>
                   <input
                     value={form.icon}
                     onChange={e => setForm(f => ({ ...f, icon: e.target.value }))}
                     placeholder="Scale"
-                    className="w-full bg-[#0A0E1A] border border-[#BFA071]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#BFA071]/50 font-mono"
+                    className="w-full bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#C9A84C]/50 font-mono"
                   />
                 </div>
               )}
               {activeStep === "sub_roles" && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-wider">
+                  <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">
                     Прив'язка до сегмента (parent_value)
                   </label>
                   <select
                     value={form.parent_value}
                     onChange={e => setForm(f => ({ ...f, parent_value: e.target.value }))}
-                    className="w-full bg-[#0A0E1A] border border-[#BFA071]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#BFA071]/50"
+                    className="w-full bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-xl px-4 py-2.5 text-sm text-[#E0E6ED] outline-none focus:border-[#C9A84C]/50"
                   >
                     <option value="">— всі сегменти —</option>
                     {options.filter(o => o.step_key === "segments").map(o => (
@@ -450,7 +450,7 @@ export default function OnboardingAdminPage() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="w-full h-11 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px]"
+              className="w-full h-11 rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px]"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4 mr-2" />Зберегти</>}
             </Button>

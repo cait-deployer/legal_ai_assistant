@@ -57,7 +57,7 @@ type Filters = {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TIER_CFG: Record<string, { label: string; bg: string; text: string; border: string }> = {
-  free:     { label: "Free",     bg: "bg-[#BFA071]/5",   text: "text-[#BFA071]/70",  border: "border-[#BFA071]/20" },
+  free:     { label: "Free",     bg: "bg-[#C9A84C]/5",   text: "text-[#C9A84C]/70",  border: "border-[#C9A84C]/20" },
   daily:    { label: "Daily",    bg: "bg-blue-500/10",   text: "text-blue-400",       border: "border-blue-500/20"  },
   standard: { label: "Standard", bg: "bg-amber-500/10",  text: "text-amber-400",      border: "border-amber-500/20" },
   pro:      { label: "Pro",      bg: "bg-purple-500/10", text: "text-purple-400",     border: "border-purple-500/20"},
@@ -134,15 +134,15 @@ function SortTh({
   const active = sort.col === col
   return (
     <th
-      className={`px-4 py-3 text-left text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider cursor-pointer select-none hover:text-[#BFA071] transition-colors group ${className}`}
+      className={`px-4 py-3 text-left text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider cursor-pointer select-none hover:text-[#C9A84C] transition-colors group ${className}`}
       onClick={() => onSort(col)}
     >
       <span className="inline-flex items-center gap-1">
         {label}
         {active
           ? sort.dir === "asc"
-            ? <ArrowUp   className="w-3 h-3 text-[#BFA071]" />
-            : <ArrowDown className="w-3 h-3 text-[#BFA071]" />
+            ? <ArrowUp   className="w-3 h-3 text-[#C9A84C]" />
+            : <ArrowDown className="w-3 h-3 text-[#C9A84C]" />
           : <ArrowUpDown className="w-3 h-3 opacity-25 group-hover:opacity-60" />
         }
       </span>
@@ -152,7 +152,7 @@ function SortTh({
 
 function Th({ label, className = "" }: { label: string; className?: string }) {
   return (
-    <th className={`px-4 py-3 text-left text-[10px] font-black text-[#BFA071]/70 uppercase tracking-wider ${className}`}>
+    <th className={`px-4 py-3 text-left text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider ${className}`}>
       {label}
     </th>
   )
@@ -162,9 +162,9 @@ function StatCard({ label, value, sub, accent = false }: {
   label: string; value: string | number; sub?: string; accent?: boolean
 }) {
   return (
-    <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-4 min-w-0">
-      <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-[0.2em] mb-2 truncate">{label}</p>
-      <p className={`text-2xl font-serif font-bold ${accent ? "text-emerald-400" : "text-[#BFA071]"}`}>{value}</p>
+    <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 min-w-0">
+      <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2 truncate">{label}</p>
+      <p className={`text-2xl font-serif font-bold ${accent ? "text-emerald-400" : "text-[#C9A84C]"}`}>{value}</p>
       {sub && <p className="text-[11px] text-[#E0E6ED]/35 mt-1 truncate">{sub}</p>}
     </div>
   )
@@ -181,7 +181,7 @@ function FilterSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-9 px-3 bg-[#0d1120] border border-[#BFA071]/20 rounded-xl text-[11px] text-[#E0E6ED]/70 focus:outline-none focus:border-[#BFA071]/40 cursor-pointer"
+      className="h-9 px-3 bg-[#0d1120] border border-[#C9A84C]/20 rounded-xl text-[11px] text-[#E0E6ED]/70 focus:outline-none focus:border-[#C9A84C]/40 cursor-pointer"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value} className="bg-[#0d1120]">
@@ -196,7 +196,7 @@ function FilterSelect({
 
 function DrawerRow({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2 border-b border-[#BFA071]/5 last:border-0">
+    <div className="flex items-center justify-between gap-4 py-2 border-b border-[#C9A84C]/5 last:border-0">
       <span className="text-xs text-[#E0E6ED]/40 shrink-0">{label}</span>
       <span className={`text-xs text-right ${mono ? "font-mono text-[#E0E6ED]/60" : "font-medium text-[#E0E6ED]/80"} truncate`}>
         {value ?? "—"}
@@ -207,7 +207,7 @@ function DrawerRow({ label, value, mono }: { label: string; value?: React.ReactN
 
 function BoolRow({ label, value }: { label: string; value: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2 border-b border-[#BFA071]/5 last:border-0">
+    <div className="flex items-center justify-between gap-4 py-2 border-b border-[#C9A84C]/5 last:border-0">
       <span className="text-xs text-[#E0E6ED]/40 shrink-0">{label}</span>
       {value
         ? <Check className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -223,12 +223,12 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[420px] bg-[#0d1120] border-l border-[#BFA071]/20 h-full overflow-y-auto shadow-2xl flex flex-col">
+      <div className="relative w-full max-w-[420px] bg-[#0d1120] border-l border-[#C9A84C]/20 h-full overflow-y-auto shadow-2xl flex flex-col">
 
         {/* Header */}
-        <div className="sticky top-0 bg-[#0d1120]/95 backdrop-blur-sm border-b border-[#BFA071]/10 px-6 py-4 flex items-center justify-between z-10 shrink-0">
+        <div className="sticky top-0 bg-[#0d1120]/95 backdrop-blur-sm border-b border-[#C9A84C]/10 px-6 py-4 flex items-center justify-between z-10 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-[#BFA071]/10 border border-[#BFA071]/20 flex items-center justify-center text-[#BFA071] font-bold text-sm shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center text-[#C9A84C] font-bold text-sm shrink-0">
               {initials(user)}
             </div>
             <div className="min-w-0">
@@ -236,7 +236,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
               {user.full_name && <p className="text-xs text-[#E0E6ED]/40 truncate">{user.email}</p>}
             </div>
           </div>
-          <button onClick={onClose} className="text-[#BFA071]/40 hover:text-[#BFA071] transition-colors ml-3 shrink-0">
+          <button onClick={onClose} className="text-[#C9A84C]/40 hover:text-[#C9A84C] transition-colors ml-3 shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -245,7 +245,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
           {/* Tier + provider */}
           <div className="flex items-center gap-2 flex-wrap">
             <TierBadge tier={user.subscription_tier} />
-            <span className="inline-flex items-center gap-1 text-[10px] text-[#E0E6ED]/40 border border-[#BFA071]/10 rounded-lg px-2 py-0.5">
+            <span className="inline-flex items-center gap-1 text-[10px] text-[#E0E6ED]/40 border border-[#C9A84C]/10 rounded-lg px-2 py-0.5">
               {user.auth_provider === "google" ? <Globe className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
               {user.auth_provider}
             </span>
@@ -253,19 +253,19 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
 
           {/* Activity */}
           <section>
-            <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-[0.2em] mb-3">Активність</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Активність</p>
             <div>
               {/* Requests progress */}
-              <div className="mb-3 p-3 bg-[#BFA071]/5 border border-[#BFA071]/10 rounded-xl">
+              <div className="mb-3 p-3 bg-[#C9A84C]/5 border border-[#C9A84C]/10 rounded-xl">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs text-[#E0E6ED]/60">Запити цього місяця</span>
-                  <span className="text-xs font-mono text-[#BFA071]">
+                  <span className="text-xs font-mono text-[#C9A84C]">
                     {user.requests_this_month} / {user.monthly_limit ?? "∞"}
                   </span>
                 </div>
                 {user.monthly_limit && (
                   <div className="w-full h-1.5 bg-[#0A0E1A] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-[#BFA071] transition-all" style={{ width: `${pct}%` }} />
+                    <div className="h-full rounded-full bg-[#C9A84C] transition-all" style={{ width: `${pct}%` }} />
                   </div>
                 )}
                 {user.limit_reset_at && (
@@ -286,7 +286,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
 
           {/* Profile */}
           <section>
-            <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-[0.2em] mb-3">Профіль</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Профіль</p>
             <BoolRow label="Онбординг пройдено"   value={user.is_onboarded}      />
             <BoolRow label="Email підтверджено"    value={user.email_confirmed}   />
             <BoolRow label="Тріал використано"     value={user.trial_used}        />
@@ -296,7 +296,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
 
           {/* Technical */}
           <section>
-            <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-[0.2em] mb-3">Технічне</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Технічне</p>
             <DrawerRow label="IP" value={user.last_ip} mono />
             <DrawerRow
               label="Місто"
@@ -392,10 +392,10 @@ export default function UsersPage() {
     <div className="flex flex-col h-full">
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10 shrink-0">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <Users className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <Users className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Користувачі</h1>
@@ -406,7 +406,7 @@ export default function UsersPage() {
           variant="ghost" size="sm"
           onClick={() => { fetchUsers(); setStatsLoading(true); fetch("/api/admin/users/stats").then(r => r.json()).then(d => setStats(d)).finally(() => setStatsLoading(false)) }}
           disabled={loading}
-          className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl shrink-0"
+          className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl shrink-0"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Оновити
@@ -419,7 +419,7 @@ export default function UsersPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {statsLoading ? (
             Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl p-4 h-24 animate-pulse" />
+              <div key={i} className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 h-24 animate-pulse" />
             ))
           ) : stats ? (
             <>
@@ -440,29 +440,29 @@ export default function UsersPage() {
         <div className="flex flex-wrap gap-2 items-center">
           {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#BFA071]/40 pointer-events-none" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C9A84C]/40 pointer-events-none" />
             <input
               value={rawSearch}
               onChange={(e) => setRawSearch(e.target.value)}
               placeholder="Пошук за email або ім'ям..."
-              className="pl-9 pr-8 h-9 w-[240px] bg-[#0d1120] border border-[#BFA071]/20 rounded-xl text-sm text-[#E0E6ED]/80 placeholder:text-[#E0E6ED]/25 focus:outline-none focus:border-[#BFA071]/40"
+              className="pl-9 pr-8 h-9 w-[240px] bg-[#0d1120] border border-[#C9A84C]/20 rounded-xl text-sm text-[#E0E6ED]/80 placeholder:text-[#E0E6ED]/25 focus:outline-none focus:border-[#C9A84C]/40"
             />
             {rawSearch && (
               <button onClick={() => setRawSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2">
-                <X className="w-3.5 h-3.5 text-[#BFA071]/40 hover:text-[#BFA071]" />
+                <X className="w-3.5 h-3.5 text-[#C9A84C]/40 hover:text-[#C9A84C]" />
               </button>
             )}
           </div>
 
           {/* Tier pills */}
-          <div className="flex items-center gap-0.5 p-1 bg-[#0d1120] border border-[#BFA071]/10 rounded-xl">
+          <div className="flex items-center gap-0.5 p-1 bg-[#0d1120] border border-[#C9A84C]/10 rounded-xl">
             {tierItems.map((t) => (
               <button
                 key={t}
                 onClick={() => setFilter("tier", t)}
                 className={`px-3 h-7 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
                   filters.tier === t
-                    ? "bg-[#BFA071] text-[#0A0E1A]"
+                    ? "bg-[#C9A84C] text-[#0A0E1A]"
                     : "text-[#E0E6ED]/50 hover:text-[#E0E6ED]"
                 }`}
               >
@@ -515,12 +515,12 @@ export default function UsersPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 rounded-2xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-[#BFA071]/10">
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#C9A84C]/10">
             <p className="text-sm text-[#E0E6ED]/60">
               {loading ? "Завантаження..." : `${total} ${total === 1 ? "юзер" : total < 5 ? "юзери" : "юзерів"}`}
             </p>
-            <p className="text-[10px] font-black text-[#BFA071]/40 uppercase tracking-widest">
+            <p className="text-[10px] font-black text-[#C9A84C]/40 uppercase tracking-widest">
               Сторінка {page} з {totalPages}
             </p>
           </div>
@@ -528,7 +528,7 @@ export default function UsersPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#BFA071]/10 bg-[#0A0E1A]/40">
+                <tr className="border-b border-[#C9A84C]/10 bg-[#0A0E1A]/40">
                   <Th label="Юзер" />
                   <SortTh col="subscription_tier"   label="Тариф"       sort={sort} onSort={handleSort} />
                   <SortTh col="requests_this_month" label="Запити"      sort={sort} onSort={handleSort} className="hidden md:table-cell" />
@@ -541,10 +541,10 @@ export default function UsersPage() {
               <tbody>
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
-                    <tr key={i} className="border-b border-[#BFA071]/5">
+                    <tr key={i} className="border-b border-[#C9A84C]/5">
                       {[120, 80, 80, 100, 90, 100, 70].map((w, j) => (
                         <td key={j} className={`px-4 py-3.5 ${j === 2 ? "hidden md:table-cell" : j >= 4 ? "hidden sm:table-cell" : ""}`}>
-                          <div className={`h-4 rounded bg-[#BFA071]/5 animate-pulse`} style={{ width: w }} />
+                          <div className={`h-4 rounded bg-[#C9A84C]/5 animate-pulse`} style={{ width: w }} />
                         </td>
                       ))}
                     </tr>
@@ -562,12 +562,12 @@ export default function UsersPage() {
                       <tr
                         key={u.id}
                         onClick={() => setSelected(u)}
-                        className="border-b border-[#BFA071]/5 last:border-0 hover:bg-[#BFA071]/3 transition-colors cursor-pointer"
+                        className="border-b border-[#C9A84C]/5 last:border-0 hover:bg-[#C9A84C]/3 transition-colors cursor-pointer"
                       >
                         {/* User */}
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-8 h-8 rounded-xl bg-[#BFA071]/10 border border-[#BFA071]/15 flex items-center justify-center text-[#BFA071] text-xs font-bold shrink-0">
+                            <div className="w-8 h-8 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/15 flex items-center justify-center text-[#C9A84C] text-xs font-bold shrink-0">
                               {initials(u)}
                             </div>
                             <div className="min-w-0">
@@ -598,9 +598,9 @@ export default function UsersPage() {
                               </span>
                             </div>
                             {u.monthly_limit ? (
-                              <div className="w-14 h-1 bg-[#BFA071]/10 rounded-full overflow-hidden">
+                              <div className="w-14 h-1 bg-[#C9A84C]/10 rounded-full overflow-hidden">
                                 <div
-                                  className="h-full rounded-full bg-[#BFA071]/60"
+                                  className="h-full rounded-full bg-[#C9A84C]/60"
                                   style={{ width: `${Math.min(100, (u.requests_this_month / u.monthly_limit) * 100)}%` }}
                                 />
                               </div>
@@ -628,9 +628,9 @@ export default function UsersPage() {
                         {/* Status dots */}
                         <td className="px-4 py-3 hidden sm:table-cell">
                           <div className="flex items-center gap-1.5">
-                            <span title="Онбординг" className={`w-2 h-2 rounded-full ${u.is_onboarded ? "bg-emerald-400" : "bg-[#BFA071]/15"}`} />
-                            <span title="Email підтверджено" className={`w-2 h-2 rounded-full ${u.email_confirmed ? "bg-emerald-400" : "bg-[#BFA071]/15"}`} />
-                            <span title="Тріал використано" className={`w-2 h-2 rounded-full ${u.trial_used ? "bg-amber-400" : "bg-[#BFA071]/15"}`} />
+                            <span title="Онбординг" className={`w-2 h-2 rounded-full ${u.is_onboarded ? "bg-emerald-400" : "bg-[#C9A84C]/15"}`} />
+                            <span title="Email підтверджено" className={`w-2 h-2 rounded-full ${u.email_confirmed ? "bg-emerald-400" : "bg-[#C9A84C]/15"}`} />
+                            <span title="Тріал використано" className={`w-2 h-2 rounded-full ${u.trial_used ? "bg-amber-400" : "bg-[#C9A84C]/15"}`} />
                           </div>
                         </td>
                       </tr>
@@ -642,12 +642,12 @@ export default function UsersPage() {
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between px-5 py-4 border-t border-[#BFA071]/10">
+          <div className="flex items-center justify-between px-5 py-4 border-t border-[#C9A84C]/10">
             <Button
               variant="ghost" size="sm"
               disabled={page <= 1 || loading}
               onClick={() => setPage((p) => p - 1)}
-              className="gap-1.5 h-9 rounded-xl border border-[#BFA071]/15 hover:border-[#BFA071]/30 text-[#E0E6ED]/60 hover:text-[#E0E6ED] disabled:opacity-30"
+              className="gap-1.5 h-9 rounded-xl border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 text-[#E0E6ED]/60 hover:text-[#E0E6ED] disabled:opacity-30"
             >
               <ChevronLeft className="w-4 h-4" /> Попередня
             </Button>
@@ -670,8 +670,8 @@ export default function UsersPage() {
                     onClick={() => setPage(p)}
                     className={`w-8 h-8 rounded-xl text-xs font-bold transition-all ${
                       p === page
-                        ? "bg-[#BFA071] text-[#0A0E1A]"
-                        : "text-[#E0E6ED]/40 hover:text-[#E0E6ED] hover:bg-[#BFA071]/10"
+                        ? "bg-[#C9A84C] text-[#0A0E1A]"
+                        : "text-[#E0E6ED]/40 hover:text-[#E0E6ED] hover:bg-[#C9A84C]/10"
                     }`}
                   >
                     {p}
@@ -684,7 +684,7 @@ export default function UsersPage() {
               variant="ghost" size="sm"
               disabled={page >= totalPages || loading}
               onClick={() => setPage((p) => p + 1)}
-              className="gap-1.5 h-9 rounded-xl border border-[#BFA071]/15 hover:border-[#BFA071]/30 text-[#E0E6ED]/60 hover:text-[#E0E6ED] disabled:opacity-30"
+              className="gap-1.5 h-9 rounded-xl border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 text-[#E0E6ED]/60 hover:text-[#E0E6ED] disabled:opacity-30"
             >
               Наступна <ChevronRight className="w-4 h-4" />
             </Button>
@@ -700,7 +700,7 @@ export default function UsersPage() {
             <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Тріал
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#BFA071]/20 inline-block" /> Не виконано
+            <span className="w-2 h-2 rounded-full bg-[#C9A84C]/20 inline-block" /> Не виконано
           </span>
           <span className="text-[#E0E6ED]/20">· Кольорові точки: онбординг / email / тріал</span>
         </div>

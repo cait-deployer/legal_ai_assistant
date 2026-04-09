@@ -124,10 +124,10 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6 py-2">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <LayoutDashboard className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <LayoutDashboard className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Огляд</h1>
@@ -136,7 +136,7 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {lastUpdated && (
-            <p className="text-[10px] font-black text-[#BFA071]/50 uppercase tracking-widest hidden sm:block">
+            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">
               Оновлено {lastUpdated.toLocaleTimeString()}
             </p>
           )}
@@ -145,7 +145,7 @@ export default function AdminDashboard() {
             size="sm"
             onClick={fetchStats}
             disabled={loading}
-            className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Оновити
@@ -156,48 +156,48 @@ export default function AdminDashboard() {
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {/* Doc count */}
-        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 hover:border-[#BFA071]/30 rounded-[2rem] p-6 transition-all duration-200">
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 hover:border-[#C9A84C]/30 rounded-[2rem] p-6 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-[0.2em]">Документів у базі</p>
-            <div className="w-9 h-9 rounded-xl bg-[#BFA071]/10 flex items-center justify-center">
-              <FileText className="w-4 h-4 text-[#BFA071]" />
+            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Документів у базі</p>
+            <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center">
+              <FileText className="w-4 h-4 text-[#C9A84C]" />
             </div>
           </div>
           {loading ? (
-            <div className="h-10 w-28 rounded-xl bg-[#BFA071]/5 animate-pulse" />
+            <div className="h-10 w-28 rounded-xl bg-[#C9A84C]/5 animate-pulse" />
           ) : (
             <div className="text-4xl font-serif font-bold text-white tabular-nums">
               {stats?.doc_count?.toLocaleString() ?? "—"}
             </div>
           )}
-          <p className="text-xs text-[#BFA071]/50 mt-2 font-medium uppercase tracking-wider">Векторних чанків у Supabase</p>
+          <p className="text-xs text-[#C9A84C]/50 mt-2 font-medium uppercase tracking-wider">Векторних чанків у Supabase</p>
         </div>
 
         {/* Schedule toggle */}
-        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 hover:border-[#BFA071]/30 rounded-[2rem] p-6 transition-all duration-200">
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 hover:border-[#C9A84C]/30 rounded-[2rem] p-6 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-[0.2em]">Автосинхронізація</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Автосинхронізація</p>
             <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
               <Calendar className="w-4 h-4 text-blue-400" />
             </div>
           </div>
           {loading ? (
-            <div className="h-10 w-28 rounded-xl bg-[#BFA071]/5 animate-pulse" />
+            <div className="h-10 w-28 rounded-xl bg-[#C9A84C]/5 animate-pulse" />
           ) : (
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full transition-colors ${stats?.schedule_enabled ? "bg-emerald-400" : "bg-[#BFA071]/20"}`} />
+                  <div className={`w-2.5 h-2.5 rounded-full transition-colors ${stats?.schedule_enabled ? "bg-emerald-400" : "bg-[#C9A84C]/20"}`} />
                   <span className="text-xl font-serif font-bold text-white">
                     {stats?.schedule_enabled ? "Увімкнено" : "Вимкнено"}
                   </span>
                 </div>
-                <p className="text-[10px] text-[#BFA071]/50 mt-1.5 font-black uppercase tracking-wider">Щодня о 01:00</p>
+                <p className="text-[10px] text-[#C9A84C]/50 mt-1.5 font-black uppercase tracking-wider">Щодня о 01:00</p>
               </div>
               <button
                 onClick={handleToggleSchedule}
                 disabled={scheduleToggling}
-                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-300 focus:outline-none disabled:opacity-60 ${stats?.schedule_enabled ? "bg-[#BFA071]" : "bg-[#BFA071]/20"
+                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-300 focus:outline-none disabled:opacity-60 ${stats?.schedule_enabled ? "bg-[#C9A84C]" : "bg-[#C9A84C]/20"
                   }`}
                 role="switch"
                 aria-checked={stats?.schedule_enabled}
@@ -210,15 +210,15 @@ export default function AdminDashboard() {
         </div>
 
         {/* Scraping status */}
-        <div className="bg-[#0d1120]/60 border border-[#BFA071]/10 hover:border-[#BFA071]/30 rounded-[2rem] p-6 transition-all duration-200">
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 hover:border-[#C9A84C]/30 rounded-[2rem] p-6 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-[10px] font-black text-[#BFA071]/70 uppercase tracking-[0.2em]">Статус скрапінгу</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Статус скрапінгу</p>
             <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
               <Zap className="w-4 h-4 text-amber-400" />
             </div>
           </div>
           {loading ? (
-            <div className="h-10 w-28 rounded-xl bg-[#BFA071]/5 animate-pulse" />
+            <div className="h-10 w-28 rounded-xl bg-[#C9A84C]/5 animate-pulse" />
           ) : stats?.scraping_running ? (
             <div className="flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
@@ -251,7 +251,7 @@ export default function AdminDashboard() {
               <span className="text-xl font-serif font-bold text-white">Очікування</span>
             </div>
           )}
-          <p className="text-[10px] text-[#BFA071]/50 mt-2 font-black uppercase tracking-wider">Поточний стан синхронізації</p>
+          <p className="text-[10px] text-[#C9A84C]/50 mt-2 font-black uppercase tracking-wider">Поточний стан синхронізації</p>
         </div>
       </div>
 
@@ -259,18 +259,18 @@ export default function AdminDashboard() {
       <div className={`bg-[#0d1120]/60 border rounded-[2rem] p-6 transition-all ${
         (syncStats?.consecutive_failures ?? 0) >= 3 ? "border-red-500/30"
         : (syncStats?.consecutive_failures ?? 0) === 1 ? "border-amber-500/20"
-        : "border-[#BFA071]/10"
+        : "border-[#C9A84C]/10"
       }`}>
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[#BFA071]" />
-              <h2 className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Аналітика синхронізації</h2>
+              <Clock className="w-4 h-4 text-[#C9A84C]" />
+              <h2 className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Аналітика синхронізації</h2>
             </div>
             <p className="text-sm text-[#E0E6ED]/70 mt-1">Надійність та статистика за 30 днів</p>
           </div>
           <Link href="/admin/settings">
-            <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5 rounded-xl">
+            <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 rounded-xl">
               Керувати <ArrowRight className="w-3 h-3" />
             </Button>
           </Link>
@@ -278,9 +278,9 @@ export default function AdminDashboard() {
 
         {loading ? (
           <div className="space-y-3">
-            <div className="h-10 w-full rounded-xl bg-[#BFA071]/5 animate-pulse" />
+            <div className="h-10 w-full rounded-xl bg-[#C9A84C]/5 animate-pulse" />
             <div className="grid grid-cols-4 gap-3">
-              {[0,1,2,3].map(i => <div key={i} className="h-14 rounded-xl bg-[#BFA071]/5 animate-pulse" />)}
+              {[0,1,2,3].map(i => <div key={i} className="h-14 rounded-xl bg-[#C9A84C]/5 animate-pulse" />)}
             </div>
           </div>
         ) : (
@@ -290,7 +290,7 @@ export default function AdminDashboard() {
               <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${
                 a.level === "error"   ? "bg-red-500/10 border-red-500/20 text-red-400"
                 : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                : "bg-[#BFA071]/5 border-[#BFA071]/15 text-[#BFA071]/80"
+                : "bg-[#C9A84C]/5 border-[#C9A84C]/15 text-[#C9A84C]/80"
               }`}>
                 {a.level === "error"   && <XCircle className="w-4 h-4 shrink-0" />}
                 {a.level === "warning" && <AlertTriangle className="w-4 h-4 shrink-0" />}
@@ -303,7 +303,7 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {/* Reliability */}
               <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                   <TrendingUp className="w-3 h-3" /> Надійність
                 </p>
                 <p className={`text-2xl font-bold mt-1 ${
@@ -321,7 +321,7 @@ export default function AdminDashboard() {
 
               {/* Laws 30d */}
               <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                   <CheckCircle className="w-3 h-3" /> Законів / міс
                 </p>
                 <p className="text-2xl font-bold mt-1 text-white">
@@ -334,7 +334,7 @@ export default function AdminDashboard() {
 
               {/* Avg duration */}
               <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                   <Timer className="w-3 h-3" /> Сер. тривалість
                 </p>
                 <p className="text-2xl font-bold mt-1 text-white">
@@ -345,7 +345,7 @@ export default function AdminDashboard() {
 
               {/* Last success */}
               <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/50 flex items-center gap-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                   <Clock className="w-3 h-3" /> Останній успіх
                 </p>
                 <p className={`text-xl font-bold mt-1 ${
@@ -365,7 +365,7 @@ export default function AdminDashboard() {
             {/* Sparkline */}
             {syncStats && syncStats.last_14_runs.length > 0 && (
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#BFA071]/40 mb-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/40 mb-2">
                   Останні {syncStats.last_14_runs.length} запусків
                   <span className="ml-2 font-normal normal-case text-[#E0E6ED]/30">(висота = кількість законів)</span>
                 </p>
@@ -382,25 +382,25 @@ export default function AdminDashboard() {
       </div>
 
       {/* Quick actions */}
-      <div className="bg-[#0d1120]/40 border border-dashed border-[#BFA071]/10 rounded-[2rem] p-6">
+      <div className="bg-[#0d1120]/40 border border-dashed border-[#C9A84C]/10 rounded-[2rem] p-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Швидкі дії</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Швидкі дії</p>
             <p className="text-sm text-[#E0E6ED]/70 mt-1">Перейдіть до потрібного розділу</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/settings">
-              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#BFA071]/15 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl text-xs">
+              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl text-xs">
                 <Settings className="w-4 h-4" /> Налаштування
               </Button>
             </Link>
             <Link href="/admin/base">
-              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#BFA071]/15 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl text-xs">
+              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl text-xs">
                 <BookOpen className="w-4 h-4" /> База знань
               </Button>
             </Link>
             <Link href="/">
-              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#BFA071]/15 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl text-xs">
+              <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl text-xs">
                 <FileText className="w-4 h-4" /> Відкрити чат
               </Button>
             </Link>

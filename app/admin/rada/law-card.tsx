@@ -77,11 +77,11 @@ const CATEGORY_STYLES: Record<string, string> = {
 
 const STATUS_STYLES: Record<string, string> = {
   "Чинний": "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  "Невідомо": "bg-[#BFA071]/5 text-[#BFA071]/70 border-[#BFA071]/10",
+  "Невідомо": "bg-[#C9A84C]/5 text-[#C9A84C]/70 border-[#C9A84C]/10",
 }
 
 export function getStatusStyle(status: string) {
-  return STATUS_STYLES[status] ?? "bg-[#BFA071]/5 text-[#BFA071]/70 border-[#BFA071]/10"
+  return STATUS_STYLES[status] ?? "bg-[#C9A84C]/5 text-[#C9A84C]/70 border-[#C9A84C]/10"
 }
 
 export function getCategoryLabel(cat: string) {
@@ -89,7 +89,7 @@ export function getCategoryLabel(cat: string) {
 }
 
 export function getCategoryStyle(cat: string) {
-  return CATEGORY_STYLES[cat] ?? "bg-[#BFA071]/5 text-[#BFA071]/70 border-[#BFA071]/10"
+  return CATEGORY_STYLES[cat] ?? "bg-[#C9A84C]/5 text-[#C9A84C]/70 border-[#C9A84C]/10"
 }
 
 type Props = {
@@ -111,19 +111,19 @@ export function LawCard({ law, isActive, onOpen }: Props) {
           group flex flex-col transition-all duration-200 overflow-hidden cursor-pointer rounded-2xl border
           bg-[#0d1120]/60
           ${isActive
-            ? "border-[#BFA071] shadow-lg shadow-[#BFA071]/10 ring-1 ring-[#BFA071]/20"
-            : "border-[#BFA071]/10 hover:border-[#BFA071]/30 hover:shadow-md hover:shadow-black/20"
+            ? "border-[#C9A84C] shadow-lg shadow-[#C9A84C]/10 ring-1 ring-[#C9A84C]/20"
+            : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30 hover:shadow-md hover:shadow-black/20"
           }
         `}
       >
         {/* top accent bar */}
-        <div className={`h-0.5 w-full shrink-0 transition-all duration-200 ${isActive ? "bg-[#BFA071]" : "bg-gradient-to-r from-[#BFA071]/40 via-[#BFA071]/20 to-transparent"}`} />
+        <div className={`h-0.5 w-full shrink-0 transition-all duration-200 ${isActive ? "bg-[#C9A84C]" : "bg-gradient-to-r from-[#C9A84C]/40 via-[#C9A84C]/20 to-transparent"}`} />
 
         <div className="flex-1 pt-4 pb-3 px-4 space-y-3">
           {/* icon + title */}
           <div className="flex items-start gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#BFA071]/10 flex items-center justify-center shrink-0 mt-0.5">
-              <Scale className="w-4 h-4 text-[#BFA071]" />
+            <div className="w-8 h-8 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center shrink-0 mt-0.5">
+              <Scale className="w-4 h-4 text-[#C9A84C]" />
             </div>
             <p className="font-semibold text-sm leading-snug line-clamp-2 min-w-0 text-[#E0E6ED]">
               {meta.source || `Закон ${meta.law_id}`}
@@ -143,7 +143,7 @@ export function LawCard({ law, isActive, onOpen }: Props) {
           </div>
 
           {/* law id */}
-          <div className="flex items-center gap-1.5 text-xs text-[#BFA071]/70">
+          <div className="flex items-center gap-1.5 text-xs text-[#C9A84C]/70">
             <Hash className="w-3.5 h-3.5 shrink-0" />
             <span className="font-mono truncate">{meta.law_id}</span>
           </div>
@@ -157,19 +157,19 @@ export function LawCard({ law, isActive, onOpen }: Props) {
         </div>
 
         <div
-          className="pt-2 pb-3 px-4 flex gap-2 border-t border-[#BFA071]/10 bg-[#0A0E1A]/30"
+          className="pt-2 pb-3 px-4 flex gap-2 border-t border-[#C9A84C]/10 bg-[#0A0E1A]/30"
           onClick={(e) => e.stopPropagation()}
         >
           <Button
             variant="ghost" size="sm"
-            className="flex-1 gap-1.5 h-8 text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors rounded-xl text-xs"
+            className="flex-1 gap-1.5 h-8 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors rounded-xl text-xs"
             onClick={onOpen}
           >
             <FileText className="w-3.5 h-3.5" /> Читати
           </Button>
           {meta.law_url && (
             <>
-              <div className="w-px h-5 bg-[#BFA071]/10 self-center" />
+              <div className="w-px h-5 bg-[#C9A84C]/10 self-center" />
               <Tooltip>
                 <TooltipTrigger>
                   <a
@@ -177,12 +177,12 @@ export function LawCard({ law, isActive, onOpen }: Props) {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="flex-1 gap-1.5 h-8 inline-flex items-center justify-center rounded-xl text-xs font-medium hover:text-[#BFA071] hover:bg-[#BFA071]/10 transition-colors text-[#BFA071]/70"
+                    className="flex-1 gap-1.5 h-8 inline-flex items-center justify-center rounded-xl text-xs font-medium hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors text-[#C9A84C]/70"
                   >
                     <ExternalLink className="w-3.5 h-3.5" /> РАДА
                   </a>
                 </TooltipTrigger>
-                <TooltipContent side="top" className="bg-[#0d1120] border-[#BFA071]/20 text-[#E0E6ED]"><p>Відкрити на zakon.rada.gov.ua</p></TooltipContent>
+                <TooltipContent side="top" className="bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]"><p>Відкрити на zakon.rada.gov.ua</p></TooltipContent>
               </Tooltip>
             </>
           )}

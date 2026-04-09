@@ -74,7 +74,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {/* Sidebar */}
           <aside className={cn(
-            "fixed top-0 left-0 z-50 h-full bg-[#0d1120] border-r border-[#BFA071]/20 shadow-xl shadow-black/40",
+            "fixed top-0 left-0 z-50 h-full bg-[#0d1120] border-r border-[#C9A84C]/20 shadow-xl shadow-black/40",
             "transition-all duration-300 ease-in-out flex flex-col",
             "lg:translate-x-0",
             mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
@@ -83,7 +83,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           )}>
             {/* Header */}
             <div className={cn(
-              "flex items-center border-b border-[#BFA071]/10 shrink-0 transition-all duration-300",
+              "flex items-center border-b border-[#C9A84C]/10 shrink-0 transition-all duration-300",
               mounted && collapsed ? "lg:px-3 lg:py-4 lg:justify-center px-5 py-[18px] justify-between" : "px-5 py-[18px] justify-between",
             )}>
               {mounted && collapsed ? (
@@ -93,26 +93,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     className="hidden lg:flex items-center justify-center group"
                     title="Розгорнути"
                   >
-                    <div className="w-9 h-9 rounded-xl bg-[#BFA071] flex items-center justify-center shadow-md shadow-[#BFA071]/20 group-hover:bg-[#d4b78a] transition-all duration-200">
+                    <div className="w-9 h-9 rounded-xl bg-[#C9A84C] flex items-center justify-center shadow-md shadow-[#C9A84C]/20 group-hover:bg-[#E2C47A] transition-all duration-200">
                       <Scale className="w-4 h-4 text-[#0A0E1A]" />
                     </div>
                   </button>
                   <div className="flex items-center gap-3 lg:hidden">
-                    <div className="w-9 h-9 rounded-xl bg-[#BFA071] flex items-center justify-center shadow-md shadow-[#BFA071]/20 shrink-0">
+                    <div className="w-9 h-9 rounded-xl bg-[#C9A84C] flex items-center justify-center shadow-md shadow-[#C9A84C]/20 shrink-0">
                       <Scale className="w-4 h-4 text-[#0A0E1A]" />
                     </div>
                     <span className="font-serif font-bold text-base whitespace-nowrap text-white">
                       Lawyer AI
                     </span>
                   </div>
-                  <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8 text-[#BFA071]/60 hover:text-[#BFA071] hover:bg-[#BFA071]/5" onClick={() => setMobileOpen(false)}>
+                  <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8 text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5" onClick={() => setMobileOpen(false)}>
                     <X className="w-4 h-4" />
                   </Button>
                 </>
               ) : (
                 <>
                   <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="w-9 h-9 rounded-xl bg-[#BFA071] flex items-center justify-center shadow-md shadow-[#BFA071]/20 shrink-0">
+                    <div className="w-9 h-9 rounded-xl bg-[#C9A84C] flex items-center justify-center shadow-md shadow-[#C9A84C]/20 shrink-0">
                       <Scale className="w-4 h-4 text-[#0A0E1A]" />
                     </div>
                     <span className="font-serif font-bold text-base whitespace-nowrap text-white">
@@ -122,12 +122,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <div className="flex items-center gap-1">
                     <Button
                       variant="ghost" size="icon"
-                      className="hidden lg:flex h-8 w-8 text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5"
+                      className="hidden lg:flex h-8 w-8 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"
                       onClick={toggleCollapse}
                     >
                       <PanelLeftClose className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8 text-[#BFA071]/60 hover:text-[#BFA071] hover:bg-[#BFA071]/5" onClick={() => setMobileOpen(false)}>
+                    <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8 text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5" onClick={() => setMobileOpen(false)}>
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
@@ -147,21 +147,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                         "w-full h-10 font-medium transition-all duration-200 group",
                         collapsed ? "lg:justify-center lg:px-0 justify-start gap-3 px-3" : "justify-start gap-3 px-3",
                         isActive
-                          ? "bg-[#BFA071]/10 text-[#BFA071] hover:bg-[#BFA071]/15 hover:text-[#BFA071] border border-[#BFA071]/20"
-                          : "hover:bg-[#BFA071]/5 text-[#E0E6ED]/70 hover:text-[#E0E6ED]",
+                          ? "bg-[#C9A84C]/10 text-[#C9A84C] hover:bg-[#C9A84C]/15 hover:text-[#C9A84C] border border-[#C9A84C]/20"
+                          : "hover:bg-[#C9A84C]/5 text-[#E0E6ED]/70 hover:text-[#E0E6ED]",
                       )}
                       onClick={() => setMobileOpen(false)}
                     >
                       <item.icon className={cn(
                         "shrink-0",
                         collapsed ? "lg:w-5 lg:h-5 w-4 h-4" : "w-4 h-4",
-                        isActive ? "text-[#BFA071]" : "text-[#E0E6ED]/70 group-hover:text-[#E0E6ED]",
+                        isActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/70 group-hover:text-[#E0E6ED]",
                       )} />
                       <span className={cn("truncate", collapsed && "lg:hidden")}>
                         {item.name}
                       </span>
                       {isActive && !collapsed && (
-                        <ChevronRight className="w-3 h-3 ml-auto text-[#BFA071]/60" />
+                        <ChevronRight className="w-3 h-3 ml-auto text-[#C9A84C]/60" />
                       )}
                     </Button>
                   </Link>
@@ -173,7 +173,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                       <TooltipTrigger>
                         <div className="hidden lg:block">{btn}</div>
                       </TooltipTrigger>
-                      <TooltipContent side="right" className="font-medium bg-[#0d1120] border-[#BFA071]/20 text-[#E0E6ED]">{item.name}</TooltipContent>
+                      <TooltipContent side="right" className="font-medium bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">{item.name}</TooltipContent>
                     </Tooltip>
                   )
                 }
@@ -188,34 +188,34 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <TooltipTrigger>
                     <Button
                       variant="ghost" size="icon"
-                      className="h-9 w-9 text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5"
+                      className="h-9 w-9 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"
                       onClick={toggleCollapse}
                     >
                       <PanelLeftOpen className="w-4 h-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="right" className="bg-[#0d1120] border-[#BFA071]/20 text-[#E0E6ED]">Розгорнути</TooltipContent>
+                  <TooltipContent side="right" className="bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">Розгорнути</TooltipContent>
                 </Tooltip>
               </div>
             )}
 
             {/* Footer */}
             <div className={cn(
-              "border-t border-[#BFA071]/10 shrink-0 transition-all duration-300 flex flex-col gap-1.5",
+              "border-t border-[#C9A84C]/10 shrink-0 transition-all duration-300 flex flex-col gap-1.5",
               collapsed ? "p-2" : "p-3",
             )}>
               {collapsed ? (
                 <Tooltip>
                   <TooltipTrigger>
-                    <Link href="/" className="flex items-center justify-center w-full h-10 rounded-xl text-[#BFA071]/70 hover:text-[#BFA071] hover:bg-[#BFA071]/5 transition-colors">
+                    <Link href="/" className="flex items-center justify-center w-full h-10 rounded-xl text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 transition-colors">
                       <ChevronLeft className="w-4 h-4" />
                     </Link>
                   </TooltipTrigger>
-                  <TooltipContent side="right" className="bg-[#0d1120] border-[#BFA071]/20 text-[#E0E6ED]">До чату</TooltipContent>
+                  <TooltipContent side="right" className="bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">До чату</TooltipContent>
                 </Tooltip>
               ) : (
                 <Link href="/">
-                  <Button variant="ghost" className="w-full justify-start gap-3 h-10 font-medium text-sm text-[#BFA071]/60 hover:text-[#BFA071] hover:bg-[#BFA071]/5 border border-[#BFA071]/10 hover:border-[#BFA071]/20 rounded-xl transition-all duration-200">
+                  <Button variant="ghost" className="w-full justify-start gap-3 h-10 font-medium text-sm text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 border border-[#C9A84C]/10 hover:border-[#C9A84C]/20 rounded-xl transition-all duration-200">
                     <ChevronLeft className="w-4 h-4" />
                     До чату
                   </Button>
@@ -229,14 +229,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             "flex-1 min-w-0 transition-all duration-300",
             mounted && collapsed ? "lg:pl-[68px]" : "lg:pl-64",
           )}>
-            <header className="sticky top-0 z-30 bg-[#0A0E1A]/80 backdrop-blur-md border-b border-[#BFA071]/10">
+            <header className="sticky top-0 z-30 bg-[#0A0E1A]/80 backdrop-blur-md border-b border-[#C9A84C]/10">
               <div className="flex items-center justify-between px-4 sm:px-6 py-3.5">
-                <Button variant="ghost" size="icon" className="lg:hidden h-9 w-9 text-[#BFA071]/60 hover:text-[#BFA071] hover:bg-[#BFA071]/5" onClick={() => setMobileOpen(true)}>
+                <Button variant="ghost" size="icon" className="lg:hidden h-9 w-9 text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5" onClick={() => setMobileOpen(true)}>
                   <Menu className="w-5 h-5" />
                 </Button>
-                <div className="hidden lg:flex items-center gap-2 text-sm text-[#BFA071]/60">
+                <div className="hidden lg:flex items-center gap-2 text-sm text-[#C9A84C]/60">
                   <Scale className="w-4 h-4" />
-                  <span className="text-[#BFA071]/50">/</span>
+                  <span className="text-[#C9A84C]/50">/</span>
                   <span className="text-[#E0E6ED]/80 font-medium">
                     {navigation.find((n) => n.href === pathname)?.name ?? "Адмін"}
                   </span>
@@ -244,21 +244,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <div className="flex-1 lg:flex-none" />
                 <DropdownMenu>
                   <DropdownMenuTrigger className="focus:outline-none">
-                    <div className="inline-flex items-center gap-2.5 px-2.5 h-10 hover:bg-[#BFA071]/5 rounded-xl cursor-pointer transition-colors">
-                      <Avatar className="w-8 h-8 border-2 border-[#BFA071]/20">
-                        <AvatarFallback className="bg-[#BFA071]/10 text-[#BFA071] text-xs font-bold">AD</AvatarFallback>
+                    <div className="inline-flex items-center gap-2.5 px-2.5 h-10 hover:bg-[#C9A84C]/5 rounded-xl cursor-pointer transition-colors">
+                      <Avatar className="w-8 h-8 border-2 border-[#C9A84C]/20">
+                        <AvatarFallback className="bg-[#C9A84C]/10 text-[#C9A84C] text-xs font-bold">AD</AvatarFallback>
                       </Avatar>
                       <span className="hidden md:inline-block font-medium text-sm text-[#E0E6ED]/80">Admin</span>
                     </div>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48 bg-[#0d1120] border-[#BFA071]/20">
+                  <DropdownMenuContent align="end" className="w-48 bg-[#0d1120] border-[#C9A84C]/20">
                     <DropdownMenuLabel className="font-normal">
                       <div className="flex flex-col gap-0.5">
                         <span className="font-semibold text-sm text-[#E0E6ED]">Admin</span>
-                        <span className="text-xs text-[#BFA071]/70">Панель керування</span>
+                        <span className="text-xs text-[#C9A84C]/70">Панель керування</span>
                       </div>
                     </DropdownMenuLabel>
-                    <DropdownMenuSeparator className="bg-[#BFA071]/10" />
+                    <DropdownMenuSeparator className="bg-[#C9A84C]/10" />
                     <DropdownMenuItem
                       className="text-red-400 focus:text-red-400 focus:bg-red-500/10 cursor-pointer"
                       onClick={handleLogout}

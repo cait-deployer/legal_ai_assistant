@@ -47,22 +47,22 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
       style={style}
       className={`flex items-center gap-4 px-5 py-4 rounded-2xl border transition-all ${
         isDragging
-          ? "border-[#BFA071]/40 bg-[#0d1120] shadow-2xl shadow-black/40"
-          : "border-[#BFA071]/10 bg-[#0d1120]/60 hover:border-[#BFA071]/25"
+          ? "border-[#C9A84C]/40 bg-[#0d1120] shadow-2xl shadow-black/40"
+          : "border-[#C9A84C]/10 bg-[#0d1120]/60 hover:border-[#C9A84C]/25"
       }`}
     >
       {/* Drag handle */}
       <button
         {...attributes}
         {...listeners}
-        className="text-[#BFA071]/20 hover:text-[#BFA071]/50 cursor-grab active:cursor-grabbing shrink-0"
+        className="text-[#C9A84C]/20 hover:text-[#C9A84C]/50 cursor-grab active:cursor-grabbing shrink-0"
       >
         <GripVertical className="w-5 h-5" />
       </button>
 
       {/* Sort order badge */}
-      <div className="w-7 h-7 rounded-lg bg-[#BFA071]/10 flex items-center justify-center shrink-0">
-        <span className="text-[10px] font-black text-[#BFA071]/60">{plan.sort_order + 1}</span>
+      <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+        <span className="text-[10px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
       </div>
 
       {/* Name + badge */}
@@ -73,7 +73,7 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
             <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
               plan.badge_color === "emerald"
                 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                : "bg-[#BFA071]/10 text-[#BFA071] border-[#BFA071]/20"
+                : "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/20"
             }`}>
               {plan.badge_text}
             </span>
@@ -86,7 +86,7 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
 
       {/* Price */}
       <div className="shrink-0 text-right">
-        <div className="font-bold text-[#BFA071] text-lg">
+        <div className="font-bold text-[#C9A84C] text-lg">
           {plan.price_uah === 0 ? "Безкоштовно" : `${plan.price_uah} грн`}
         </div>
         {plan.price_uah > 0 && <PeriodLabel period={plan.billing_period} />}
@@ -95,27 +95,27 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
       {/* Requests */}
       <div className="shrink-0 w-32 text-center">
         {plan.request_limit == null
-          ? <Infinity className="w-4 h-4 text-[#BFA071]/60 mx-auto" />
+          ? <Infinity className="w-4 h-4 text-[#C9A84C]/60 mx-auto" />
           : <span className="text-sm text-[#E0E6ED]/60">{plan.request_limit} запитів</span>
         }
       </div>
 
       {/* Feature count */}
       <div className="shrink-0 w-20 text-center">
-        <span className="text-xs text-[#BFA071]/50">{featureCount} фіч</span>
+        <span className="text-xs text-[#C9A84C]/50">{featureCount} фіч</span>
       </div>
 
       {/* Active toggle */}
       <div className="shrink-0">
         {plan.is_active
           ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          : <XCircle className="w-4 h-4 text-[#BFA071]/20" />
+          : <XCircle className="w-4 h-4 text-[#C9A84C]/20" />
         }
       </div>
 
       {/* Edit */}
       <Link href={`/admin/plans/${plan.id}`} className="shrink-0">
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/10 rounded-xl">
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 rounded-xl">
           <Pencil className="w-3.5 h-3.5" />
         </Button>
       </Link>
@@ -176,10 +176,10 @@ export default function PlansListPage() {
   return (
     <div className="space-y-6 py-2">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#BFA071]/10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#BFA071]/10 border border-[#BFA071]/20 rounded-2xl shrink-0">
-            <CreditCard className="w-8 h-8 text-[#BFA071]" />
+          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
+            <CreditCard className="w-8 h-8 text-[#C9A84C]" />
           </div>
           <div>
             <h1 className="text-3xl font-serif font-bold text-white">Тарифи</h1>
@@ -188,7 +188,7 @@ export default function PlansListPage() {
         </div>
         <Button
           variant="ghost" size="sm" onClick={load} disabled={loading}
-          className="gap-2 border border-[#BFA071]/20 hover:border-[#BFA071]/40 hover:bg-[#BFA071]/5 text-[#BFA071]/60 hover:text-[#BFA071] rounded-xl"
+          className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
         >
           {loading || saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Оновити
@@ -196,7 +196,7 @@ export default function PlansListPage() {
       </div>
 
       {/* Column headers */}
-      <div className="flex items-center gap-4 px-5 text-[9px] font-black text-[#BFA071]/30 uppercase tracking-[0.2em]">
+      <div className="flex items-center gap-4 px-5 text-[9px] font-black text-[#C9A84C]/30 uppercase tracking-[0.2em]">
         <div className="w-5 shrink-0" />
         <div className="w-7 shrink-0" />
         <div className="flex-1">Назва</div>
@@ -210,7 +210,7 @@ export default function PlansListPage() {
       {loading ? (
         <div className="space-y-3">
           {[0,1,2,3].map(i => (
-            <div key={i} className="h-16 rounded-2xl bg-[#BFA071]/5 animate-pulse" style={{ animationDelay: `${i*70}ms` }} />
+            <div key={i} className="h-16 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i*70}ms` }} />
           ))}
         </div>
       ) : (
@@ -225,7 +225,7 @@ export default function PlansListPage() {
         </DndContext>
       )}
 
-      <p className="text-center text-[10px] text-[#BFA071]/30 font-black uppercase tracking-widest pt-4">
+      <p className="text-center text-[10px] text-[#C9A84C]/30 font-black uppercase tracking-widest pt-4">
         {plans.length} тарифів
       </p>
     </div>

@@ -138,8 +138,8 @@ function OnboardingContent() {
 
   if (loading) return (
     <div className="flex flex-col items-center gap-4">
-      <Loader2 className="w-12 h-12 animate-spin text-[#BFA071]" />
-      <p className="text-[#BFA071] font-black uppercase tracking-[0.3em] text-[10px]">Завантаження...</p>
+      <Loader2 className="w-12 h-12 animate-spin text-[#C9A84C]" />
+      <p className="text-[#C9A84C] font-black uppercase tracking-[0.3em] text-[10px]">Завантаження...</p>
     </div>
   )
 
@@ -150,12 +150,12 @@ function OnboardingContent() {
     <div className="relative z-10 w-full max-w-[500px]">
       {/* ── Logo (З твого оригінального дизайну) ── */}
       <div className="flex flex-col items-center gap-4 mb-8">
-        <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
+        <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#C9A84C] to-[#E2C47A] flex items-center justify-center shadow-2xl shadow-[#C9A84C]/20 ring-4 ring-[#C9A84C]/10">
           <Scale className="w-8 h-8 text-[#0A0E1A]" />
         </div>
         <div className="text-center">
           <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
-            Lawyer <span className="text-[#BFA071]">AI</span>
+            Lawyer <span className="text-[#C9A84C]">AI</span>
           </h1>
           <p className="text-sm text-[#E0E6ED]/60 mt-0.5">Налаштуємо під вас за хвилину</p>
         </div>
@@ -170,17 +170,17 @@ function OnboardingContent() {
           return (
             <div key={s.step_key} className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-300 ${done ? "bg-[#BFA071] text-[#0A0E1A]" : active ? "bg-[#BFA071]/20 border border-[#BFA071]/50 text-[#BFA071]" : "bg-[#BFA071]/5 border border-[#BFA071]/10 text-[#BFA071]/30"
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-300 ${done ? "bg-[#C9A84C] text-[#0A0E1A]" : active ? "bg-[#C9A84C]/20 border border-[#C9A84C]/50 text-[#C9A84C]" : "bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/30"
                   }`}>
                   {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
                 </div>
-                <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${active ? "text-[#BFA071]" : done ? "text-[#BFA071]/60" : "text-[#BFA071]/20"
+                <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${active ? "text-[#C9A84C]" : done ? "text-[#C9A84C]/60" : "text-[#C9A84C]/20"
                   }`}>
                   {s.step_key === 'segments' ? 'Сфера' : s.step_key === 'roles' ? 'Роль' : 'Спеціалізація'}
                 </span>
               </div>
               {i < steps.length - 1 && (
-                <div className={`w-8 h-px transition-colors ${currentStepIdx > i ? "bg-[#BFA071]/40" : "bg-[#BFA071]/10"}`} />
+                <div className={`w-8 h-px transition-colors ${currentStepIdx > i ? "bg-[#C9A84C]/40" : "bg-[#C9A84C]/10"}`} />
               )}
             </div>
           )
@@ -188,9 +188,9 @@ function OnboardingContent() {
       </div>
 
       {/* ── Card (Твій оригінальний стиль) ── */}
-      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-7">
+      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-7">
         <div className="mb-5">
-          <p className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] mb-1">Крок {currentStepIdx + 1} з {steps.length}</p>
+          <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] mb-1">Крок {currentStepIdx + 1} з {steps.length}</p>
           <h2 className="text-lg font-serif font-bold text-white">{currentStep.title}</h2>
           <p className="text-sm text-[#E0E6ED]/50 mt-0.5">{currentStep.subtitle}</p>
         </div>
@@ -208,14 +208,14 @@ function OnboardingContent() {
                 key={opt.id}
                 onClick={() => handleSelect(opt.value)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-2xl border text-left transition-all duration-150 ${isSelected
-                    ? "border-[#BFA071]/50 bg-[#BFA071]/8 ring-1 ring-[#BFA071]/20"
-                    : "border-[#BFA071]/10 hover:border-[#BFA071]/30 hover:bg-[#BFA071]/5"
+                    ? "border-[#C9A84C]/50 bg-[#C9A84C]/8 ring-1 ring-[#C9A84C]/20"
+                    : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5"
                   }`}
               >
                 {opt.icon && (
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isSelected ? "bg-[#BFA071]/15 border border-[#BFA071]/30" : "bg-[#BFA071]/5 border border-[#BFA071]/10"
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isSelected ? "bg-[#C9A84C]/15 border border-[#C9A84C]/30" : "bg-[#C9A84C]/5 border border-[#C9A84C]/10"
                     }`}>
-                    <Icon className={`w-4 h-4 ${isSelected ? "text-[#BFA071]" : "text-[#BFA071]/40"}`} strokeWidth={1.75} />
+                    <Icon className={`w-4 h-4 ${isSelected ? "text-[#C9A84C]" : "text-[#C9A84C]/40"}`} strokeWidth={1.75} />
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
@@ -224,7 +224,7 @@ function OnboardingContent() {
                   </div>
                   {opt.description && <div className="text-xs text-[#E0E6ED]/40 truncate">{opt.description}</div>}
                 </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? "border-[#BFA071] bg-[#BFA071]" : "border-[#BFA071]/20"
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? "border-[#C9A84C] bg-[#C9A84C]" : "border-[#C9A84C]/20"
                   }`}>
                   {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-[#0A0E1A]" strokeWidth={2.5} />}
                 </div>
@@ -246,7 +246,7 @@ function OnboardingContent() {
         <div className="flex gap-3 mt-5">
           {currentStepIdx > 0 && (
             <button
-              className="h-14 flex-1 rounded-2xl border border-[#BFA071]/20 text-[#BFA071]/70 hover:border-[#BFA071]/40 hover:text-[#BFA071] hover:bg-[#BFA071]/5 font-black uppercase tracking-[0.15em] text-[11px] transition-all active:scale-95 flex items-center justify-center gap-2"
+              className="h-14 flex-1 rounded-2xl border border-[#C9A84C]/20 text-[#C9A84C]/70 hover:border-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 font-black uppercase tracking-[0.15em] text-[11px] transition-all active:scale-95 flex items-center justify-center gap-2"
               onClick={() => setCurrentStepIdx(prev => prev - 1)}
               disabled={saveLoading}
             >
@@ -255,7 +255,7 @@ function OnboardingContent() {
           )}
 
           <button
-            className="h-14 flex-[2] rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
+            className="h-14 flex-[2] rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
             disabled={!hasSelection || saveLoading}
             onClick={isLastStep ? handleFinish : () => setCurrentStepIdx(prev => prev + 1)}
           >
@@ -270,7 +270,7 @@ function OnboardingContent() {
         </div>
       </div>
 
-      <p className="text-center mt-6 text-[10px] font-black text-[#BFA071]/30 uppercase tracking-[0.2em]">
+      <p className="text-center mt-6 text-[10px] font-black text-[#C9A84C]/30 uppercase tracking-[0.2em]">
         URAI · Юридичний асистент України
       </p>
     </div>
@@ -282,21 +282,21 @@ export default function OnboardingPage() {
     <div className="min-h-screen bg-[#0A0E1A] relative flex items-center justify-center overflow-hidden py-8 px-4">
       {/* ── Background (Твій оригінальний фон) ── */}
       <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
-        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#BFA071]/5" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#BFA071]/[0.03]" />
+        <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#C9A84C]/5 blur-[120px]" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#C9A84C]/3 blur-[140px]" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#C9A84C]/5" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#C9A84C]/[0.03]" />
         <svg className="absolute inset-0 w-full h-full opacity-[0.015]">
           <defs>
             <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-              <circle cx="1.5" cy="1.5" r="1.5" fill="#BFA071" />
+              <circle cx="1.5" cy="1.5" r="1.5" fill="#C9A84C" />
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#dots)" />
         </svg>
       </div>
 
-      <Suspense fallback={<Loader2 className="animate-spin text-[#BFA071]" />}>
+      <Suspense fallback={<Loader2 className="animate-spin text-[#C9A84C]" />}>
         <OnboardingContent />
       </Suspense>
     </div>

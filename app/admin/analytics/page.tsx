@@ -46,7 +46,7 @@ const SENTIMENT_CONFIG: Record<string, { label: string; color: string; icon: Rea
 }
 
 const CATEGORY_COLORS = [
-  "#BFA071", "#8B6FBF", "#4E9FBF", "#BF4E4E", "#4EBF8F", "#BF8F4E", "#7E8FB5",
+  "#C9A84C", "#8B6FBF", "#4E9FBF", "#BF4E4E", "#4EBF8F", "#BF8F4E", "#7E8FB5",
 ]
 
 function formatDate(iso: string) {
@@ -63,7 +63,7 @@ function formatTime(ms: number | null) {
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 function StatCard({
-  icon: Icon, label, value, sub, color = "#BFA071",
+  icon: Icon, label, value, sub, color = "#C9A84C",
 }: {
   icon: React.ElementType; label: string; value: string | number; sub?: string; color?: string
 }) {
@@ -71,7 +71,7 @@ function StatCard({
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl p-5 flex gap-4 items-start"
+      className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5 flex gap-4 items-start"
     >
       <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}18` }}>
         <Icon className="w-5 h-5" style={{ color }} />
@@ -117,7 +117,7 @@ function DailyChart({ data }: { data: { date: string; count: number }[] }) {
                 animate={{ height: `${Math.max(pct, 4)}%` }}
                 transition={{ duration: 0.5, ease: "easeOut" }}
                 className="w-full rounded-t-md"
-                style={{ background: count > 0 ? "#BFA071" : "#1a2035" }}
+                style={{ background: count > 0 ? "#C9A84C" : "#1a2035" }}
               />
             </div>
             <span className="text-[10px] text-[#6B7CA3]">{formatDate(date)}</span>
@@ -148,18 +148,18 @@ export default function AnalyticsPage() {
         <div>
           <h1 className="text-2xl font-serif font-bold text-[#E0E6ED]">Аналітика запитів</h1>
           <p className="text-sm text-[#6B7CA3] mt-0.5">
-            Всього запитів у системі: <span className="text-[#BFA071] font-semibold">{data?.total ?? "—"}</span>
+            Всього запитів у системі: <span className="text-[#C9A84C] font-semibold">{data?.total ?? "—"}</span>
           </p>
         </div>
         {/* Period selector */}
-        <div className="flex gap-1 bg-[#0d1120] border border-[#BFA071]/15 rounded-xl p-1">
+        <div className="flex gap-1 bg-[#0d1120] border border-[#C9A84C]/15 rounded-xl p-1">
           {[7, 14, 30].map(d => (
             <button
               key={d}
               onClick={() => setDays(d)}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                 days === d
-                  ? "bg-[#BFA071] text-[#0A0E1A]"
+                  ? "bg-[#C9A84C] text-[#0A0E1A]"
                   : "text-[#6B7CA3] hover:text-[#E0E6ED]"
               }`}
             >
@@ -210,10 +210,10 @@ export default function AnalyticsPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl p-5"
+              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
             >
               <div className="flex items-center gap-2 mb-3">
-                <TrendingUp className="w-4 h-4 text-[#BFA071]" />
+                <TrendingUp className="w-4 h-4 text-[#C9A84C]" />
                 <h2 className="text-sm font-semibold text-[#E0E6ED]">Тренд (7 днів)</h2>
               </div>
               <DailyChart data={data?.dailyTrend ?? []} />
@@ -224,10 +224,10 @@ export default function AnalyticsPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 }}
-              className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl p-5"
+              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
             >
               <div className="flex items-center gap-2 mb-4">
-                <Smile className="w-4 h-4 text-[#BFA071]" />
+                <Smile className="w-4 h-4 text-[#C9A84C]" />
                 <h2 className="text-sm font-semibold text-[#E0E6ED]">Настрій запитів</h2>
               </div>
               <div className="space-y-3">
@@ -260,10 +260,10 @@ export default function AnalyticsPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl p-5 xl:col-span-1"
+              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5 xl:col-span-1"
             >
               <div className="flex items-center gap-2 mb-4">
-                <BarChart2 className="w-4 h-4 text-[#BFA071]" />
+                <BarChart2 className="w-4 h-4 text-[#C9A84C]" />
                 <h2 className="text-sm font-semibold text-[#E0E6ED]">Категорії</h2>
               </div>
               <div className="space-y-3">
@@ -287,10 +287,10 @@ export default function AnalyticsPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.25 }}
-              className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl p-5"
+              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
             >
               <div className="flex items-center gap-2 mb-4">
-                <Brain className="w-4 h-4 text-[#BFA071]" />
+                <Brain className="w-4 h-4 text-[#C9A84C]" />
                 <h2 className="text-sm font-semibold text-[#E0E6ED]">Намір запиту</h2>
               </div>
               <div className="space-y-3">
@@ -317,22 +317,22 @@ export default function AnalyticsPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl p-5"
+              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
             >
               <div className="flex items-center gap-2 mb-4">
-                <Users className="w-4 h-4 text-[#BFA071]" />
+                <Users className="w-4 h-4 text-[#C9A84C]" />
                 <h2 className="text-sm font-semibold text-[#E0E6ED]">Топ користувачів</h2>
                 <span className="text-xs text-[#6B7CA3]">за {days}д</span>
               </div>
               <div className="space-y-2.5">
                 {(data?.topUsers ?? []).map(({ user_id, count, email, full_name }, i) => (
                   <div key={user_id} className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-[#BFA071]/60 w-4">{i + 1}</span>
+                    <span className="text-xs font-bold text-[#C9A84C]/60 w-4">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-[#E0E6ED]/80 truncate">{full_name ?? email}</p>
                       {full_name && <p className="text-[11px] text-[#6B7CA3] truncate">{email}</p>}
                     </div>
-                    <span className="text-xs font-bold text-[#BFA071] bg-[#BFA071]/10 px-2 py-0.5 rounded-full shrink-0">{count}</span>
+                    <span className="text-xs font-bold text-[#C9A84C] bg-[#C9A84C]/10 px-2 py-0.5 rounded-full shrink-0">{count}</span>
                   </div>
                 ))}
                 {(data?.topUsers?.length ?? 0) === 0 && (
@@ -347,16 +347,16 @@ export default function AnalyticsPage() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.35 }}
-            className="bg-[#0d1120] border border-[#BFA071]/15 rounded-2xl overflow-hidden"
+            className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl overflow-hidden"
           >
-            <div className="px-5 py-4 border-b border-[#BFA071]/10 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-[#BFA071]" />
+            <div className="px-5 py-4 border-b border-[#C9A84C]/10 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-[#C9A84C]" />
               <h2 className="text-sm font-semibold text-[#E0E6ED]">Останні запити</h2>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-[#BFA071]/10">
+                  <tr className="border-b border-[#C9A84C]/10">
                     {["Запит", "Категорія", "Настрій", "Складність", "Час", "Дата"].map(h => (
                       <th key={h} className="text-left px-4 py-3 text-[#6B7CA3] font-semibold uppercase tracking-wider whitespace-nowrap">
                         {h}
@@ -368,12 +368,12 @@ export default function AnalyticsPage() {
                   {(data?.recent ?? []).map((row) => {
                     const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
                     return (
-                      <tr key={row.id} className="border-b border-[#BFA071]/5 hover:bg-[#BFA071]/3 transition-colors">
+                      <tr key={row.id} className="border-b border-[#C9A84C]/5 hover:bg-[#C9A84C]/3 transition-colors">
                         <td className="px-4 py-3 max-w-xs">
                           <span className="text-[#E0E6ED]/80 line-clamp-1">{row.query_text}</span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="bg-[#BFA071]/10 text-[#BFA071] px-2 py-0.5 rounded-full text-[11px] font-medium">
+                          <span className="bg-[#C9A84C]/10 text-[#C9A84C] px-2 py-0.5 rounded-full text-[11px] font-medium">
                             {row.category ?? "—"}
                           </span>
                         </td>

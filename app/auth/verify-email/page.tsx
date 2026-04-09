@@ -6,20 +6,21 @@ import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Scale, Loader2, Mail, RefreshCw, CheckCircle2, ArrowLeft } from "lucide-react"
+import Image from "next/image"
+import { Loader2, Mail, RefreshCw, CheckCircle2, ArrowLeft } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 
 function AuthBg() {
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#BFA071]/5" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#BFA071]/[0.03]" />
+      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#C9A84C]/5 blur-[120px]" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#C9A84C]/3 blur-[140px]" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#C9A84C]/5" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#C9A84C]/[0.03]" />
       <svg className="absolute inset-0 w-full h-full opacity-[0.015]">
         <defs>
           <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-            <circle cx="1.5" cy="1.5" r="1.5" fill="#BFA071" />
+            <circle cx="1.5" cy="1.5" r="1.5" fill="#C9A84C" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#dots)" />
@@ -81,15 +82,15 @@ function VerifyEmailContent() {
   }
 
   return (
-    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-8">
+    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-8">
       <div className="flex justify-center mb-8">
         <div className="relative">
-          <div className="w-20 h-20 rounded-3xl bg-[#BFA071]/10 border border-[#BFA071]/20 flex items-center justify-center">
-            <Mail className="w-10 h-10 text-[#BFA071]" strokeWidth={1.5} />
+          <div className="w-20 h-20 rounded-3xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center">
+            <Mail className="w-10 h-10 text-[#C9A84C]" strokeWidth={1.5} />
           </div>
           <span className="absolute -top-1 -right-1 flex h-5 w-5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#BFA071] opacity-40" />
-            <span className="relative inline-flex rounded-full h-5 w-5 bg-[#BFA071] shadow-lg shadow-[#BFA071]/50" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#C9A84C] opacity-40" />
+            <span className="relative inline-flex rounded-full h-5 w-5 bg-[#C9A84C] shadow-lg shadow-[#C9A84C]/50" />
           </span>
         </div>
       </div>
@@ -99,7 +100,7 @@ function VerifyEmailContent() {
         <p className="text-sm text-[#E0E6ED]/60 leading-relaxed max-w-[280px] mx-auto">
           Ми надіслали посилання для підтвердження на{" "}
           {email ? (
-            <span className="font-bold text-[#BFA071] break-all">{email}</span>
+            <span className="font-bold text-[#C9A84C] break-all">{email}</span>
           ) : (
             <span className="italic">вашу адресу</span>
           )}
@@ -114,7 +115,7 @@ function VerifyEmailContent() {
           "Вас автоматично перенаправить до сервісу",
         ].map((step, i) => (
           <div key={i} className="flex items-center gap-4 group">
-            <div className="w-8 h-8 rounded-xl bg-[#0A0E1A] border border-[#BFA071]/20 text-[#BFA071] flex items-center justify-center shrink-0 font-serif font-bold text-xs group-hover:border-[#BFA071]/50 transition-colors">
+            <div className="w-8 h-8 rounded-xl bg-[#0A0E1A] border border-[#C9A84C]/20 text-[#C9A84C] flex items-center justify-center shrink-0 font-serif font-bold text-xs group-hover:border-[#C9A84C]/50 transition-colors">
               {i + 1}
             </div>
             <span className="text-xs font-medium text-[#E0E6ED]/70 uppercase tracking-widest">{step}</span>
@@ -136,7 +137,7 @@ function VerifyEmailContent() {
       )}
 
       <Button
-        className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40"
+        className="w-full h-14 rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.15em] text-[11px] shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-40"
         onClick={handleResend}
         disabled={resendLoading || cooldown > 0 || !email}
       >
@@ -150,20 +151,20 @@ function VerifyEmailContent() {
         )}
       </Button>
 
-      <p className="text-[10px] text-[#BFA071]/70 font-black uppercase tracking-widest text-center mt-4">
+      <p className="text-[10px] text-[#C9A84C]/70 font-black uppercase tracking-widest text-center mt-4">
         Перевірте папку «Спам», якщо лист не надійшов
       </p>
 
-      <div className="flex items-center justify-between mt-8 pt-6 border-t border-[#BFA071]/10">
+      <div className="flex items-center justify-between mt-8 pt-6 border-t border-[#C9A84C]/10">
         <Link
           href="/auth/login"
-          className="text-[10px] font-black text-[#BFA071]/60 hover:text-[#BFA071] uppercase tracking-[0.2em] transition-all flex items-center gap-2"
+          className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all flex items-center gap-2"
         >
           <ArrowLeft className="w-3 h-3" /> Увійти
         </Link>
         <Link
           href="/auth/register"
-          className="text-[10px] font-black text-[#BFA071]/60 hover:text-[#BFA071] uppercase tracking-[0.2em] transition-all"
+          className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all"
         >
           Інший email
         </Link>
@@ -178,20 +179,16 @@ export default function VerifyEmailPage() {
       <AuthBg />
       <div className="relative z-10 w-full max-w-[420px]">
         <div className="flex flex-col items-center gap-4 mb-10">
-          <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
-            <Scale className="w-8 h-8 text-[#0A0E1A]" />
-          </div>
+          <Image src="/logo.jpg" alt="URAI" width={72} height={72} className="rounded-2xl object-cover shadow-2xl shadow-[#C9A84C]/20" />
           <div className="text-center">
-            <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
-              Lawyer <span className="text-[#BFA071]">AI</span>
-            </h1>
+            <h1 className="text-3xl font-serif font-bold tracking-tight text-[#C9A84C]">URAI</h1>
             <p className="text-sm text-[#E0E6ED]/70 mt-0.5">Юридичний асистент на базі AI</p>
           </div>
         </div>
 
         <Suspense fallback={
-          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[420px]">
-            <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]" />
+          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[420px]">
+            <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]" />
           </div>
         }>
           <VerifyEmailContent />

@@ -8,15 +8,16 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Eye, EyeOff, Scale, Loader2, AlertCircle, CheckCircle2, ArrowLeft, Lock } from "lucide-react"
+import Image from "next/image"
+import { Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, ArrowLeft, Lock } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { motion, AnimatePresence } from "framer-motion"
 
 function AuthBg() {
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
+      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#C9A84C]/5 blur-[120px]" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#C9A84C]/3 blur-[140px]" />
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-[0.03]" />
     </div>
   )
@@ -85,7 +86,7 @@ function ResetPasswordForm() {
 
   if (success) {
     return (
-      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] p-10 text-center shadow-2xl">
+      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] p-10 text-center shadow-2xl">
         <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/10">
           <CheckCircle2 className="w-10 h-10 text-emerald-400" />
         </div>
@@ -99,18 +100,18 @@ function ResetPasswordForm() {
 
   if (!sessionReady) {
     return (
-      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] p-10 flex flex-col items-center gap-4 text-center shadow-2xl">
-        <Loader2 className="w-10 h-10 animate-spin text-[#BFA071]" />
-        <p className="text-xs font-black text-[#BFA071] uppercase tracking-[0.3em]">Авторизація посилання...</p>
+      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] p-10 flex flex-col items-center gap-4 text-center shadow-2xl">
+        <Loader2 className="w-10 h-10 animate-spin text-[#C9A84C]" />
+        <p className="text-xs font-black text-[#C9A84C] uppercase tracking-[0.3em]">Авторизація посилання...</p>
       </div>
     )
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-8 relative overflow-hidden">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-8 relative overflow-hidden">
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
-          <Lock size={18} className="text-[#BFA071]" />
+          <Lock size={18} className="text-[#C9A84C]" />
           <h2 className="text-2xl font-serif font-bold text-white">Новий пароль</h2>
         </div>
         <p className="text-sm text-[#E0E6ED]/60 leading-relaxed">Встановіть новий пароль для захисту акаунта</p>
@@ -127,7 +128,7 @@ function ResetPasswordForm() {
         </AnimatePresence>
 
         <div className="space-y-2">
-          <Label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] ml-1">Придумайте пароль</Label>
+          <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] ml-1">Придумайте пароль</Label>
           <div className="relative group">
             <Input
               type={showPassword ? "text" : "password"}
@@ -135,13 +136,13 @@ function ResetPasswordForm() {
               value={password}
               autoComplete="new-password"
               onChange={(e) => { setPassword(e.target.value); setError("") }}
-              className="h-14 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] pr-12 focus:border-[#BFA071]/50 focus:ring-0 transition-all"
+              className="h-14 bg-[#0A0E1A] border-[#C9A84C]/20 rounded-2xl text-[#E0E6ED] pr-12 focus:border-[#C9A84C]/50 focus:ring-0 transition-all"
               required
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-4.5 text-[#BFA071]/50 hover:text-[#BFA071] transition-colors"
+              className="absolute right-4 top-4.5 text-[#C9A84C]/50 hover:text-[#C9A84C] transition-colors"
             >
               {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
@@ -149,14 +150,14 @@ function ResetPasswordForm() {
         </div>
 
         <div className="space-y-2">
-          <Label className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em] ml-1">Повторіть пароль</Label>
+          <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] ml-1">Повторіть пароль</Label>
           <Input
             type={showPassword ? "text" : "password"}
             placeholder="Введіть ще раз"
             value={confirmPassword}
             autoComplete="new-password"
             onChange={(e) => { setConfirmPassword(e.target.value); setError("") }}
-            className={`h-14 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] focus:border-[#BFA071]/50 focus:ring-0 transition-all ${confirmPassword && confirmPassword !== password ? "border-red-500/40" : ""
+            className={`h-14 bg-[#0A0E1A] border-[#C9A84C]/20 rounded-2xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 transition-all ${confirmPassword && confirmPassword !== password ? "border-red-500/40" : ""
               }`}
             required
           />
@@ -165,14 +166,14 @@ function ResetPasswordForm() {
         <Button
           type="submit"
           disabled={loading || !password || !confirmPassword}
-          className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 mt-4"
+          className="w-full h-14 rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-40 mt-4"
         >
           {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "ЗБЕРЕГТИ ПАРОЛЬ"}
         </Button>
       </form>
 
-      <div className="mt-8 pt-6 border-t border-[#BFA071]/10 text-center">
-        <Link href="/auth/login" className="text-[10px] font-black text-[#BFA071]/60 hover:text-[#BFA071] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2">
+      <div className="mt-8 pt-6 border-t border-[#C9A84C]/10 text-center">
+        <Link href="/auth/login" className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2">
           <ArrowLeft size={14} /> ПОВЕРНУТИСЯ ДО ВХОДУ
         </Link>
       </div>
@@ -186,17 +187,16 @@ export default function ResetPasswordPage() {
       <AuthBg />
       <div className="relative z-10 w-full max-w-[420px]">
         <div className="flex flex-col items-center gap-4 mb-10">
-          <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl ring-4 ring-[#BFA071]/10">
-            <Scale className="w-8 h-8 text-[#0A0E1A]" />
-          </div>
+          <Image src="/logo.jpg" alt="URAI" width={72} height={72} className="rounded-2xl object-cover shadow-2xl shadow-[#C9A84C]/20" />
           <div className="text-center">
-            <h1 className="text-3xl font-serif font-bold tracking-tight text-white">URAI <span className="text-[#BFA071]">Legal</span></h1>
+            <h1 className="text-3xl font-serif font-bold tracking-tight text-[#C9A84C]">URAI</h1>
+            <p className="text-sm text-[#E0E6ED]/70 mt-0.5">Юридичний асистент на базі AI</p>
           </div>
         </div>
 
         <Suspense fallback={
-          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/10 rounded-[2.5rem] p-10 flex items-center justify-center h-[400px]">
-            <Loader2 className="w-10 h-10 animate-spin text-[#BFA071]" />
+          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/10 rounded-[2.5rem] p-10 flex items-center justify-center h-[400px]">
+            <Loader2 className="w-10 h-10 animate-spin text-[#C9A84C]" />
           </div>
         }>
           <ResetPasswordForm />

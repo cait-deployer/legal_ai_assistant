@@ -7,20 +7,21 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Scale, Loader2, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react"
+import Image from "next/image"
+import { Loader2, AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 
 function AuthBg() {
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-0" aria-hidden>
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#BFA071]/5 blur-[120px]" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#BFA071]/3 blur-[140px]" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#BFA071]/5" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#BFA071]/[0.03]" />
+      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[#C9A84C]/5 blur-[120px]" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#C9A84C]/3 blur-[140px]" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full border border-[#C9A84C]/5" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] rounded-full border border-[#C9A84C]/[0.03]" />
       <svg className="absolute inset-0 w-full h-full opacity-[0.015]">
         <defs>
           <pattern id="dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-            <circle cx="1.5" cy="1.5" r="1.5" fill="#BFA071" />
+            <circle cx="1.5" cy="1.5" r="1.5" fill="#C9A84C" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#dots)" />
@@ -64,18 +65,18 @@ function ForgotPasswordForm() {
 
   if (success) {
     return (
-      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-10 text-center">
+      <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-10 text-center">
         <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/10">
           <CheckCircle2 className="w-10 h-10 text-emerald-400" />
         </div>
         <h3 className="text-2xl font-serif font-bold text-white mb-3">Лист надіслано</h3>
         <p className="text-sm text-[#E0E6ED]/60 leading-relaxed mb-8">
           Ми надіслали посилання для скидання пароля на{" "}
-          <span className="font-bold text-[#BFA071]">{email}</span>.
+          <span className="font-bold text-[#C9A84C]">{email}</span>.
           {" "}Перевірте папку «Спам», якщо лист не з&apos;явився.
         </p>
         <Link href="/auth/login">
-          <Button className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95">
+          <Button className="w-full h-14 rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Повернутись до входу
           </Button>
@@ -85,7 +86,7 @@ function ForgotPasswordForm() {
   }
 
   return (
-    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/20 rounded-[2.5rem] shadow-2xl p-8">
+    <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-8">
       <div className="mb-7">
         <h2 className="text-2xl font-serif font-bold text-white">Відновлення пароля</h2>
         <p className="text-sm text-[#E0E6ED]/60 mt-1">
@@ -102,7 +103,7 @@ function ForgotPasswordForm() {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-[10px] font-black text-[#BFA071]/60 uppercase tracking-[0.2em]">Email</Label>
+          <Label htmlFor="email" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
           <Input
             id="email"
             type="email"
@@ -111,7 +112,7 @@ function ForgotPasswordForm() {
             autoComplete="email"
             autoFocus
             onChange={(e) => { setEmail(e.target.value); setError("") }}
-            className="h-14 bg-[#0A0E1A] border-[#BFA071]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#BFA071]/20 focus-visible:border-[#BFA071]/50 focus-visible:ring-0"
+            className="h-14 bg-[#0A0E1A] border-[#C9A84C]/20 rounded-2xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/50 focus-visible:ring-0"
             required
           />
         </div>
@@ -119,7 +120,7 @@ function ForgotPasswordForm() {
         <Button
           type="submit"
           disabled={loading || !email}
-          className="w-full h-14 rounded-2xl bg-[#BFA071] hover:bg-[#d4b78a] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#BFA071]/10 transition-all active:scale-95 disabled:opacity-40 mt-2"
+          className="w-full h-14 rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-[0.2em] text-[11px] shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-40 mt-2"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -129,10 +130,10 @@ function ForgotPasswordForm() {
         </Button>
       </form>
 
-      <div className="mt-8 pt-6 border-t border-[#BFA071]/10 text-center">
+      <div className="mt-8 pt-6 border-t border-[#C9A84C]/10 text-center">
         <Link
           href="/auth/login"
-          className="text-[10px] font-black text-[#BFA071]/60 hover:text-[#BFA071] uppercase tracking-[0.2em] transition-all inline-flex items-center gap-2"
+          className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all inline-flex items-center gap-2"
         >
           <ArrowLeft className="w-3 h-3" /> Назад до входу
         </Link>
@@ -147,21 +148,17 @@ export default function ForgotPasswordPage() {
       <AuthBg />
       <div className="relative z-10 w-full max-w-[420px]">
         <div className="flex flex-col items-center gap-4 mb-10">
-          <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-[#BFA071] to-[#d4b78a] flex items-center justify-center shadow-2xl shadow-[#BFA071]/20 ring-4 ring-[#BFA071]/10">
-            <Scale className="w-8 h-8 text-[#0A0E1A]" />
-          </div>
+          <Image src="/logo.jpg" alt="URAI" width={72} height={72} className="rounded-2xl object-cover shadow-2xl shadow-[#C9A84C]/20" />
           <div className="text-center">
-            <h1 className="text-3xl font-serif font-bold tracking-tight text-white">
-              Lawyer <span className="text-[#BFA071]">AI</span>
-            </h1>
+            <h1 className="text-3xl font-serif font-bold tracking-tight text-[#C9A84C]">URAI</h1>
             <p className="text-sm text-[#E0E6ED]/70 mt-0.5">Юридичний асистент на базі AI</p>
           </div>
         </div>
 
         {/* Suspense захищає білд від помилок рендерингу searchParams або ініціалізації клієнта */}
         <Suspense fallback={
-          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#BFA071]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[280px]">
-            <Loader2 className="w-8 h-8 animate-spin text-[#BFA071]" />
+          <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/10 rounded-[2.5rem] p-8 flex items-center justify-center h-[280px]">
+            <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]" />
           </div>
         }>
           <ForgotPasswordForm />
