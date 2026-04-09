@@ -996,15 +996,11 @@ async def get_base_docs(
 
         client = get_client()
 
-        domain_map = {
-            "rada": "zakon.rada.gov.ua",
-            "supreme": "supreme.court.gov.ua",
-            "wiki": "legalaid.wiki",
-        }
-
+        # Rada може фільтруватись по source_domain (є у payload).
+        # Supreme і wiki — ні (source_domain порожній), тому для них фільтруємо по префіксу law_id у Python.
         must = [FieldCondition(key="chunk_index", match=MatchValue(value=0))]
-        if source and source in domain_map:
-            must.append(FieldCondition(key="source_domain", match=MatchValue(value=domain_map[source])))
+        if source == "rada":
+            must.append(FieldCondition(key="source_domain", match=MatchValue(value="zakon.rada.gov.ua")))
         if category:
             must.append(FieldCondition(key="category", match=MatchValue(value=category)))
 
@@ -1024,6 +1020,12 @@ async def get_base_docs(
             all_points.extend(batch)
             if next_page_offset is None:
                 break
+
+        # Python-рівень: фільтр по джерелу (supreme/wiki по префіксу law_id)
+        if source == "supreme":
+            all_points = [p for p in all_points if (p.payload.get("law_id") or "").startswith("sc_")]
+        elif source == "wiki":
+            all_points = [p for p in all_points if (p.payload.get("law_id") or "").startswith("wiki_")]
 
         # Python-рівень: пошук по назві або law_id (Qdrant не підтримує substring без індексу)
         if search:
