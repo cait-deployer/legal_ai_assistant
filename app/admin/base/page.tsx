@@ -32,7 +32,7 @@ function getSourceStyle(law_id: string) {
 const SOURCE_OPTIONS = [
   { value: "", label: "Всі джерела" },
   { value: "rada", label: "РАДА" },
-  { value: "supreme", label: "Верховний Суд" },
+  { value: "court", label: "Верховний Суд" },
   { value: "wiki", label: "Wiki" },
 ]
 
