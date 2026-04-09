@@ -89,8 +89,6 @@ def get_total_pages(code: str) -> int:
     return max_page
 
 
-# ПАРСИНГ СПИСКУ ЗАКОНІВ З ОДНІЄЇ СТОРІНКИ
-
 def parse_laws_from_page(html: str, category: str) -> list[dict]:
     """
     Парсить HTML сторінки списку і витягує всі посилання на закони.
