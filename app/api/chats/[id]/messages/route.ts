@@ -25,10 +25,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const clientIp = extractIp(request)
   const body = await request.json()
-  const { role, content, references, analytics } = body as {
+  const { role, content, citations, analytics } = body as {
     role: "user" | "assistant"
     content: string
-    references?: unknown[]
+    citations?: unknown[]
     analytics?: {
       query_text: string
       ai_response: string
@@ -58,7 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // Always save messages to DB (history in UI is controlled by plan, but we store for analytics)
   const { data: savedMsg, error: msgError } = await admin()
     .from("messages")
-    .insert({ chat_id: chatId, role, content, references: references ?? [] })
+    .insert({ chat_id: chatId, role, content, citations: citations ?? [] })
     .select()
     .single()
 

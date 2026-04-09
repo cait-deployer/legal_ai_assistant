@@ -189,7 +189,7 @@ function ChatPage() {
                     setIsFirstMessage(true);
                     return;
                 }
-                setMessages(rows.map(r => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.references ?? [] })));
+                setMessages(rows.map(r => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.citations ?? [] })));
                 setIsFirstMessage(rows.length === 0);
             })
             .catch(() => toast.error('Не вдалося завантажити чат'))
@@ -249,7 +249,7 @@ function ChatPage() {
                     body: JSON.stringify({
                         role: 'assistant',
                         content: data.answer,
-                        references: data.references ?? [],
+                        citations: data.references ?? [],
                         analytics: {
                             query_text: questionText,
                             ai_response: data.answer,
