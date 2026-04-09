@@ -83,23 +83,33 @@ def run_rada_sync(log_callback=None, session_id=None):
         law_url = f"{BASE}/laws/show/{law_id}"
         
         # 3. ЛОГІКА ДЕДУПЛІКАЦІЇ ТА ОНОВЛЕННЯ
+        # Пріоритет: порівняння дати редакції з Ради (list_date) зі збереженою.
+        # Fallback для старих записів без дати: перевірка по віку scraped_at.
         should_download = True
         if law_id in existing_meta:
-            # Парсимо дату (обробляємо Z для сумісності з Python)
-            last_date_str = existing_meta[law_id].replace('Z', '+00:00')
-            last_scraped = datetime.fromisoformat(last_date_str)
-            
-            # Порівнюємо в UTC, щоб уникнути помилок
-            now = datetime.now(timezone.utc) if last_scraped.tzinfo else datetime.now()
-            days_passed = (now - last_scraped).days
-            
-            if days_passed < 7:
-                # Закон свіжий, пропускаємо
-                should_download = False
+            meta = existing_meta[law_id]
+            stored_date = meta.get("effective_date", "")
+            list_date = law.get("list_date", "")
+
+            if stored_date and list_date:
+                if stored_date == list_date:
+                    should_download = False
+                else:
+                    log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
+                    delete_old_law_chunks(law_id)
             else:
-                # Закон застарів — видаляємо старі чанки перед оновленням
-                log(f"🔄 Оновлення: {law_id} (вік: {days_passed} дн.)...")
-                delete_old_law_chunks(law_id)
+                try:
+                    last_date_str = meta.get("scraped_at", "").replace("Z", "+00:00")
+                    last_scraped = datetime.fromisoformat(last_date_str)
+                    now = datetime.now(timezone.utc) if last_scraped.tzinfo else datetime.now()
+                    days_passed = (now - last_scraped).days
+                    if days_passed < 7:
+                        should_download = False
+                    else:
+                        log(f"🔄 Оновлення: {law_id} (вік: {days_passed} дн., дата редакції невідома)")
+                        delete_old_law_chunks(law_id)
+                except Exception:
+                    pass
 
         if not should_download:
             continue
@@ -130,6 +140,7 @@ def run_rada_sync(log_callback=None, session_id=None):
                     "law_url": law_url,
                     "source_domain": "zakon.rada.gov.ua",
                     "scraped_at": scraped_at,
+                    "effective_date": law.get("list_date", ""),
                     "chunk_index": j
                 }
                 upload_to_qdrant(chunk_text, metadata, vector, session_id=session_id)

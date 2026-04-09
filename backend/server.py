@@ -292,20 +292,35 @@ def _do_rada(
             law_url = f"{BASE}/laws/show/{law_id}"
 
             # ── Логіка дедуплікації / оновлення ───────────────────────────
+            # Пріоритет: порівнюємо дату редакції з Ради (list_date) зі збереженою.
+            # Якщо дат немає (старі записи) — fallback на вік scraped_at (7 днів).
             should_download = True
             if law_id in existing_meta:
-                try:
-                    last_str = existing_meta[law_id].replace("Z", "+00:00")
-                    last = datetime.fromisoformat(last_str)
-                    now = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
-                    days = (now - last).days
-                    if days < 7:
-                        should_download = False
+                meta = existing_meta[law_id]
+                stored_date = meta.get("effective_date", "")
+                list_date = law.get("list_date", "")
+
+                if stored_date and list_date:
+                    # Обидві дати відомі → порівнюємо редакцію
+                    if stored_date == list_date:
+                        should_download = False  # Закон не змінився
                     else:
-                        log(f"🔄 Оновлення: {law_id} (вік: {days} дн.)")
+                        log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
                         delete_law_chunks(law_id)
-                except Exception:
-                    pass  # при помилці парсингу дати — скачуємо знову
+                else:
+                    # Fallback: для старих записів без збереженої дати → перевірка по віку
+                    try:
+                        last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
+                        last = datetime.fromisoformat(last_str)
+                        now = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
+                        days = (now - last).days
+                        if days < 7:
+                            should_download = False
+                        else:
+                            log(f"🔄 Оновлення: {law_id} (вік: {days} дн., дата редакції невідома)")
+                            delete_law_chunks(law_id)
+                    except Exception:
+                        pass  # при помилці парсингу — скачуємо знову
 
             if not should_download:
                 # Зберігаємо прогрес навіть для пропущених
@@ -331,6 +346,7 @@ def _do_rada(
                             "law_url": law_url,
                             "source_domain": "zakon.rada.gov.ua",
                             "scraped_at": scraped_at,
+                            "effective_date": law.get("list_date", ""),
                             "chunk_index": 0,
                         },
                         title_vector,
@@ -364,6 +380,7 @@ def _do_rada(
                             "law_url": law_url,
                             "source_domain": "zakon.rada.gov.ua",
                             "scraped_at": scraped_at,
+                            "effective_date": law.get("list_date", ""),
                             "chunk_index": j,
                         },
                         vector,
@@ -1467,7 +1484,7 @@ async def ask(body: AskRequest):
         location = settings_cache.get_vertex_location()
         vertexai.init(project=project, location=location, credentials=creds)
 
-        model_name    = settings_cache.get("ai_model", "gemini-2.0-flash-lite")
+        model_name    = settings_cache.get("ai_model")
         system_prompt = settings_cache.get(
             "system_prompt",
             "Ти — досвідчений український адвокат. Надавай точні відповіді виключно на основі наданого контексту.",
@@ -1496,7 +1513,7 @@ async def ask(body: AskRequest):
         )
 
         main_model = GenerativeModel(model_name, system_instruction=system_prompt)
-        clf_model  = GenerativeModel("gemini-2.0-flash-lite")
+        clf_model  = GenerativeModel(model_name)
 
         response, clf_response = await _asyncio.gather(
             _asyncio.to_thread(
@@ -1557,6 +1574,48 @@ async def ask(body: AskRequest):
             **classification,
         },
     }
+
+
+class GenerateNameRequest(BaseModel):
+    question: str
+    answer: str
+
+@app.post("/generate-name")
+async def generate_name(body: GenerateNameRequest):
+    """Генерує назву та категорію чату через Vertex AI."""
+    import asyncio as _asyncio
+    from vertexai.generative_models import GenerativeModel, GenerationConfig
+    import vertexai, json as _json
+
+    creds    = settings_cache.get_credentials()
+    project  = settings_cache.get_vertex_project()
+    location = settings_cache.get_vertex_location()
+    model_name = settings_cache.get("ai_model")
+    vertexai.init(project=project, location=location, credentials=creds)
+
+    prompt = (
+        "Ти — юридичний асистент. Проаналізуй запит користувача та відповідь AI.\n\n"
+        "Поверни СТРОГО JSON без жодного іншого тексту:\n"
+        '{"title":"назва до 5 слів без лапок","category":"категорія права"}\n\n'
+        "Категорії: Трудове, Кримінальне, Цивільне, ФОП/Бізнес, Сімейне, Нерухомість, Мобілізація, Захист прав, Інше\n\n"
+        f"Запит: {body.question[:500]}\nВідповідь: {body.answer[:500]}"
+    )
+
+    try:
+        model = GenerativeModel(model_name)
+        response = await _asyncio.to_thread(
+            model.generate_content,
+            prompt,
+            generation_config=GenerationConfig(temperature=0.3, max_output_tokens=60),
+        )
+        raw = response.text.replace("```json", "").replace("```", "").strip()
+        parsed = _json.loads(raw)
+        return {
+            "title":    (parsed.get("title", "") or "")[:80],
+            "category": (parsed.get("category", "") or "")[:50],
+        }
+    except Exception as e:
+        raise HTTPException(500, f"generate-name error: {e}")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

@@ -70,18 +70,25 @@ def upload_to_qdrant(text: str, metadata: dict, embedding: list, session_id=None
 # ── ЧИТАННЯ ІСНУЮЧИХ ЗАКОНІВ ───────────────────────────────────────────────
 
 def get_existing_laws_meta() -> dict:
-    """Повертає {law_id: scraped_at} — тільки перший чанк кожного закону."""
+    """
+    Повертає {law_id: {"scraped_at": str, "effective_date": str}} — тільки перший чанк.
+    effective_date — дата редакції з Ради (dd.mm.yyyy), "" якщо ще не збережена
+    (старі записи без поля — безпечно повертають "").
+    """
     try:
         result, _ = get_client().scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=Filter(
                 must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
             ),
-            with_payload=["law_id", "scraped_at"],
+            with_payload=["law_id", "scraped_at", "effective_date"],
             limit=10000,
         )
         return {
-            p.payload["law_id"]: p.payload.get("scraped_at", "1970-01-01T00:00:00")
+            p.payload["law_id"]: {
+                "scraped_at": p.payload.get("scraped_at", "1970-01-01T00:00:00"),
+                "effective_date": p.payload.get("effective_date", ""),
+            }
             for p in result if "law_id" in p.payload
         }
     except Exception as e:

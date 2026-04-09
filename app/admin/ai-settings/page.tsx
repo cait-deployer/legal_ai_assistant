@@ -353,7 +353,7 @@ export default function AiSettingsPage() {
                 value={settings.embedding_model}
                 onChange={v => set("embedding_model", v)}
                 placeholder="text-embedding-004"
-                mono
+                mono             
               />
             </Field>
           </div>

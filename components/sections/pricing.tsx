@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Check } from "lucide-react"
+import { CheckCircle2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 type Benefit = {
@@ -26,6 +26,12 @@ type PlanData = {
   note_text: string | null
   extra_text: string | null
   sort_order: number
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  requests: "Запити",
+  sources: "Джерела",
+  response: "Відповідь",
 }
 
 export function PricingSection() {
@@ -73,7 +79,11 @@ return (
             {plans.map((plan) => {
               const isHighlight = plan.badge_color === "gold"
               const { price, period } = priceLabel(plan)
-              const allBenefits = plan.benefits.map(b => b.text)
+              const benefitsByCategory = plan.benefits.reduce((acc, b) => {
+                if (!acc[b.category]) acc[b.category] = []
+                acc[b.category].push(b)
+                return acc
+              }, {} as Record<string, Benefit[]>)
 
               return (
                 <div
@@ -114,15 +124,26 @@ return (
                     <div className={`h-px ${isHighlight ? "bg-[#C9A84C]/20" : "bg-[#C9A84C]/25"}`} />
                   </div>
 
-                  {/* Features — flex-grow розтягує цей блок, притискаючи футер донизу */}
-                  <ul className="flex flex-col gap-2 px-6 py-6 flex-grow">
-                    {allBenefits.map((f, fi) => (
-                      <li key={fi} className="flex items-start gap-2 text-xs">
-                        <Check size={13} className="text-[#C9A84C] shrink-0 mt-0.5" />
-                        <span className="text-white/45 leading-snug">{f}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  {/* Features grouped by category */}
+                  <div className="flex flex-col gap-4 px-6 py-6 flex-grow">
+                    {Object.entries(CATEGORY_LABELS).map(([cat, catLabel]) => {
+                      const items = benefitsByCategory[cat] ?? []
+                      if (items.length === 0) return null
+                      return (
+                        <div key={cat}>
+                          <p className="text-[9px] font-black text-[#C9A84C]/40 uppercase tracking-[0.2em] mb-1.5">{catLabel}</p>
+                          <ul className="space-y-1.5">
+                            {items.map(b => (
+                              <li key={b.id} className="flex items-start gap-2 text-xs text-white/55 leading-snug">
+                                <CheckCircle2 size={13} className="text-[#C9A84C]/60 shrink-0 mt-0.5" />
+                                {b.text}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )
+                    })}
+                  </div>
 
                   {/* CTA Area — завжди в самому низу */}
                   <div className="space-y-3 border-t border-[#C9A84C]/25 px-6 pt-4 pb-6 mt-auto">

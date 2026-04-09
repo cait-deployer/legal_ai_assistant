@@ -39,13 +39,17 @@ def scrape_wiki_article(url, title, session_id=None, existing_meta=None):
     clean_id = re.sub(r'[^\w]', '_', title)
     law_id = f"wiki_{clean_id}"
 
-    # ПЕРЕВІРКА ДАТИ (Must-Have логіка)
+    # ПЕРЕВІРКА ДАТИ: Wiki оновлюємо раз на 14 днів
     if existing_meta and law_id in existing_meta:
-        last_date_str = existing_meta[law_id].replace('Z', '+00:00')
-        last_scraped = datetime.fromisoformat(last_date_str)
-        # Оновлюємо Wiki раз на 14 днів (вона змінюється рідше за закони)
-        if (datetime.now(timezone.utc) if last_scraped.tzinfo else datetime.now() - last_scraped).days < 14:
-            return True # Пропускаємо, ще свіжа
+        meta = existing_meta[law_id]
+        scraped_at_str = meta.get("scraped_at", "") if isinstance(meta, dict) else str(meta)
+        try:
+            last_scraped = datetime.fromisoformat(scraped_at_str.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc) if last_scraped.tzinfo else datetime.now()
+            if (now - last_scraped).days < 14:
+                return True  # Пропускаємо, ще свіжа
+        except Exception:
+            pass
         
         # Якщо застаріла — видаляємо старе перед записом
         delete_old_law_chunks(law_id)

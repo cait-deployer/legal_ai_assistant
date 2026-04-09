@@ -92,11 +92,13 @@ def get_total_pages(code: str) -> int:
 def parse_laws_from_page(html: str, category: str) -> list[dict]:
     """
     Парсить HTML сторінки списку і витягує всі посилання на закони.
-    Шукає всі <a href="/laws/show/..."> і бере ID та назву.
+    Шукає всі <a href="/laws/show/..."> і бере ID, назву та дату редакції.
+    Дата береться з рядка таблиці (<tr>) без додаткового запиту.
     """
     soup = BeautifulSoup(html, "html.parser")
     laws = []
     seen = set()
+    _DATE_RE = re.compile(r'\b(\d{2}\.\d{2}\.\d{4})\b')
 
     for a in soup.find_all("a", href=True):
         href = a["href"]
@@ -104,9 +106,21 @@ def parse_laws_from_page(html: str, category: str) -> list[dict]:
             continue
         law_id = href.split("/show/")[1].split("#")[0].strip()
         title = a.text.strip()
-        if law_id and title and law_id not in seen:
-            seen.add(law_id)
-            laws.append({"id": law_id, "title": title, "category": category})
+        if not (law_id and title and law_id not in seen):
+            continue
+        seen.add(law_id)
+
+        # Шукаємо дату редакції в найближчому рядку таблиці (<tr>).
+        # Рада відображає дату прийняття/редакції поряд з назвою закону.
+        # Якщо <tr> немає або дати нема — list_date залишається порожнім (safe fallback).
+        list_date = ""
+        row = a.find_parent("tr")
+        if row:
+            m = _DATE_RE.search(row.get_text())
+            if m:
+                list_date = m.group(1)
+
+        laws.append({"id": law_id, "title": title, "category": category, "list_date": list_date})
 
     return laws
 
