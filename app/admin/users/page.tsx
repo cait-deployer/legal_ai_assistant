@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import {
   Users, Search, X, ChevronLeft, ChevronRight,
   ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Loader2,
-  Check, Mail, Globe,
+  Check, Mail, Globe, MessageSquare,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -216,9 +216,22 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
   )
 }
 
+type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string }
+
 function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
   const rel = formatRelative(user.last_active_at)
   const pct = user.monthly_limit ? Math.min(100, Math.round((user.requests_this_month / user.monthly_limit) * 100)) : 0
+  const [chats, setChats] = useState<ChatRow[]>([])
+  const [chatsLoading, setChatsLoading] = useState(true)
+
+  useEffect(() => {
+    setChatsLoading(true)
+    fetch(`/api/admin/users/${user.id}/chats`)
+      .then(r => r.json())
+      .then(d => setChats(Array.isArray(d) ? d : []))
+      .catch(() => setChats([]))
+      .finally(() => setChatsLoading(false))
+  }, [user.id])
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -305,6 +318,39 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
                 : "—"}
             />
             <DrawerRow label="Браузер" value={parseBrowser(user.user_agent)} />
+          </section>
+
+          {/* Chats */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Чати</p>
+              {!chatsLoading && (
+                <span className="text-[10px] text-[#6B7CA3] bg-[#C9A84C]/5 border border-[#C9A84C]/10 rounded-full px-1.5 py-0.5">
+                  {chats.length}
+                </span>
+              )}
+            </div>
+            {chatsLoading ? (
+              <div className="flex items-center gap-2 text-xs text-[#6B7CA3] py-2">
+                <Loader2 className="w-3 h-3 animate-spin" /> Завантаження…
+              </div>
+            ) : chats.length === 0 ? (
+              <p className="text-xs text-[#6B7CA3] py-2">Чатів немає</p>
+            ) : (
+              <div className="space-y-1.5">
+                {chats.map(chat => (
+                  <div key={chat.id} className="flex items-start gap-2 px-3 py-2 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/10">
+                    <MessageSquare className="w-3.5 h-3.5 text-[#C9A84C]/50 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-[#E0E6ED]/80 truncate">{chat.title || "Новий чат"}</p>
+                      <p className="text-[10px] text-[#6B7CA3]">
+                        {new Date(chat.updated_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       </div>

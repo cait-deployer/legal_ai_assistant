@@ -38,7 +38,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const { data, error } = await admin()
     .from("messages")
-    .select("id, role, content, created_at")
+    .select("id, role, content, references, created_at")
     .eq("chat_id", id)
     .order("created_at", { ascending: true })
 

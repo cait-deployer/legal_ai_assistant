@@ -189,7 +189,7 @@ function ChatPage() {
                     setIsFirstMessage(true);
                     return;
                 }
-                setMessages(rows.map(r => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content })));
+                setMessages(rows.map(r => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.references ?? [] })));
                 setIsFirstMessage(rows.length === 0);
             })
             .catch(() => toast.error('Не вдалося завантажити чат'))
@@ -249,6 +249,7 @@ function ChatPage() {
                     body: JSON.stringify({
                         role: 'assistant',
                         content: data.answer,
+                        references: data.references ?? [],
                         analytics: {
                             query_text: questionText,
                             ai_response: data.answer,
@@ -462,7 +463,7 @@ function ChatPage() {
                     {activeCitation?.law_url && (
                         <div className="px-10 py-6 border-t border-[#C9A84C]/10 bg-[#0d1120]">
                             <a href={activeCitation.law_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2.5 text-xs font-black text-[#C9A84C] hover:text-[#E2C47A] transition-all uppercase tracking-widest group">
-                                <ExternalLink className="h-4 w-4 group-hover:scale-110 transition-transform" /> Читати повний текст на zakon.rada.gov.ua
+                                <ExternalLink className="h-4 w-4 group-hover:scale-110 transition-transform" /> Читати повний текст
                             </a>
                         </div>
                     )}

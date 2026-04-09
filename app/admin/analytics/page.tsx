@@ -2,10 +2,11 @@
 
 import useSWR from "swr"
 import { useState } from "react"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import {
   BarChart2, Clock, Brain, Users, TrendingUp,
   MessageSquare, AlertCircle, Smile, Meh, Frown,
+  UserPlus, Repeat2, Target, Timer, X,
 } from "lucide-react"
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -26,6 +27,7 @@ interface AnalyticsData {
   recent: {
     id: string
     query_text: string
+    ai_response: string | null
     category: string | null
     sentiment: string | null
     complexity_score: number | null
@@ -34,6 +36,13 @@ interface AnalyticsData {
     created_at: string
     user_id: string | null
   }[]
+  newUsersTotal: number
+  newUsersPerDay: { date: string; count: number }[]
+  retentionRate: number
+  conversionRate: number
+  avgSessionMs: number | null
+  totalUsers: number
+  activeUsers: number
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -128,10 +137,91 @@ function DailyChart({ data }: { data: { date: string; count: number }[] }) {
   )
 }
 
+// ── Query Modal ───────────────────────────────────────────────────────────────
+
+type QueryRow = AnalyticsData["recent"][number]
+
+function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
+  const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      >
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 16 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95 }}
+          className="relative w-full max-w-2xl bg-[#0d1120] border border-[#C9A84C]/25 rounded-2xl shadow-2xl overflow-hidden"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#C9A84C]/10">
+            <div className="flex items-center gap-2 flex-wrap">
+              {row.category && (
+                <span className="bg-[#C9A84C]/10 text-[#C9A84C] px-2 py-0.5 rounded-full text-[11px] font-medium">
+                  {row.category}
+                </span>
+              )}
+              {sentCfg && (
+                <span className="flex items-center gap-1 text-xs" style={{ color: sentCfg.color }}>
+                  <sentCfg.icon className="w-3 h-3" />
+                  {sentCfg.label}
+                </span>
+              )}
+              <span className="text-[11px] text-[#6B7CA3]">
+                {new Date(row.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+            <button onClick={onClose} className="text-[#6B7CA3] hover:text-[#E0E6ED] transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            {/* Question */}
+            <div>
+              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Запит</p>
+              <div className="bg-[#C9A84C]/5 border border-[#C9A84C]/15 rounded-xl px-4 py-3 text-sm text-[#E0E6ED]/90 leading-relaxed">
+                {row.query_text}
+              </div>
+            </div>
+
+            {/* Answer */}
+            <div>
+              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Відповідь</p>
+              <div className="bg-[#1a2035] border border-[#C9A84C]/10 rounded-xl px-4 py-3 text-sm text-[#E0E6ED]/75 leading-relaxed whitespace-pre-wrap">
+                {row.ai_response ?? <span className="text-[#6B7CA3] italic">Відповідь не збережена</span>}
+              </div>
+            </div>
+
+            {/* Meta */}
+            <div className="flex gap-4 text-xs text-[#6B7CA3] pt-1">
+              {row.complexity_score && (
+                <span>Складність: <span className="text-[#C9A84C]">{"★".repeat(row.complexity_score)}</span></span>
+              )}
+              {row.processing_time_ms && (
+                <span>Час: <span className="text-[#E0E6ED]/60">{formatTime(row.processing_time_ms)}</span></span>
+              )}
+              {row.user_intent && (
+                <span>Намір: <span className="text-[#E0E6ED]/60">{row.user_intent}</span></span>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  )
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30)
+  const [activeQuery, setActiveQuery] = useState<QueryRow | null>(null)
   const { data, isLoading } = useSWR<AnalyticsData>(
     `/api/admin/analytics?days=${days}`,
     fetcher,
@@ -200,6 +290,38 @@ export default function AnalyticsPage() {
               value={data?.topUsers?.[0]?.count ?? "—"}
               sub={data?.topUsers?.[0]?.full_name ?? data?.topUsers?.[0]?.email ?? "—"}
               color="#10B981"
+            />
+          </div>
+
+          {/* Extra stat cards */}
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            <StatCard
+              icon={UserPlus}
+              label={`Нових юзерів (${days}д)`}
+              value={data?.newUsersTotal ?? "—"}
+              sub={`Всього: ${data?.totalUsers ?? 0}`}
+              color="#4E9FBF"
+            />
+            <StatCard
+              icon={Repeat2}
+              label="Retention"
+              value={data?.retentionRate != null ? `${data.retentionRate}%` : "—"}
+              sub="Повернулись >1 разу"
+              color="#8B6FBF"
+            />
+            <StatCard
+              icon={Target}
+              label="Конверсія"
+              value={data?.conversionRate != null ? `${data.conversionRate}%` : "—"}
+              sub={`Активних: ${data?.activeUsers ?? 0} / ${data?.totalUsers ?? 0}`}
+              color="#10B981"
+            />
+            <StatCard
+              icon={Timer}
+              label="Сер. тривалість сесії"
+              value={data?.avgSessionMs ? formatTime(data.avgSessionMs) : "—"}
+              sub="Від першого до останнього"
+              color="#F59E0B"
             />
           </div>
 
@@ -368,7 +490,11 @@ export default function AnalyticsPage() {
                   {(data?.recent ?? []).map((row) => {
                     const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
                     return (
-                      <tr key={row.id} className="border-b border-[#C9A84C]/5 hover:bg-[#C9A84C]/3 transition-colors">
+                      <tr
+                        key={row.id}
+                        className="border-b border-[#C9A84C]/5 hover:bg-[#C9A84C]/5 transition-colors cursor-pointer"
+                        onClick={() => setActiveQuery(row)}
+                      >
                         <td className="px-4 py-3 max-w-xs">
                           <span className="text-[#E0E6ED]/80 line-clamp-1">{row.query_text}</span>
                         </td>
@@ -420,6 +546,8 @@ export default function AnalyticsPage() {
           </motion.div>
         </>
       )}
+
+      {activeQuery && <QueryModal row={activeQuery} onClose={() => setActiveQuery(null)} />}
     </div>
   )
 }

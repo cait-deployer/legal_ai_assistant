@@ -21,6 +21,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const days = parseInt(searchParams.get("days") ?? "30", 10)
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+  const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
   const sb = admin()
 
@@ -35,78 +36,49 @@ export async function GET(request: Request) {
     topUsersRes,
     dailyRes,
     avgTimeRes,
+    allProfilesRes,
+    newUsersRes,
+    chatsRes,
+    messagesRes,
   ] = await Promise.all([
-    // Total all-time
     sb.from("query_analytics").select("id", { count: "exact", head: true }),
-
-    // Period count
+    sb.from("query_analytics").select("id", { count: "exact", head: true }).gte("created_at", since),
+    sb.from("query_analytics").select("category").gte("created_at", since).not("category", "is", null),
+    sb.from("query_analytics").select("sentiment").gte("created_at", since).not("sentiment", "is", null),
+    sb.from("query_analytics").select("user_intent").gte("created_at", since).not("user_intent", "is", null),
+    sb.from("query_analytics").select("complexity_score").gte("created_at", since).not("complexity_score", "is", null),
     sb.from("query_analytics")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", since),
-
-    // By category (period)
-    sb.from("query_analytics")
-      .select("category")
-      .gte("created_at", since)
-      .not("category", "is", null),
-
-    // By sentiment (period)
-    sb.from("query_analytics")
-      .select("sentiment")
-      .gte("created_at", since)
-      .not("sentiment", "is", null),
-
-    // By user_intent (period)
-    sb.from("query_analytics")
-      .select("user_intent")
-      .gte("created_at", since)
-      .not("user_intent", "is", null),
-
-    // Avg complexity
-    sb.from("query_analytics")
-      .select("complexity_score")
-      .gte("created_at", since)
-      .not("complexity_score", "is", null),
-
-    // Recent 20 queries
-    sb.from("query_analytics")
-      .select("id, query_text, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id")
+      .select("id, query_text, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id")
       .order("created_at", { ascending: false })
       .limit(20),
-
-    // Top users by query count (period) — join email from profiles
-    sb.from("query_analytics")
-      .select("user_id, profiles(email, full_name)")
-      .gte("created_at", since)
-      .not("user_id", "is", null),
-
-    // Daily counts last 7 days
-    sb.from("query_analytics")
-      .select("created_at")
-      .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
-
-    // Avg processing time
-    sb.from("query_analytics")
-      .select("processing_time_ms")
-      .gte("created_at", since)
-      .not("processing_time_ms", "is", null),
+    sb.from("query_analytics").select("user_id").gte("created_at", since).not("user_id", "is", null),
+    sb.from("query_analytics").select("created_at").gte("created_at", since7),
+    sb.from("query_analytics").select("processing_time_ms").gte("created_at", since).not("processing_time_ms", "is", null),
+    // All profiles for conversion/retention
+    sb.from("profiles").select("id, email, full_name, created_at"),
+    // New users in period
+    sb.from("profiles").select("id, created_at").gte("created_at", since),
+    // Chats for session duration
+    sb.from("chats").select("id, user_id, created_at").gte("created_at", since),
+    // Messages for session duration
+    sb.from("messages").select("chat_id, created_at").gte("created_at", since).order("created_at", { ascending: true }),
   ])
 
-  // ── Aggregate categories
+  // ── Categories
   const categoryMap: Record<string, number> = {}
   for (const row of (categoryRes.data ?? [])) {
     const k = row.category ?? "Загальне"
     categoryMap[k] = (categoryMap[k] ?? 0) + 1
   }
 
-  // ── Aggregate sentiments
+  // ── Sentiments
   const sentimentMap: Record<string, number> = {}
   for (const row of (sentimentRes.data ?? [])) {
     const k = row.sentiment ?? "neutral"
     sentimentMap[k] = (sentimentMap[k] ?? 0) + 1
   }
 
-  // ── Aggregate user intents
+  // ── Intents
   const intentMap: Record<string, number> = {}
   for (const row of (intentRes.data ?? [])) {
     const k = row.user_intent ?? "консультація"
@@ -119,26 +91,30 @@ export async function GET(request: Request) {
     ? (complexityScores.reduce((a: number, b: number) => a + b, 0) / complexityScores.length).toFixed(1)
     : null
 
-  // ── Top users (with email/name from joined profiles)
-  const userMap: Record<string, { count: number; email: string; full_name: string | null }> = {}
+  // ── Top users
+  const userCountMap: Record<string, number> = {}
   for (const row of (topUsersRes.data ?? [])) {
-    const k = row.user_id
-    const profile = (row as { profiles?: { email?: string; full_name?: string | null } }).profiles
-    if (!userMap[k]) {
-      userMap[k] = {
-        count: 0,
-        email: profile?.email ?? k.slice(0, 8) + "…",
-        full_name: profile?.full_name ?? null,
-      }
-    }
-    userMap[k].count += 1
+    const k = row.user_id as string
+    userCountMap[k] = (userCountMap[k] ?? 0) + 1
   }
-  const topUsers = Object.entries(userMap)
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 5)
-    .map(([user_id, { count, email, full_name }]) => ({ user_id, count, email, full_name }))
+  const topUserIds = Object.entries(userCountMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id)
 
-  // ── Daily trend (last 7 days)
+  const profilesRes = topUserIds.length
+    ? await sb.from("profiles").select("id, email, full_name").in("id", topUserIds)
+    : { data: [] }
+
+  const profileMap: Record<string, { email: string; full_name: string | null }> = {}
+  for (const p of (profilesRes.data ?? [])) {
+    profileMap[p.id] = { email: p.email ?? p.id.slice(0, 8) + "…", full_name: p.full_name ?? null }
+  }
+  const topUsers = topUserIds.map(user_id => ({
+    user_id,
+    count: userCountMap[user_id],
+    email: profileMap[user_id]?.email ?? user_id.slice(0, 8) + "…",
+    full_name: profileMap[user_id]?.full_name ?? null,
+  }))
+
+  // ── Daily trend
   const dayMap: Record<string, number> = {}
   for (let i = 6; i >= 0; i--) {
     const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
@@ -156,6 +132,51 @@ export async function GET(request: Request) {
     ? Math.round(times.reduce((a: number, b: number) => a + b, 0) / times.length)
     : null
 
+  // ── New users per day (last 7 days)
+  const newUsersDayMap: Record<string, number> = {}
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
+    newUsersDayMap[d.toISOString().slice(0, 10)] = 0
+  }
+  for (const row of (newUsersRes.data ?? [])) {
+    const day = (row.created_at as string).slice(0, 10)
+    if (day in newUsersDayMap) newUsersDayMap[day] = (newUsersDayMap[day] ?? 0) + 1
+  }
+  const newUsersPerDay = Object.entries(newUsersDayMap).map(([date, count]) => ({ date, count }))
+  const newUsersTotal = newUsersRes.data?.length ?? 0
+
+  // ── Retention: users with >1 query in period
+  const usersWithQueries = Object.values(userCountMap)
+  const returningUsers = usersWithQueries.filter(c => c > 1).length
+  const totalActiveUsers = usersWithQueries.length
+  const retentionRate = totalActiveUsers > 0
+    ? Math.round((returningUsers / totalActiveUsers) * 100)
+    : 0
+
+  // ── Conversion: % of registered users who made at least 1 query
+  const allProfileIds = new Set((allProfilesRes.data ?? []).map(p => p.id))
+  const activeUserIds = new Set(Object.keys(userCountMap))
+  const conversionRate = allProfileIds.size > 0
+    ? Math.round((activeUserIds.size / allProfileIds.size) * 100)
+    : 0
+
+  // ── Avg session duration (first → last message per chat)
+  const chatMsgMap: Record<string, { first: number; last: number }> = {}
+  for (const msg of (messagesRes.data ?? [])) {
+    const t = new Date(msg.created_at as string).getTime()
+    if (!chatMsgMap[msg.chat_id]) chatMsgMap[msg.chat_id] = { first: t, last: t }
+    else {
+      chatMsgMap[msg.chat_id].first = Math.min(chatMsgMap[msg.chat_id].first, t)
+      chatMsgMap[msg.chat_id].last  = Math.max(chatMsgMap[msg.chat_id].last, t)
+    }
+  }
+  const durations = Object.values(chatMsgMap)
+    .map(({ first, last }) => last - first)
+    .filter(d => d > 0)
+  const avgSessionMs = durations.length
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+    : null
+
   return NextResponse.json({
     total: totalRes.count ?? 0,
     period: periodRes.count ?? 0,
@@ -168,5 +189,13 @@ export async function GET(request: Request) {
     topUsers,
     dailyTrend,
     recent: recentRes.data ?? [],
+    // New metrics
+    newUsersTotal,
+    newUsersPerDay,
+    retentionRate,
+    conversionRate,
+    avgSessionMs,
+    totalUsers: allProfileIds.size,
+    activeUsers: activeUserIds.size,
   })
 }
