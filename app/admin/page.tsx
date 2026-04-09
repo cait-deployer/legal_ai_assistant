@@ -257,8 +257,8 @@ export default function AdminDashboard() {
 
       {/* Sync health widget */}
       <div className={`bg-[#0d1120]/60 border rounded-[2rem] p-6 transition-all ${
-        syncStats?.consecutive_failures >= 3 ? "border-red-500/30"
-        : syncStats?.consecutive_failures === 1 ? "border-amber-500/20"
+        (syncStats?.consecutive_failures ?? 0) >= 3 ? "border-red-500/30"
+        : (syncStats?.consecutive_failures ?? 0) === 1 ? "border-amber-500/20"
         : "border-[#BFA071]/10"
       }`}>
         <div className="flex items-center justify-between mb-5">

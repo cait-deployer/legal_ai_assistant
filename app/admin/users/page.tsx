@@ -327,7 +327,7 @@ export default function UsersPage() {
   const [page, setPage]             = useState(1)
   const [selected, setSelected]     = useState<User | null>(null)
   const PER_PAGE = 25
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>()
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Debounce search
   useEffect(() => {
