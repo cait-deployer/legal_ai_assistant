@@ -97,7 +97,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }],
         generationConfig: { temperature: 0.2, maxOutputTokens: 100 },
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(30000),
     })
 
     if (!vertexRes.ok) {
@@ -107,6 +107,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     const vd = await vertexRes.json()
+    console.log("[name] full response:", JSON.stringify(vd).slice(0, 500))
     // gemini-2.5 thinking models have multiple parts: [thinking, actual_response]
     const parts: { text?: string }[] = vd?.candidates?.[0]?.content?.parts ?? []
     const raw = parts.map((p) => p.text ?? "").filter(Boolean).at(-1) ?? ""
