@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import {
   Users, Search, X, ChevronLeft, ChevronRight,
   ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Loader2,
-  Check, Mail, Globe, MessageSquare,
+  Check, Mail, Globe, MessageSquare, ArrowLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -217,12 +218,17 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
 }
 
 type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string }
+type MsgRow  = { id: string; role: string; content: string; created_at: string }
 
 function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
   const rel = formatRelative(user.last_active_at)
   const pct = user.monthly_limit ? Math.min(100, Math.round((user.requests_this_month / user.monthly_limit) * 100)) : 0
-  const [chats, setChats] = useState<ChatRow[]>([])
+  const [chats, setChats]               = useState<ChatRow[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
+  const [openChat, setOpenChat]         = useState<ChatRow | null>(null)
+  const [messages, setMessages]         = useState<MsgRow[]>([])
+  const [msgsLoading, setMsgsLoading]   = useState(false)
+  const msgsEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setChatsLoading(true)
@@ -233,10 +239,91 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
       .finally(() => setChatsLoading(false))
   }, [user.id])
 
+  const openChatView = (chat: ChatRow) => {
+    setOpenChat(chat)
+    setMessages([])
+    setMsgsLoading(true)
+    fetch(`/api/admin/chats/${chat.id}/messages`)
+      .then(r => r.json())
+      .then(d => setMessages(Array.isArray(d) ? d : []))
+      .catch(() => setMessages([]))
+      .finally(() => setMsgsLoading(false))
+  }
+
+  useEffect(() => {
+    if (!msgsLoading) msgsEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages, msgsLoading])
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[420px] bg-[#0d1120] border-l border-[#C9A84C]/20 h-full overflow-y-auto shadow-2xl flex flex-col">
+      <div className="relative w-full max-w-[420px] bg-[#0d1120] border-l border-[#C9A84C]/20 h-full shadow-2xl flex flex-col overflow-hidden">
+
+        {/* ── Chat conversation panel (slides in from right) ── */}
+        <AnimatePresence>
+          {openChat && (
+            <motion.div
+              key="chat-panel"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 320, damping: 32 }}
+              className="absolute inset-0 z-20 bg-[#0d1120] flex flex-col"
+            >
+              {/* Chat panel header */}
+              <div className="shrink-0 bg-[#0d1120]/95 backdrop-blur-sm border-b border-[#C9A84C]/10 px-4 py-3 flex items-center gap-3">
+                <button
+                  onClick={() => setOpenChat(null)}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-all shrink-0"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-[#E0E6ED] truncate">
+                    {openChat.title || "Новий чат"}
+                  </p>
+                  <p className="text-[10px] text-[#6B7CA3]">
+                    {new Date(openChat.updated_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+                <button onClick={onClose} className="text-[#C9A84C]/30 hover:text-[#C9A84C] transition-colors shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                {msgsLoading ? (
+                  <div className="flex items-center justify-center h-full gap-2 text-sm text-[#6B7CA3]">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Завантаження…
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-sm text-[#6B7CA3]">
+                    Повідомлень немає
+                  </div>
+                ) : (
+                  messages.map(msg => (
+                    <div
+                      key={msg.id}
+                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words ${
+                          msg.role === "user"
+                            ? "bg-[#C9A84C]/15 border border-[#C9A84C]/25 text-[#E0E6ED]/90 rounded-tr-sm"
+                            : "bg-[#0A0E1A] border border-[#C9A84C]/10 text-[#E0E6ED]/75 rounded-tl-sm"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))
+                )}
+                <div ref={msgsEndRef} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Header */}
         <div className="sticky top-0 bg-[#0d1120]/95 backdrop-blur-sm border-b border-[#C9A84C]/10 px-6 py-4 flex items-center justify-between z-10 shrink-0">
@@ -254,7 +341,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-6 flex-1">
+        <div className="px-6 py-5 space-y-6 flex-1 overflow-y-auto">
           {/* Tier + provider */}
           <div className="flex items-center gap-2 flex-wrap">
             <TierBadge tier={user.subscription_tier} />
@@ -339,15 +426,20 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
             ) : (
               <div className="space-y-1.5">
                 {chats.map(chat => (
-                  <div key={chat.id} className="flex items-start gap-2 px-3 py-2 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/10">
-                    <MessageSquare className="w-3.5 h-3.5 text-[#C9A84C]/50 shrink-0 mt-0.5" />
+                  <button
+                    key={chat.id}
+                    onClick={() => openChatView(chat)}
+                    className="w-full flex items-start gap-2 px-3 py-2.5 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/10 hover:bg-[#C9A84C]/10 hover:border-[#C9A84C]/25 transition-all text-left group"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-[#C9A84C]/40 group-hover:text-[#C9A84C]/70 shrink-0 mt-0.5 transition-colors" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs text-[#E0E6ED]/80 truncate">{chat.title || "Новий чат"}</p>
+                      <p className="text-xs text-[#E0E6ED]/80 truncate group-hover:text-[#E0E6ED] transition-colors">{chat.title || "Новий чат"}</p>
                       <p className="text-[10px] text-[#6B7CA3]">
                         {new Date(chat.updated_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </p>
                     </div>
-                  </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-[#C9A84C]/20 group-hover:text-[#C9A84C]/50 shrink-0 mt-0.5 transition-colors" />
+                  </button>
                 ))}
               </div>
             )}
