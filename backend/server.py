@@ -25,6 +25,7 @@ import json
 import uuid
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor as _TPE
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -214,6 +215,14 @@ def _clear_state() -> None:
 # Фонові задачі скрапінгу
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Семафор: максимум 2 паралельних HTTP-запити до zakon.rada.gov.ua (безпечно)
+_rada_http_sem = threading.Semaphore(2)
+
+# Кількість паралельних воркерів для обробки законів
+# 2 = безпечно (4 HTTP-з'єднання max), 3 = агресивніше (ризик 429)
+RADA_WORKERS = 2
+
+
 def _do_rada(
     session_id: str,
     start_index: int = 0,
@@ -222,8 +231,9 @@ def _do_rada(
 ) -> None:
     """
     Головна функція синхронізації Ради.
-    Підтримує: старт з нуля, resume з індексу, пауза після поточного документа.
+    Підтримує: старт з нуля, resume з індексу, пауза після поточного батча.
     section_codes — selected sections (None = all ALL_THEMES).
+    RADA_WORKERS законів обробляються паралельно.
     """
     src = "rada"
     log = lambda m, lv="info": _log(src, m, lv)
@@ -266,9 +276,113 @@ def _do_rada(
 
         total = len(all_laws)
 
-        for i in range(start_index, total):
+        # ── Функція обробки одного закону (виконується в потоці) ──────────
+        def _process_law(i: int) -> int:
+            """Повертає 1 якщо закон оброблено, 0 якщо пропущено."""
+            law       = all_laws[i]
+            law_id    = law["id"]
+            law_title = law["title"]
+            category  = law["category"]
+            law_url   = f"{BASE}/laws/show/{law_id}"
+            coll      = get_collection_for_category(category)
 
-            # ── Перевірка запиту на паузу ─────────────────────────────────
+            # Дедуплікація / оновлення
+            if law_id in existing_meta:
+                meta           = existing_meta[law_id]
+                stored_date    = meta.get("effective_date", "")
+                list_date      = law.get("list_date", "")
+                stored_coll    = meta.get("collection_name", coll)
+                if stored_date and list_date:
+                    if stored_date == list_date:
+                        return 0
+                    log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
+                    delete_law_chunks(law_id, stored_coll)
+                else:
+                    try:
+                        last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
+                        last = datetime.fromisoformat(last_str)
+                        now  = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
+                        if (now - last).days < 7:
+                            return 0
+                        log(f"🔄 Оновлення: {law_id} (вік: {(now - last).days} дн.)")
+                        delete_law_chunks(law_id, stored_coll)
+                    except Exception:
+                        pass
+
+            log(f"[{i + 1}/{total}] {law_title[:60]}")
+
+            # Паралельний fetch: текст + метадані з семафором на rada.gov.ua
+            def _fetch_text():
+                with _rada_http_sem:
+                    return get_law_text(law_id)
+
+            def _fetch_meta():
+                with _rada_http_sem:
+                    return get_law_metadata(law_id)
+
+            with _TPE(max_workers=2) as ex:
+                text_f = ex.submit(_fetch_text)
+                meta_f = ex.submit(_fetch_meta)
+                text     = text_f.result()
+                law_meta = meta_f.result()
+
+            scraped_at = datetime.now(timezone.utc).isoformat()
+
+            if text == "__RESTRICTED__":
+                log(f"  🔒 ДСК — зберігаємо без тексту", "warning")
+                try:
+                    v = embeddings.embed_query(law_title)
+                    upload_to_qdrant("", {
+                        "source": law_title, "law_id": law_id, "category": category,
+                        "status": "ДСК", "law_url": law_url,
+                        "source_domain": "zakon.rada.gov.ua",
+                        "scraped_at": scraped_at,
+                        "effective_date": law.get("list_date", ""),
+                        "chunk_index": 0,
+                    }, v, coll, session_id=session_id)
+                except Exception as e:
+                    log(f"  ❌ ДСК upload: {e}", "error")
+                return 1
+
+            if not text:
+                log(f"  ⚠️ Порожній текст — пропускаємо", "warning")
+                return 0
+
+            chunks     = splitter.split_text(text)
+            text_flags = detect_text_flags(text)
+            log(f"  ✂️ {len(chunks)} чанків | {law_meta['status']} | {coll}")
+
+            # Batch embed усі чанки одним викликом
+            try:
+                vectors = embeddings.embed_documents(chunks)
+            except Exception as e:
+                log(f"  ❌ Embedding: {e}", "error")
+                return 0
+
+            base = {
+                "source": law_title, "law_id": law_id, "category": category,
+                "status": law_meta["status"], "law_url": law_url,
+                "source_domain": "zakon.rada.gov.ua", "scraped_at": scraped_at,
+                "effective_date": law.get("list_date", ""),
+                "doc_type": law_meta.get("doc_type", ""),
+                "author": law_meta.get("author", ""),
+                "superseded_by": law_meta.get("superseded_by", ""),
+                **text_flags,
+            }
+            for j, (chunk, vector) in enumerate(zip(chunks, vectors)):
+                try:
+                    upload_to_qdrant(chunk, {**base, "chunk_index": j}, vector, coll, session_id=session_id)
+                except Exception as e:
+                    log(f"  ❌ Чанк {j}: {e}", "error")
+
+            log(f"  ✅ [{i + 1}/{total}] готово", "success")
+            return 1
+
+        # ── Батч-паралельний цикл ─────────────────────────────────────────
+        i = start_index
+        while i < total:
+
+            # Перевірка паузи між батчами
             with _lock:
                 pause = _sync[src]["pause_requested"]
             if pause:
@@ -287,129 +401,31 @@ def _do_rada(
                     _sync[src]["pause_requested"] = False
                 return
 
-            law = all_laws[i]
-            law_id = law["id"]
-            law_title = law["title"]
-            category = law["category"]
-            law_url = f"{BASE}/laws/show/{law_id}"
-            collection_name = get_collection_for_category(category)
+            # Формуємо батч
+            batch_end   = min(i + RADA_WORKERS, total)
+            batch_range = list(range(i, batch_end))
+            log(f"⚡ Батч законів {i + 1}–{batch_end} / {total} ({RADA_WORKERS} потоків)")
 
-            # ── Логіка дедуплікації / оновлення ───────────────────────────
-            should_download = True
-            if law_id in existing_meta:
-                meta = existing_meta[law_id]
-                stored_date = meta.get("effective_date", "")
-                list_date = law.get("list_date", "")
-                stored_collection = meta.get("collection_name", collection_name)
-
-                if stored_date and list_date:
-                    if stored_date == list_date:
-                        should_download = False
-                    else:
-                        log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
-                        delete_law_chunks(law_id, stored_collection)
-                else:
+            with _TPE(max_workers=RADA_WORKERS) as pool:
+                from concurrent.futures import as_completed
+                futs = {pool.submit(_process_law, idx): idx for idx in batch_range}
+                for fut in as_completed(futs):
                     try:
-                        last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
-                        last = datetime.fromisoformat(last_str)
-                        now = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
-                        days = (now - last).days
-                        if days < 7:
-                            should_download = False
-                        else:
-                            log(f"🔄 Оновлення: {law_id} (вік: {days} дн.)")
-                            delete_law_chunks(law_id, stored_collection)
-                    except Exception:
-                        pass
+                        processed += fut.result()
+                    except Exception as e:
+                        log(f"  ❌ Воркер: {e}", "error")
 
-            if not should_download:
-                # Зберігаємо прогрес навіть для пропущених
-                _save_state(src, all_laws, i + 1, session_id)
-                continue
+            i = batch_end
 
-            log(f"[{i + 1}/{total}] {law_title[:65]}")
-
-            text = get_law_text(law_id)
-            if text == "__RESTRICTED__":
-                # Фіксуємо ДСК-документ в Qdrant (без тексту, для статистики покриття)
-                log(f"  🔒 ДСК — зберігаємо запис без тексту", "warning")
-                scraped_at = datetime.now(timezone.utc).isoformat()
-                try:
-                    title_vector = embeddings.embed_query(law_title)
-                    upload_to_qdrant(
-                        "",
-                        {
-                            "source": law_title,
-                            "law_id": law_id,
-                            "category": category,
-                            "status": "ДСК",
-                            "law_url": law_url,
-                            "source_domain": "zakon.rada.gov.ua",
-                            "scraped_at": scraped_at,
-                            "effective_date": law.get("list_date", ""),
-                            "chunk_index": 0,
-                        },
-                        title_vector,
-                        collection_name,
-                        session_id=session_id,
-                    )
-                    processed += 1
-                except Exception as e:
-                    log(f"  ❌ Помилка збереження ДСК: {e}", "error")
-                _save_state(src, all_laws, i + 1, session_id)
-                continue
-            if not text:
-                log(f"  ⚠️ Порожній текст — пропускаємо", "warning")
-                _save_state(src, all_laws, i + 1, session_id)
-                continue
-
-            law_meta = get_law_metadata(law_id)
-            chunks = splitter.split_text(text)
-            text_flags = detect_text_flags(text)
-            log(f"  ✂️ {len(chunks)} чанків | Статус: {law_meta['status']} | Колекція: {collection_name}")
-
-            scraped_at = datetime.now(timezone.utc).isoformat()
-            for j, chunk in enumerate(chunks):
-                try:
-                    vector = embeddings.embed_query(chunk)
-                    upload_to_qdrant(
-                        chunk,
-                        {
-                            "source":         law_title,
-                            "law_id":         law_id,
-                            "category":       category,
-                            "status":         law_meta["status"],
-                            "law_url":        law_url,
-                            "source_domain":  "zakon.rada.gov.ua",
-                            "scraped_at":     scraped_at,
-                            "effective_date": law.get("list_date", ""),
-                            "chunk_index":    j,
-                            "doc_type":       law_meta.get("doc_type", ""),
-                            "author":         law_meta.get("author", ""),
-                            "superseded_by":  law_meta.get("superseded_by", ""),
-                            **text_flags,
-                        },
-                        vector,
-                        collection_name,
-                        session_id=session_id,
-                    )
-                    time.sleep(0.5)
-                except Exception as e:
-                    log(f"  ❌ Чанк {j}: {e}", "error")
-                    time.sleep(2)
-
-            processed += 1
-            log(f"  ✅ Готово! (всього оброблено: {processed})", "success")
-
-            # Оновлюємо in-memory лічильник і Supabase кожні 10 законів
+            # Зберігаємо прогрес і лічильник після кожного батча
+            _save_state(src, all_laws, i, session_id)
             with _lock:
                 _sync[src]["laws_processed"] = processed
-            if processed % 10 == 0:
+            if processed % 10 < RADA_WORKERS:
                 _sb_update_log(session_id, laws_processed=processed)
 
-            # Зберігаємо прогрес після кожного закону
-            _save_state(src, all_laws, i + 1, session_id)
-            time.sleep(0.5)
+            # Пауза між батчами — ввічливо до rada.gov.ua
+            time.sleep(1.0)
 
         # ── Успішне завершення ─────────────────────────────────────────────
         _clear_state()
