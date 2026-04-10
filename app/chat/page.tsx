@@ -27,8 +27,6 @@ import {
 import { ChatSidebar } from '@/components/chat-sidebar';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
 const SAMPLE_QUESTIONS = [
     { icon: <Scale className="h-4 w-4" />, text: 'Які права має ФОП 3 групи?' },
     { icon: <Briefcase className="h-4 w-4" />, text: 'Як законно звільнити працівника?' },
@@ -242,7 +240,7 @@ function ChatPage() {
         }).catch(() => { });
 
         try {
-            const res = await fetch(`${API_URL}/ask`, {
+            const res = await fetch(`/api/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: questionText }),

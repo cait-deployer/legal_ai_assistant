@@ -153,11 +153,10 @@ def _sb_update_schedule(enabled: bool) -> None:
 
 
 def _qdrant_doc_count() -> int:
-    """Кількість векторів у Qdrant."""
+    """Загальна кількість векторів у всіх колекціях Qdrant."""
     try:
-        from qdrant_storage import get_client, COLLECTION_NAME
-        info = get_client().get_collection(COLLECTION_NAME)
-        return info.points_count or 0
+        from qdrant_storage import get_total_doc_count
+        return get_total_doc_count()
     except Exception as e:
         print(f"⚠️ doc_count: {e}")
         return 0
@@ -241,8 +240,11 @@ def _do_rada(
     processed = 0
 
     try:
-        from qdrant_storage import get_existing_laws_meta, delete_law_chunks, upload_to_qdrant
-        from rada_scanner import get_all_legal_ids, get_law_text, get_law_metadata, BASE
+        from qdrant_storage import (
+            get_all_existing_laws_meta, delete_law_chunks, upload_to_qdrant,
+            get_collection_for_category,
+        )
+        from rada_scanner import get_all_legal_ids, get_law_text, get_law_metadata, detect_text_flags, BASE
         from langchain_text_splitters import MarkdownTextSplitter
         from rada_to_supabase import embeddings
 
@@ -257,9 +259,9 @@ def _do_rada(
             all_laws = get_all_legal_ids(section_codes=section_codes, log=log)
             log(f"📦 Знайдено: {len(all_laws)} унікальних законів")
 
-        # 2. Метадані існуючих (завжди свіжі)
+        # 2. Метадані існуючих — по всіх колекціях паралельно
         log("🔍 Завантаження метаданих Qdrant...")
-        existing_meta = get_existing_laws_meta()
+        existing_meta = get_all_existing_laws_meta()
         log(f"📊 В базі вже: {len(existing_meta)} законів")
 
         total = len(all_laws)
@@ -290,25 +292,23 @@ def _do_rada(
             law_title = law["title"]
             category = law["category"]
             law_url = f"{BASE}/laws/show/{law_id}"
+            collection_name = get_collection_for_category(category)
 
             # ── Логіка дедуплікації / оновлення ───────────────────────────
-            # Пріоритет: порівнюємо дату редакції з Ради (list_date) зі збереженою.
-            # Якщо дат немає (старі записи) — fallback на вік scraped_at (7 днів).
             should_download = True
             if law_id in existing_meta:
                 meta = existing_meta[law_id]
                 stored_date = meta.get("effective_date", "")
                 list_date = law.get("list_date", "")
+                stored_collection = meta.get("collection_name", collection_name)
 
                 if stored_date and list_date:
-                    # Обидві дати відомі → порівнюємо редакцію
                     if stored_date == list_date:
-                        should_download = False  # Закон не змінився
+                        should_download = False
                     else:
                         log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
-                        delete_law_chunks(law_id)
+                        delete_law_chunks(law_id, stored_collection)
                 else:
-                    # Fallback: для старих записів без збереженої дати → перевірка по віку
                     try:
                         last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
                         last = datetime.fromisoformat(last_str)
@@ -317,10 +317,10 @@ def _do_rada(
                         if days < 7:
                             should_download = False
                         else:
-                            log(f"🔄 Оновлення: {law_id} (вік: {days} дн., дата редакції невідома)")
-                            delete_law_chunks(law_id)
+                            log(f"🔄 Оновлення: {law_id} (вік: {days} дн.)")
+                            delete_law_chunks(law_id, stored_collection)
                     except Exception:
-                        pass  # при помилці парсингу — скачуємо знову
+                        pass
 
             if not should_download:
                 # Зберігаємо прогрес навіть для пропущених
@@ -350,6 +350,7 @@ def _do_rada(
                             "chunk_index": 0,
                         },
                         title_vector,
+                        collection_name,
                         session_id=session_id,
                     )
                     processed += 1
@@ -364,7 +365,8 @@ def _do_rada(
 
             law_meta = get_law_metadata(law_id)
             chunks = splitter.split_text(text)
-            log(f"  ✂️ {len(chunks)} чанків | Статус: {law_meta['status']}")
+            text_flags = detect_text_flags(text)
+            log(f"  ✂️ {len(chunks)} чанків | Статус: {law_meta['status']} | Колекція: {collection_name}")
 
             scraped_at = datetime.now(timezone.utc).isoformat()
             for j, chunk in enumerate(chunks):
@@ -373,17 +375,22 @@ def _do_rada(
                     upload_to_qdrant(
                         chunk,
                         {
-                            "source": law_title,
-                            "law_id": law_id,
-                            "category": category,
-                            "status": law_meta["status"],
-                            "law_url": law_url,
-                            "source_domain": "zakon.rada.gov.ua",
-                            "scraped_at": scraped_at,
+                            "source":         law_title,
+                            "law_id":         law_id,
+                            "category":       category,
+                            "status":         law_meta["status"],
+                            "law_url":        law_url,
+                            "source_domain":  "zakon.rada.gov.ua",
+                            "scraped_at":     scraped_at,
                             "effective_date": law.get("list_date", ""),
-                            "chunk_index": j,
+                            "chunk_index":    j,
+                            "doc_type":       law_meta.get("doc_type", ""),
+                            "author":         law_meta.get("author", ""),
+                            "superseded_by":  law_meta.get("superseded_by", ""),
+                            **text_flags,
                         },
                         vector,
+                        collection_name,
                         session_id=session_id,
                     )
                     time.sleep(0.5)
@@ -1054,24 +1061,28 @@ async def get_law_text_endpoint(law_id: str):
         raise HTTPException(400, "law_id required")
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, COLLECTION_NAME
+        from qdrant_storage import get_client, ALL_COLLECTIONS
 
         client = get_client()
         all_chunks: list = []
-        next_page_offset = None
-        while True:
-            batch, next_page_offset = client.scroll(
-                collection_name=COLLECTION_NAME,
-                scroll_filter=Filter(must=[
-                    FieldCondition(key="law_id", match=MatchValue(value=law_id))
-                ]),
-                with_payload=True,
-                limit=500,
-                offset=next_page_offset,
-            )
-            all_chunks.extend(batch)
-            if next_page_offset is None:
-                break
+        # Шукаємо по всіх колекціях — law_id унікальний
+        for col in ALL_COLLECTIONS:
+            next_page_offset = None
+            while True:
+                batch, next_page_offset = client.scroll(
+                    collection_name=col,
+                    scroll_filter=Filter(must=[
+                        FieldCondition(key="law_id", match=MatchValue(value=law_id))
+                    ]),
+                    with_payload=True,
+                    limit=500,
+                    offset=next_page_offset,
+                )
+                all_chunks.extend(batch)
+                if next_page_offset is None:
+                    break
+            if all_chunks:
+                break  # знайшли колекцію — далі не шукаємо
 
         if not all_chunks:
             raise HTTPException(404, "Документ не знайдено")
@@ -1099,40 +1110,39 @@ async def get_base_docs(
     """Список унікальних документів з Qdrant (chunk_index=0 = один запис на закон)."""
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, COLLECTION_NAME
+        from qdrant_storage import get_client, RADA_COLLECTIONS, ALL_COLLECTIONS
 
         client = get_client()
 
-        # Rada може фільтруватись по source_domain (є у payload).
-        # Supreme і wiki — ні (source_domain порожній), тому для них фільтруємо по префіксу law_id у Python.
         must = [FieldCondition(key="chunk_index", match=MatchValue(value=0))]
-        if source == "rada":
-            must.append(FieldCondition(key="source_domain", match=MatchValue(value="zakon.rada.gov.ua")))
         if category:
             must.append(FieldCondition(key="category", match=MatchValue(value=category)))
-
         scroll_filter = Filter(must=must)
 
-        # Qdrant scroll не підтримує числовий offset → збираємо всі і нарізаємо
-        all_points: list = []
-        next_page_offset = None
-        while True:
-            batch, next_page_offset = client.scroll(
-                collection_name=COLLECTION_NAME,
-                scroll_filter=scroll_filter,
-                with_payload=True,
-                limit=1000,
-                offset=next_page_offset,
-            )
-            all_points.extend(batch)
-            if next_page_offset is None:
-                break
-
-        # Python-рівень: фільтр по джерелу (court/wiki по префіксу law_id)
-        if source == "court":
-            all_points = [p for p in all_points if (p.payload.get("law_id") or "").startswith("sc_")]
+        # Вибираємо колекції відповідно до фільтру source
+        if source == "rada":
+            target_cols = RADA_COLLECTIONS
+        elif source == "supreme":
+            target_cols = ["laws_supreme"]
         elif source == "wiki":
-            all_points = [p for p in all_points if (p.payload.get("law_id") or "").startswith("wiki_")]
+            target_cols = ["laws_wiki"]
+        else:
+            target_cols = ALL_COLLECTIONS
+
+        all_points: list = []
+        for col in target_cols:
+            next_page_offset = None
+            while True:
+                batch, next_page_offset = client.scroll(
+                    collection_name=col,
+                    scroll_filter=scroll_filter,
+                    with_payload=True,
+                    limit=1000,
+                    offset=next_page_offset,
+                )
+                all_points.extend(batch)
+                if next_page_offset is None:
+                    break
 
         # Python-рівень: пошук по назві або law_id (Qdrant не підтримує substring без індексу)
         if search:
@@ -1172,16 +1182,17 @@ async def get_base_categories():
     """Унікальні категорії з Qdrant для фільтра."""
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, COLLECTION_NAME
+        from qdrant_storage import get_client, RADA_COLLECTIONS
 
         client = get_client()
         scroll_filter = Filter(must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))])
 
         categories: set[str] = set()
-        next_page_offset = None
-        while True:
+        for col in RADA_COLLECTIONS:
+          next_page_offset = None
+          while True:
             batch, next_page_offset = client.scroll(
-                collection_name=COLLECTION_NAME,
+                collection_name=col,
                 scroll_filter=scroll_filter,
                 with_payload=["category"],
                 limit=1000,
@@ -1370,29 +1381,30 @@ async def get_rada_coverage(refresh: bool = False):
     import asyncio as _asyncio
     import time as _time
     from qdrant_client.models import Filter, FieldCondition, MatchValue
-    from qdrant_storage import get_client, COLLECTION_NAME
+    from qdrant_storage import get_client, RADA_COLLECTIONS
     from rada_scanner import ALL_THEMES, get_total_pages
 
-    # ── 1. Qdrant: одним scrollом збираємо всі chunk_index=0 записи Ради ──
+    # ── 1. Qdrant: збираємо chunk_index=0 по всіх РАДА-колекціях ──
     client = get_client()
     qdrant_filter = Filter(must=[
-        FieldCondition(key="chunk_index",     match=MatchValue(value=0)),
-        FieldCondition(key="source_domain",   match=MatchValue(value="zakon.rada.gov.ua")),
+        FieldCondition(key="chunk_index",   match=MatchValue(value=0)),
+        FieldCondition(key="source_domain", match=MatchValue(value="zakon.rada.gov.ua")),
     ])
 
     all_points: list = []
-    next_offset = None
-    while True:
-        batch, next_offset = client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=qdrant_filter,
-            with_payload=["category", "status", "scraped_at"],
-            limit=2000,
-            offset=next_offset,
-        )
-        all_points.extend(batch)
-        if next_offset is None:
-            break
+    for col in RADA_COLLECTIONS:
+        next_offset = None
+        while True:
+            batch, next_offset = client.scroll(
+                collection_name=col,
+                scroll_filter=qdrant_filter,
+                with_payload=["category", "status", "scraped_at"],
+                limit=2000,
+                offset=next_offset,
+            )
+            all_points.extend(batch)
+            if next_offset is None:
+                break
 
     # Групуємо по category
     qdrant: dict[str, dict] = {}
@@ -1486,8 +1498,10 @@ async def get_rada_coverage(refresh: bool = False):
 
 class AskRequest(BaseModel):
     question: str
-    max_docs: int = 8          # max chunks from Qdrant (from user's plan)
-    filter_domains: list[str] | None = None  # allowed source domains (from plan features)
+    max_docs: int = 8                          # max chunks from Qdrant (from user's plan)
+    filter_domains: list[str] | None = None    # kept for backward compat (unused)
+    filter_sources: list[str] | None = None    # e.g. ["rada", "wiki", "supreme", "ccu"]
+    response_features: list[str] = []          # enabled response quality features from plan
 
 
 _CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
@@ -1510,11 +1524,75 @@ async def ask(body: AskRequest):
     except Exception as e:
         raise HTTPException(500, f"Embedding error: {e}")
 
-    # 2. Search Qdrant (plan-based top_k and domain filter)
-    from qdrant_storage import search_qdrant
+    # 2. Routing — визначаємо в яких колекціях шукати
+    from qdrant_storage import search_qdrant, RADA_COLLECTIONS, ALL_COLLECTIONS
+
+    def _route_collections(q: str, filter_sources: list | None) -> list:
+        """
+        Keyword-роутер: повертає список колекцій для пошуку.
+        Якщо filter_sources вказано — обмежуємо по джерелу.
+        """
+        q_low = q.lower()
+
+        # Маппінг ключових слів → колекції
+        domain_keywords: list[tuple[list[str], str]] = [
+            (["трудов", "зарплат", "звільнен", "відпустк", "кзпп", "роботодав",
+              "найман", "декрет", "лікарнян", "соціальн", "допомог", "пенсі",
+              "виплат", "непрацездатн", "страхов"], "rada_labor"),
+            (["податк", "пдв", "фоп", "єдин", "оподаткуван", "митн", "акциз",
+              "прибутк", "бухгалтер", "фінанс", "бюджет", "банк", "кредит",
+              "рро", "єсв", "зед"], "rada_finance"),
+            (["цивільн", "договір", "угод", "зобов'яз", "власніст", "спадщин",
+              "аліменти", "шлюб", "розлучен", "дитин", "сім'я", "опіка",
+              "нотаріус", "адвокат"], "rada_civil"),
+            (["кримінальн", "злочин", "покаран", "вирок", "арешт",
+              "обвинувачен", "кпк", "досудов", "слідств"], "rada_criminal"),
+            (["суд", "позов", "оскарж", "апеляц", "касац", "рішення суду",
+              "судова практик", "верховний суд"], "rada_court"),
+            (["адміністратив", "штраф", "порушен", "дозвіл", "ліцензі",
+              "реєстраці", "держ орган"], "rada_admin"),
+            (["житл", "квартир", "оренд", "комунальн", "будинок",
+              "нерухомість", "приватизац", "будівництв", "осбб"], "rada_housing"),
+            (["земельн", "ділянк", "кадастр", "агро", "сільськ", "фермер"], "rada_land"),
+            (["підприємств", "бізнес", "корпоратив", "акціонер", "торгівл",
+              "транспорт", "перевезен", "промислов", "енергетик"], "rada_industry"),
+            (["військ", "мобіліз", "убд", "зсу", "воєнн", "збройн"], "rada_other"),
+            (["міжнародн", "конвенці", "ратифікац", "договір між"], "rada_intl"),
+        ]
+
+        matched: list[str] = []
+        for keywords, collection in domain_keywords:
+            if any(kw in q_low for kw in keywords):
+                matched.append(collection)
+
+        # Завжди додаємо судову практику якщо є слово "суд"
+        if "суд" in q_low and "laws_supreme" not in matched:
+            matched.append("laws_supreme")
+
+        # Якщо нічого не знайдено — шукаємо по всіх
+        targets = list(dict.fromkeys(matched)) or ALL_COLLECTIONS  # унікальні, зберігаючи порядок
+
+        # Фільтр по filter_sources якщо вказано
+        if filter_sources:
+            allowed = set(filter_sources)
+            filtered: list[str] = []
+            if "rada" in allowed:
+                filtered += [c for c in targets if c.startswith("rada_")]
+            if "supreme" in allowed:
+                filtered.append("laws_supreme")
+            if "wiki" in allowed:
+                filtered.append("laws_wiki")
+            targets = filtered or targets
+
+        return targets
+
+    target_collections = _route_collections(question, body.filter_sources)
+    fetch_k = body.max_docs * 2
+    match_threshold = settings_cache.get_float("match_threshold_docs", 0.4)
     results = await _asyncio.to_thread(
-        search_qdrant, query_vector, body.max_docs, body.filter_domains or None, 0.0
+        search_qdrant, query_vector, fetch_k, target_collections, match_threshold
     )
+    results = results[:body.max_docs]
 
     # 3. Build citations (Citation format expected by frontend)
     citations: list[dict] = []
@@ -1568,12 +1646,35 @@ async def ask(body: AskRequest):
         temperature = settings_cache.get_float("temperature", 0.1)
         top_p       = settings_cache.get_float("top_p", 0.8)
 
+        # Build response instructions based on plan features
+        rf = set(body.response_features)
+        response_instructions = ["Надай точну структуровану відповідь."]
+        if "response_detailed" in rf:
+            response_instructions.append(
+                "Дай розгорнуту відповідь з аналізом: поясни суть, розкрий деталі, "
+                "вкажи винятки та важливі нюанси."
+            )
+        if "response_steps" in rf:
+            response_instructions.append(
+                "Обов'язково додай розділ «Що робити далі» з конкретними покроковими діями."
+            )
+        if "response_scenarios" in rf:
+            response_instructions.append(
+                "Розглянь альтернативні сценарії розвитку ситуації та їхні наслідки."
+            )
+        if "response_vs_position" in rf:
+            response_instructions.append(
+                "Посилайся на конкретні правові позиції Верховного суду з джерел, якщо вони присутні в контексті."
+            )
+        response_instructions.append(
+            "Посилайся на джерела у форматі [1], [2] одразу після твердження. "
+            "Якщо контекст не містить потрібної інформації — чесно повідом про це."
+        )
+
         prompt = (
             f"Контекст з українського законодавства (кожен фрагмент пронумерований):\n\n{context}\n\n"
             f"---\nПитання: {question}\n\n"
-            "Надай точну структуровану відповідь. "
-            "Посилайся на джерела у форматі [1], [2] одразу після твердження. "
-            "Якщо контекст не містить потрібної інформації — чесно повідом про це."
+            + " ".join(response_instructions)
         )
 
         clf_prompt = (

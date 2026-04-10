@@ -1,0 +1,103 @@
+import { NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
+import { createClient as createAdminClient } from "@supabase/supabase-js"
+
+const BACKEND = process.env.API_URL || "http://localhost:8000"
+
+// Map plan feature keys → backend source names
+const SOURCE_FEATURE_MAP: Record<string, string> = {
+  source_rada:     "rada",
+  source_legalaid: "wiki",
+  source_supreme:  "supreme",
+  source_ccu:      "ccu",
+}
+
+// Response quality feature keys (passed as-is to backend)
+const RESPONSE_FEATURES = new Set([
+  "response_detailed",
+  "response_steps",
+  "response_scenarios",
+  "response_vs_position",
+])
+
+function admin() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  )
+}
+
+export async function POST(request: Request) {
+  // 1. Authenticate user
+  const supabase = await createClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const body = await request.json()
+  const { question } = body
+
+  // 2. Get user's subscription_tier (= plan id: "free", "daily", "standard", "pro")
+  const { data: profile } = await admin()
+    .from("profiles")
+    .select("subscription_tier")
+    .eq("id", user.id)
+    .single()
+
+  let filter_sources: string[] | null = null
+  let response_features: string[] = []
+  let max_docs = 8
+
+  if (profile?.subscription_tier) {
+    const planId = profile.subscription_tier
+
+    // 3. Get plan limits (id IS the slug)
+    const { data: plan } = await admin()
+      .from("subscription_plans")
+      .select("max_docs_retrieved")
+      .eq("id", planId)
+      .single()
+
+    if (plan) {
+      max_docs = plan.max_docs_retrieved ?? 8
+    }
+
+    // 4. Get all enabled features for this plan
+    const { data: features } = await admin()
+      .from("plan_features")
+      .select("feature_key")
+      .eq("plan_id", planId)
+      .eq("enabled", true)
+
+    if (features && features.length > 0) {
+      // Source filter
+      const sources = features
+        .map((f) => SOURCE_FEATURE_MAP[f.feature_key])
+        .filter(Boolean) as string[]
+      if (sources.length > 0) filter_sources = sources
+
+      // Response quality features
+      response_features = features
+        .map((f) => f.feature_key)
+        .filter((k) => RESPONSE_FEATURES.has(k))
+    }
+  }
+
+  // 5. Forward to Python backend with plan-based params
+  try {
+    const res = await fetch(`${BACKEND}/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, max_docs, filter_sources, response_features }),
+      signal: AbortSignal.timeout(120_000),
+    })
+
+    const data = await res.json()
+    return NextResponse.json(data, { status: res.status })
+  } catch (err) {
+    console.error("[api/ask] backend error:", err)
+    return NextResponse.json({ error: "Backend unavailable" }, { status: 503 })
+  }
+}

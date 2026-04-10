@@ -266,12 +266,13 @@ def get_new_laws(all_laws: list[dict], index: dict) -> list[dict]:
 def get_law_metadata(law_id: str) -> dict:
     """
     Повертає словник з метаданими закону:
-      status         — "Чинний" / "Втратив чинність" / "Невідомо"
-      doc_number     — номер документа, напр. "3553-IX"
-      doc_type       — тип: Закон / Постанова / Указ / ...
-      author         — орган: ВРУ / КМУ / Президент
-      date_adopted   — дата прийняття: "16.01.2024"
-      effective_date — дата набрання чинності: "01.03.2024"
+      status          — "Чинний" / "Втратив чинність" / "Невідомо"
+      doc_number      — номер документа, напр. "3553-IX"
+      doc_type        — тип: Закон / Постанова / Указ / ...
+      author          — орган: ВРУ / КМУ / Президент
+      date_adopted    — дата прийняття: "16.01.2024"
+      effective_date  — дата набрання чинності: "01.03.2024"
+      superseded_by   — id закону-підстави (наприклад "z1249-07"), "" якщо немає
     """
     url = f"{BASE}/laws/show/{law_id}?lang=uk"
     meta = {
@@ -281,6 +282,7 @@ def get_law_metadata(law_id: str) -> dict:
         "author": "",
         "date_adopted": "",
         "effective_date": "",
+        "superseded_by": "",
     }
 
     try:
@@ -312,6 +314,21 @@ def get_law_metadata(law_id: str) -> dict:
             if dat:
                 meta["effective_date"] = dat.get_text(strip=True)
 
+        # Підстава (superseded_by): посилання поряд з текстом "підстава"
+        # Рада показує: "поточна редакція — Редакція від XX.XX.XXXX, підстава — zXXXX-XX"
+        page_text = soup.get_text(" ")
+        basis_match = re.search(r"підстава\s*[—-]\s*([a-zA-Z0-9\-]+)", page_text, re.I)
+        if basis_match:
+            meta["superseded_by"] = basis_match.group(1).strip()
+        else:
+            # Запасний варіант: шукаємо посилання /laws/show/XXXX поряд з "підстава"
+            for a in soup.find_all("a", href=re.compile(r"/laws/show/")):
+                parent_text = (a.parent or a).get_text(" ", strip=True).lower()
+                if "підстав" in parent_text:
+                    basis_id = a["href"].split("/show/")[1].split("#")[0].strip()
+                    meta["superseded_by"] = basis_id
+                    break
+
         # Тип документа і орган — шукаємо в тексті блоку div.doc
         doc_div = soup.find("div", class_="doc")
         header_text = doc_div.get_text(" ", strip=True)[:400] if doc_div else ""
@@ -334,6 +351,37 @@ def get_law_metadata(law_id: str) -> dict:
         print(f"   ⚠️ get_law_metadata({law_id}): {e}")
 
     return meta
+
+
+# ── REGEX-ФЛАГИ З ТЕКСТУ ЗАКОНУ ───────────────────────────────────────────────
+
+_RETROACTIVE_RE = [
+    re.compile(r"поширюється на відносини.{0,60}до набрання чинності", re.I),
+    re.compile(r"зворотн.{0,15}сил", re.I),
+    re.compile(r"набирає чинності з \d{2}\.\d{2}\.\d{4}", re.I),
+]
+_WARTIME_RE = re.compile(
+    r"на період воєнного стану|в умовах воєнного стану|дію воєнного стану", re.I
+)
+_SUSPENDED_RE = re.compile(
+    r"призупин(ити|яється|ено)\s+дію|мораторі[йю]|зупин(ити|яється|ено)\s+дію", re.I
+)
+_TRANSITIONAL_RE = re.compile(
+    r"прикінцев[іи]\s+положення|перехідн[іи]\s+положення", re.I
+)
+
+
+def detect_text_flags(text: str) -> dict:
+    """
+    Аналізує текст закону регулярками і повертає булеві флаги.
+    Викликається при чанкінгу — безкоштовно, без LLM.
+    """
+    return {
+        "is_retroactive":    any(p.search(text) for p in _RETROACTIVE_RE),
+        "wartime_only":      bool(_WARTIME_RE.search(text)),
+        "is_suspended":      bool(_SUSPENDED_RE.search(text)),
+        "has_transitional":  bool(_TRANSITIONAL_RE.search(text)),
+    }
 
 
 # ТЕКСТ ЗАКОНУ
