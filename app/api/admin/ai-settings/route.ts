@@ -19,13 +19,15 @@ const BACKEND = process.env.API_URL || "http://localhost:8000"
 
 // All settings managed via admin panel
 const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default: string | number | boolean; secret?: boolean }> = {
-  service_account_json: { type: "text",  default: "",                   secret: true },
-  vertex_location:      { type: "text",  default: "us-central1" },
-  ai_model:             { type: "text",  default: "gemini-2.0-flash-lite" },
-  embedding_model:      { type: "text",  default: "text-embedding-004" },
-  system_prompt:        { type: "text",  default: "Ти — досвідчений український адвокат." },
-  temperature:          { type: "float", default: 0.1 },
-  top_p:                { type: "float", default: 0.8 },
+  service_account_json:  { type: "text",  default: "",                   secret: true },
+  vertex_location:       { type: "text",  default: "us-central1" },
+  ai_model:              { type: "text",  default: "gemini-2.0-flash-lite" },
+  embedding_model:       { type: "text",  default: "text-embedding-004" },
+  system_prompt:         { type: "text",  default: "Ти — досвідчений український адвокат." },
+  temperature:           { type: "float", default: 0.1 },
+  top_p:                 { type: "float", default: 0.8 },
+  match_threshold_docs:  { type: "float", default: 0.4 },
+  min_relevance_score:   { type: "float", default: 0.28 },
 }
 
 export async function GET() {

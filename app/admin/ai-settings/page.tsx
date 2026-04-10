@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Bot, Loader2, Save, RotateCcw, RefreshCw, Upload, CheckCircle2, AlertCircle, X } from "lucide-react"
+import { Bot, Loader2, Save, RotateCcw, RefreshCw, Upload, CheckCircle2, AlertCircle, HelpCircle } from "lucide-react"
 import { toast } from "sonner"
 
 type Settings = {
@@ -13,6 +13,8 @@ type Settings = {
   system_prompt: string
   temperature: number
   top_p: number
+  match_threshold_docs: number
+  min_relevance_score: number
 }
 
 type SaInfo = { project_id: string; client_email: string } | null
@@ -33,6 +35,8 @@ const DEFAULTS: Settings = {
 - Посилайся на джерела [1], [2] після кожного твердження`,
   temperature: 0.1,
   top_p: 0.8,
+  match_threshold_docs: 0.4,
+  min_relevance_score: 0.28,
 }
 
 function parseSaInfo(json: string): SaInfo {
@@ -46,10 +50,56 @@ function parseSaInfo(json: string): SaInfo {
   return null
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Tooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative inline-flex items-center">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className="w-4 h-4 rounded-full bg-[#C9A84C]/10 hover:bg-[#C9A84C]/20 border border-[#C9A84C]/20 flex items-center justify-center transition-colors"
+      >
+        <HelpCircle className="w-3 h-3 text-[#C9A84C]/50" />
+      </button>
+      {open && (
+        <div className="absolute left-6 top-0 z-50 w-64 bg-[#0d1120] border border-[#C9A84C]/20 rounded-xl p-3 shadow-xl text-[11px] text-[#E0E6ED]/70 leading-relaxed">
+          {text}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RestartBadge({ type }: { type: "none" | "cache" | "restart" | "rescrape" }) {
+  if (type === "none") return null
+  const configs = {
+    cache:    { label: "Оновити кеш", color: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5" },
+    restart:  { label: "Перезапуск бекенду", color: "text-amber-400 border-amber-500/20 bg-amber-500/5" },
+    rescrape: { label: "Перескрапінг бази!", color: "text-red-400 border-red-500/20 bg-red-500/5" },
+  }
+  const c = configs[type]
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-wider ${c.color}`}>
+      ↻ {c.label}
+    </span>
+  )
+}
+
+function Field({ label, hint, children, tooltip, restart }: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+  tooltip?: string
+  restart?: "none" | "cache" | "restart" | "rescrape"
+}) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-black uppercase tracking-wider text-[#C9A84C]/80">{label}</label>
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="text-xs font-black uppercase tracking-wider text-[#C9A84C]/80">{label}</label>
+        {tooltip && <Tooltip text={tooltip} />}
+        {restart && restart !== "none" && <RestartBadge type={restart} />}
+      </div>
       {children}
       {hint && <p className="text-[11px] text-[#E0E6ED]/40">{hint}</p>}
     </div>
@@ -312,20 +362,36 @@ export default function AiSettingsPage() {
           </div>
         </section>
 
+        {/* Restart info banner */}
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 text-[11px] text-[#E0E6ED]/50 space-y-2">
+          <p className="font-black uppercase tracking-wider text-[10px] text-[#C9A84C]/60">Коли що потрібно після змін:</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="flex items-start gap-2">
+              <span className="text-emerald-400 font-bold shrink-0">↻ Оновити кеш</span>
+              <span>— більшість налаштувань: модель, промпт, температура, пороги. Натисни «Зберегти» — відбувається автоматично.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-amber-400 font-bold shrink-0">⚡ Перезапуск</span>
+              <span>— тільки якщо змінився код Python. Через SSH: <code className="font-mono bg-[#C9A84C]/5 px-1 rounded">systemctl restart backend.service</code></span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-red-400 font-bold shrink-0">⚠ Перескрапінг</span>
+              <span>— тільки якщо змінилась модель ембедингів. Треба перескрапити всю базу знань заново.</span>
+            </div>
+          </div>
+        </div>
+
         {/* Vertex location */}
         <section>
           <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Vertex AI Регіон</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
             <Field
               label="Location"
-              hint="Регіон Vertex AI. Напр.: us-central1, europe-west1, europe-west4"
+              hint="Напр.: us-central1, europe-west1, europe-west4"
+              restart="cache"
+              tooltip="Регіон Google Cloud де запускається Vertex AI. Впливає на затримку відповідей. us-central1 — найбільш стабільний регіон з повною підтримкою Gemini. Після зміни натисни Зберегти."
             >
-              <TextInput
-                value={settings.vertex_location}
-                onChange={v => set("vertex_location", v)}
-                placeholder="us-central1"
-                mono
-              />
+              <TextInput value={settings.vertex_location} onChange={v => set("vertex_location", v)} placeholder="us-central1" mono />
             </Field>
           </div>
         </section>
@@ -336,25 +402,19 @@ export default function AiSettingsPage() {
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-5">
             <Field
               label="AI Модель (генерація відповідей)"
-              hint="Напр.: gemini-2.0-flash-lite, gemini-1.5-pro, gemini-2.0-flash"
+              hint="Напр.: gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-pro"
+              restart="cache"
+              tooltip="Модель Gemini для генерації юридичних відповідей. gemini-2.5-flash — найкращий баланс якість/ціна. gemini-1.5-pro — вища якість але дорожче. Зміна набирає чинності одразу після Зберегти."
             >
-              <TextInput
-                value={settings.ai_model}
-                onChange={v => set("ai_model", v)}
-                placeholder="gemini-2.0-flash-lite"
-                mono
-              />
+              <TextInput value={settings.ai_model} onChange={v => set("ai_model", v)} placeholder="gemini-2.5-flash" mono />
             </Field>
             <Field
               label="Модель ембедингів"
-              hint="УВАГА: Зміна потребує перерахунку всієї бази знань! Напр.: text-embedding-004"
+              hint="Зміна потребує повного перескрапінгу бази! Напр.: text-embedding-004"
+              restart="rescrape"
+              tooltip="Модель для перетворення тексту в вектори (числа). text-embedding-004 — рекомендована, підтримує 768 вимірів і мультимовність. УВАГА: якщо зміниш цю модель — треба перескрапити всю базу знань заново, бо старі вектори стануть несумісними."
             >
-              <TextInput
-                value={settings.embedding_model}
-                onChange={v => set("embedding_model", v)}
-                placeholder="text-embedding-004"
-                mono             
-              />
+              <TextInput value={settings.embedding_model} onChange={v => set("embedding_model", v)} placeholder="text-embedding-004" mono />
             </Field>
           </div>
         </section>
@@ -363,11 +423,44 @@ export default function AiSettingsPage() {
         <section>
           <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри генерації</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-6">
-            <Field label="Temperature" hint="0.0 = детермінований, 1.0 = творчий. Для юридичних відповідей: 0.1">
+            <Field
+              label="Temperature"
+              hint="0.0 = детермінований, 1.0 = творчий. Рекомендовано для права: 0.1"
+              restart="cache"
+              tooltip="Контролює 'творчість' AI. При 0.0 — завжди однакова відповідь, дуже передбачувана. При 1.0 — різні відповіді щоразу, більше фантазії. Для юридичних відповідей треба точність, тому 0.1–0.15. Більше 0.3 — ризик галюцинацій."
+            >
               <SliderInput value={settings.temperature} onChange={v => set("temperature", v)} min={0} max={1} step={0.05} />
             </Field>
-            <Field label="Top P" hint="Nucleus sampling. Рекомендовано: 0.8">
+            <Field
+              label="Top P"
+              hint="Nucleus sampling. Рекомендовано: 0.8"
+              restart="cache"
+              tooltip="Ще один параметр різноманітності відповідей (доповнює Temperature). 0.8 означає що AI обирає слова з 80% найімовірніших варіантів. Менше = точніше, більше = різноманітніше. Для права: 0.8 — оптимально."
+            >
               <SliderInput value={settings.top_p} onChange={v => set("top_p", v)} min={0} max={1} step={0.05} />
+            </Field>
+          </div>
+        </section>
+
+        {/* Search params */}
+        <section>
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри пошуку в базі знань</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-6">
+            <Field
+              label="Поріг відповідності документів (match_threshold_docs)"
+              hint="Мін. схожість вектора при пошуку. Рекомендовано: 0.35–0.45"
+              restart="cache"
+              tooltip="Мінімальний рівень схожості між питанням і документом у базі (0.0–1.0). Документи нижче порогу ігноруються ще на рівні Qdrant. Вище = суворіший фільтр, менше результатів але точніші. Нижче = більше результатів але можливий шум. Рекомендація: 0.4 для наповненої бази, 0.3 поки база мала."
+            >
+              <SliderInput value={settings.match_threshold_docs} onChange={v => set("match_threshold_docs", v)} min={0} max={1} step={0.01} />
+            </Field>
+            <Field
+              label="Мінімальна релевантність для відповіді (min_relevance_score)"
+              hint="Якщо найкращий результат нижче — AI відповідає 'не знайдено'. Рекомендовано: 0.25–0.35"
+              restart="cache"
+              tooltip="Якщо найрелевантніший знайдений документ має схожість нижче цього порогу — система НЕ викликає Gemini і відповідає 'не знайдено в базі'. Це захист від галюцинацій. Занадто високе значення (0.5+) = багато 'не знайдено' навіть коли є дані. Занадто низьке (0.1) = AI галюцинує на нерелевантних даних. Для мультимовних запитів (рос./укр.) рекомендуй 0.25–0.28."
+            >
+              <SliderInput value={settings.min_relevance_score} onChange={v => set("min_relevance_score", v)} min={0} max={1} step={0.01} />
             </Field>
           </div>
         </section>
@@ -379,6 +472,8 @@ export default function AiSettingsPage() {
             <Field
               label="Системний промпт"
               hint="Базова інструкція для AI. Сюди НЕ входять: правила тарифу, профіль користувача, контекст пошуку — вони додаються автоматично."
+              restart="cache"
+              tooltip="Головна інструкція яка визначає поведінку AI. Тут задаєш роль, стиль, обмеження. Не треба писати сюди правила тарифу чи профіль юзера — вони додаються автоматично кодом. Зміни набирають чинності одразу після Зберегти."
             >
               <TextareaInput value={settings.system_prompt} onChange={v => set("system_prompt", v)} rows={12} />
             </Field>
@@ -386,8 +481,8 @@ export default function AiSettingsPage() {
               <p className="font-bold text-[#C9A84C]/50 uppercase tracking-wider text-[10px]">Що додається автоматично до промпту:</p>
               <p>• <span className="text-[#E0E6ED]/60">Профіль користувача</span> — роль, спеціалізація, сфери (з онбордингу)</p>
               <p>• <span className="text-[#E0E6ED]/60">Правила відповіді</span> — по тарифу (детальність, кроки, сценарії)</p>
-              <p>• <span className="text-[#E0E6ED]/60">Контекст</span> — знайдені документи з бази знань</p>
-              <p>• <span className="text-[#E0E6ED]/60">Антигалюцинаційний блок</span> — заборона вигадувати поза контекстом</p>
+              <p>• <span className="text-[#E0E6ED]/60">Контекст</span> — знайдені документи з бази знань (з метаданими: статус, дата, флаги воєнного стану)</p>
+              <p>• <span className="text-[#E0E6ED]/60">Антигалюцинаційний блок</span> — якщо схожість &lt; min_relevance_score, Gemini не викликається взагалі</p>
             </div>
           </div>
         </section>
@@ -396,7 +491,7 @@ export default function AiSettingsPage() {
         <div className="bg-[#0d1120]/40 border border-[#C9A84C]/10 rounded-2xl p-4 text-xs text-[#E0E6ED]/40 space-y-1">
           <p>Кількість чанків на тариф керується в розділі <strong className="text-[#C9A84C]/60">Тарифи → поля top_k</strong>.</p>
           <p>Service Account JSON зберігається окремо через кнопку завантаження — не через «Зберегти».</p>
-          <p>Після збереження бекенд автоматично перезавантажує кеш. Кнопка «Оновити кеш» — примусове оновлення без збереження.</p>
+          <p>Після натискання «Зберегти» бекенд автоматично перезавантажує кеш — перезапуск не потрібен.</p>
         </div>
 
       </div>
