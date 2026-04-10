@@ -1,12 +1,10 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Scale, Play, Pause, Loader2, RefreshCw,
-  CheckCircle, XCircle, Info,
+  Gavel, Play, Pause, Loader2, RefreshCw,
+  CheckCircle, XCircle, Info, Scale, FileText,
 } from "lucide-react"
 
 type LogEntry = {
@@ -27,37 +25,50 @@ type HistoryEntry = {
 function StatusBadge({ status }: { status: string }) {
   if (status === "success")
     return (
-      <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30 bg-green-50 dark:bg-green-950/20 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
         <CheckCircle className="w-3 h-3" /> Успішно
-      </Badge>
+      </span>
     )
   if (status === "error")
     return (
-      <Badge variant="outline" className="gap-1 text-destructive border-destructive/30 bg-destructive/10 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
         <XCircle className="w-3 h-3" /> Помилка
-      </Badge>
+      </span>
     )
   if (status === "running")
     return (
-      <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
         <Loader2 className="w-3 h-3 animate-spin" /> Виконується
-      </Badge>
+      </span>
     )
   if (status === "paused")
     return (
-      <Badge variant="outline" className="gap-1 text-blue-500 border-blue-500/30 bg-blue-50 dark:bg-blue-950/20 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
         <Pause className="w-3 h-3" /> Призупинено
-      </Badge>
+      </span>
     )
-  return <Badge variant="secondary" className="shrink-0">{status}</Badge>
+  return (
+    <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/70 shrink-0">
+      {status}
+    </span>
+  )
+}
+
+function logColor(level: string) {
+  switch (level) {
+    case "error":   return "text-red-400"
+    case "success": return "text-emerald-400"
+    case "warning": return "text-amber-400"
+    default:        return "text-[#E0E6ED]/70"
+  }
 }
 
 export default function CcuPage() {
-  const [scraping, setScraping]     = useState(false)
-  const [pausing, setPausing]       = useState(false)
-  const [liveLogs, setLiveLogs]     = useState<LogEntry[]>([])
-  const [history, setHistory]       = useState<HistoryEntry[]>([])
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [scraping, setScraping]         = useState(false)
+  const [pausing, setPausing]           = useState(false)
+  const [liveLogs, setLiveLogs]         = useState<LogEntry[]>([])
+  const [history, setHistory]           = useState<HistoryEntry[]>([])
+  const [lastUpdated, setLastUpdated]   = useState<Date | null>(null)
   const [triggerError, setTriggerError] = useState("")
   const logsEndRef = useRef<HTMLDivElement>(null)
   const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -114,168 +125,170 @@ export default function CcuPage() {
     } catch {}
   }
 
-  const logLevelColor = (level: string) => {
-    switch (level) {
-      case "error":   return "text-destructive"
-      case "success": return "text-green-500"
-      case "warning": return "text-amber-500"
-      default:        return "text-muted-foreground"
-    }
-  }
+  const showLogs = scraping || liveLogs.length > 0
 
   return (
     <div className="flex flex-col h-full">
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b-2 shrink-0">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-primary/10 rounded-xl shrink-0">
-            <Scale className="w-10 h-10 text-primary" />
+      <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#C9A84C]/10 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="p-2 sm:p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-xl sm:rounded-2xl shrink-0">
+            <Gavel className="w-5 h-5 sm:w-8 sm:h-8 text-[#C9A84C]" />
           </div>
           <div>
-            <h1 className="text-4xl font-bold tracking-tight">КСУ</h1>
-            <p className="text-lg text-muted-foreground mt-1">
-              Рішення та Висновки Конституційного Суду України
-            </p>
+            <h1 className="text-xl sm:text-3xl font-serif font-bold text-white">КСУ</h1>
+            <p className="text-xs sm:text-sm text-[#E0E6ED]/70 hidden sm:block mt-1">Конституційний суд України</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          {scraping ? (
-            <Badge variant="outline" className="gap-1.5 text-amber-500 border-amber-500/30 bg-amber-50 dark:bg-amber-950/20">
+        <div className="flex items-center gap-2 shrink-0">
+          {scraping && (
+            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
               <Loader2 className="w-3 h-3 animate-spin" />
-              {pausing ? "Завершення поточного..." : "Виконується"}
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="gap-1.5 text-green-500 border-green-500/30 bg-green-50 dark:bg-green-950/20">
-              <div className="w-2 h-2 rounded-full bg-green-500" /> Очікування
-            </Badge>
+              {pausing ? "Зупиняємось..." : "Виконується"}
+            </span>
           )}
           {lastUpdated && (
-            <span className="text-xs text-muted-foreground hidden sm:block">
+            <span className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">
               {lastUpdated.toLocaleTimeString()}
             </span>
           )}
-          <Button variant="outline" size="sm" onClick={fetchLogs} className="gap-2">
-            <RefreshCw className="w-4 h-4" /> Оновити
+          <Button
+            variant="ghost" size="sm"
+            onClick={fetchLogs}
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl h-9"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span className="hidden sm:inline">Оновити</span>
           </Button>
         </div>
       </div>
 
-      <div className="space-y-6 pt-6 overflow-y-auto flex-1">
+      {/* Scrollable content */}
+      <div className="flex-1 min-h-0 overflow-y-auto py-5 space-y-4">
 
         {/* Info banner */}
-        <div className="flex gap-3 p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 text-sm text-blue-400">
+        <div className="flex gap-3 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 text-sm text-amber-400">
           <Info className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium mb-1">Що скрапується</p>
-            <p className="text-blue-400/80">
+            <p className="font-semibold mb-1">Що скрапується</p>
+            <p className="text-amber-400/80 text-xs sm:text-sm">
               Тільки <strong>Рішення</strong> (-р) та <strong>Висновки</strong> (-в) КСУ.
-              Ухвали про відмову або подовження строку автоматично пропускаються.
-              Джерело: ccu.gov.ua/docs-search (~342 сторінки, з 1997 року).
+              Ухвали та постанови автоматично пропускаються.
+              Джерело: ccu.gov.ua (~342 сторінки, з 1997 року).
             </p>
           </div>
         </div>
 
-        {/* Control cards */}
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Start/Pause */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Play className="w-5 h-5 text-amber-500" />
-                Ручний запуск
-              </CardTitle>
-              <CardDescription>Скрапінг усіх рішень та висновків КСУ</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium">
-                    {scraping ? (pausing ? "Завершення документа..." : "Скрапінг виконується...") : "Готово до запуску"}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {triggerError
-                      ? <span className="text-destructive">{triggerError}</span>
-                      : scraping
-                        ? "Новий запуск неможливий поки виконується поточний"
-                        : "Завантажить рішення та висновки КСУ до laws_ccu"}
-                  </p>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  {scraping && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handlePause}
-                      disabled={pausing}
-                      className="gap-2"
-                    >
-                      <Pause className="w-4 h-4" />
-                      {pausing ? "Зупиняється..." : "Пауза"}
-                    </Button>
-                  )}
-                  <Button onClick={handleStart} disabled={scraping} className="gap-2">
-                    {scraping
-                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Виконується</>
-                      : <><Play className="w-4 h-4" /> Запустити</>}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Control + info cards */}
+        <div className="grid gap-4 md:grid-cols-2">
 
-          {/* Stats */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Scale className="w-5 h-5 text-primary" />
-                Про колекцію
-              </CardTitle>
-              <CardDescription>laws_ccu в Qdrant</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Тип документів</span>
-                <span className="font-medium">Рішення + Висновки КСУ</span>
+          {/* Start / Pause card */}
+          <div className={`bg-[#0d1120]/60 border rounded-2xl p-5 transition-all duration-200 ${
+            scraping
+              ? pausing
+                ? "border-blue-500/30"
+                : "border-amber-500/30"
+              : "border-[#C9A84C]/10 hover:border-[#C9A84C]/20"
+          }`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                <Play className="w-4 h-4 text-amber-400" />
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Джерело</span>
-                <span className="font-mono text-xs">ccu.gov.ua</span>
+              <div>
+                <p className="font-semibold text-sm text-[#E0E6ED]">Ручний запуск</p>
+                <p className="text-xs text-[#E0E6ED]/50 mt-0.5">Скрапінг рішень та висновків</p>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Формат файлів</span>
-                <span className="font-medium">PDF</span>
+            </div>
+
+            <p className="text-sm text-[#E0E6ED]/70 mb-1">
+              {scraping ? (pausing ? "Завершення поточного документа..." : "Скрапінг виконується...") : "Готово до запуску"}
+            </p>
+            {triggerError && <p className="text-xs text-red-400 mb-2">{triggerError}</p>}
+            {!triggerError && (
+              <p className="text-xs text-[#E0E6ED]/40 mb-4">
+                {scraping
+                  ? "Новий запуск неможливий поки виконується поточний"
+                  : "Завантажить рішення та висновки до laws_ccu"}
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              {scraping && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handlePause}
+                  disabled={pausing}
+                  className="gap-1.5 h-9 rounded-xl border border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10 text-blue-400 font-black uppercase tracking-wider text-[10px]"
+                >
+                  <Pause className="w-3.5 h-3.5" />
+                  {pausing ? "Зупиняється..." : "Пауза"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={handleStart}
+                disabled={scraping}
+                className="gap-1.5 h-9 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#C9A84C]/10 disabled:opacity-40"
+              >
+                {scraping
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Виконується</>
+                  : <><Play className="w-3.5 h-3.5" /> Запустити</>}
+              </Button>
+            </div>
+          </div>
+
+          {/* Info card */}
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center">
+                <Scale className="w-4 h-4 text-[#C9A84C]" />
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Глибина архіву</span>
-                <span className="font-medium">з 1997 року</span>
+              <div>
+                <p className="font-semibold text-sm text-[#E0E6ED]">Про колекцію</p>
+                <p className="text-xs text-[#E0E6ED]/50 mt-0.5 font-mono">laws_ccu</p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="space-y-2">
+              {[
+                ["Тип документів", "Рішення + Висновки"],
+                ["Джерело", "ccu.gov.ua"],
+                ["Формат файлів", "PDF"],
+                ["Глибина архіву", "з 1997 року"],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between items-center">
+                  <span className="text-xs text-[#E0E6ED]/50">{label}</span>
+                  <span className="text-xs font-medium text-[#E0E6ED]/80">{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Live logs */}
-        {(scraping || liveLogs.length > 0) && (
-          <Card className={scraping ? "border-amber-500/30" : ""}>
-            <CardHeader className="pb-0">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  {scraping && <Loader2 className="w-4 h-4 animate-spin text-amber-500" />}
+        {showLogs && (
+          <div className={`bg-[#0d1120]/60 border rounded-2xl transition-all duration-200 ${scraping ? "border-amber-500/30" : "border-[#C9A84C]/10"}`}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#C9A84C]/10">
+              <div className="flex items-center gap-2">
+                {scraping && <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />}
+                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">
                   Лог поточного сеансу
-                </CardTitle>
-                {scraping && (
-                  <Badge variant="outline" className="text-amber-500 border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 text-xs">
-                    Оновлення кожні 5 сек
-                  </Badge>
-                )}
+                </p>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="bg-muted/30 rounded-xl border font-mono text-xs h-64 overflow-y-auto p-3 space-y-1">
+              {scraping && (
+                <span className="text-[10px] font-black text-amber-400/60 uppercase tracking-wider">
+                  Оновлення кожні 5 сек
+                </span>
+              )}
+            </div>
+            <div className="p-5">
+              <div className="bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 font-mono text-xs h-52 overflow-y-auto p-3 space-y-0.5">
                 {liveLogs.length === 0 ? (
-                  <p className="text-muted-foreground">Очікування логів...</p>
+                  <p className="text-[#C9A84C]/50">Очікування логів...</p>
                 ) : (
                   liveLogs.map((log, i) => (
-                    <div key={i} className={`flex gap-2 ${logLevelColor(log.level)}`}>
+                    <div key={i} className={`flex gap-2 ${logColor(log.level)}`}>
                       <span className="shrink-0 opacity-60 tabular-nums">
                         {new Date(log.ts).toLocaleTimeString("uk-UA")}
                       </span>
@@ -285,54 +298,58 @@ export default function CcuPage() {
                 )}
                 <div ref={logsEndRef} />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
 
         {/* History */}
-        <Card>
-          <CardHeader className="pb-0">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Scale className="w-4 h-4 text-primary" />
-              Історія синхронізацій
-            </CardTitle>
-            <CardDescription>Останні 20 запусків</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-[#C9A84C]/10">
+            <div className="flex items-center gap-2">
+              <FileText className="w-3.5 h-3.5 text-[#C9A84C]/50" />
+              <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">
+                Історія синхронізацій
+              </p>
+            </div>
+            <p className="text-[10px] text-[#E0E6ED]/30">Останні 20 запусків</p>
+          </div>
+          <div className="p-4">
             {history.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">
+              <p className="text-sm text-[#E0E6ED]/30 py-6 text-center">
                 Синхронізацій ще не було. Натисніть «Запустити» вище.
               </p>
             ) : (
-              <div className="rounded-xl border overflow-hidden">
+              <div className="rounded-xl border border-[#C9A84C]/10 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b bg-muted/40">
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground w-32">Статус</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Початок</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Кінець</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground w-24">Документів</th>
-                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Повідомлення</th>
+                    <tr className="border-b border-[#C9A84C]/10 bg-[#0A0E1A]/40">
+                      <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-32">Статус</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Початок</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Кінець</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-24">Документів</th>
+                      <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden md:table-cell">Повідомлення</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.map((h, i) => (
-                      <tr key={h.id ?? i} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
+                      <tr key={h.id ?? i} className="border-b border-[#C9A84C]/5 last:border-0 hover:bg-[#C9A84C]/3 transition-colors">
                         <td className="px-4 py-3"><StatusBadge status={h.status} /></td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs">
                           {h.started_at
                             ? new Date(h.started_at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" })
                             : "—"}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                        <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs hidden sm:table-cell">
                           {h.finished_at
                             ? new Date(h.finished_at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" })
                             : "—"}
                         </td>
                         <td className="px-4 py-3">
-                          {h.laws_processed != null ? <span className="font-semibold">{h.laws_processed}</span> : "—"}
+                          {h.laws_processed != null
+                            ? <span className="font-serif font-bold text-[#C9A84C]">{h.laws_processed}</span>
+                            : <span className="text-[#E0E6ED]/30">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell max-w-[220px]">
+                        <td className="px-4 py-3 text-[#E0E6ED]/50 text-xs hidden md:table-cell max-w-[220px]">
                           <span className="truncate block">{h.error_message ?? "—"}</span>
                         </td>
                       </tr>
@@ -341,8 +358,9 @@ export default function CcuPage() {
                 </table>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
       </div>
     </div>
   )

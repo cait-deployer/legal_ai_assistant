@@ -176,22 +176,22 @@ export default function PlansListPage() {
   return (
     <div className="space-y-6 py-2">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
-            <CreditCard className="w-8 h-8 text-[#C9A84C]" />
+      <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#C9A84C]/10">
+        <div className="flex items-center gap-3">
+          <div className="p-2 sm:p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-xl sm:rounded-2xl shrink-0">
+            <CreditCard className="w-5 h-5 sm:w-8 sm:h-8 text-[#C9A84C]" />
           </div>
           <div>
-            <h1 className="text-3xl font-serif font-bold text-white">Тарифи</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Drag-and-drop для зміни порядку. Клік на олівець для редагування.</p>
+            <h1 className="text-xl sm:text-3xl font-serif font-bold text-white">Тарифи</h1>
+            <p className="text-xs sm:text-sm text-[#E0E6ED]/70 hidden sm:block mt-1">Drag-and-drop для зміни порядку. Клік на олівець для редагування.</p>
           </div>
         </div>
         <Button
           variant="ghost" size="sm" onClick={load} disabled={loading}
-          className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
+          className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl h-9"
         >
           {loading || saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          Оновити
+          <span className="hidden sm:inline">Оновити</span>
         </Button>
       </div>
 

@@ -416,45 +416,45 @@ export default function BasePage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10 shrink-0">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
-            <BookOpen className="w-8 h-8 text-[#C9A84C]" />
+      <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#C9A84C]/10 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="p-2 sm:p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-xl sm:rounded-2xl shrink-0">
+            <BookOpen className="w-5 h-5 sm:w-8 sm:h-8 text-[#C9A84C]" />
           </div>
           <div>
-            <h1 className="text-3xl font-serif font-bold text-white">База знань</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Всі документи з усіх джерел</p>
+            <h1 className="text-xl sm:text-3xl font-serif font-bold text-white">База знань</h1>
+            <p className="text-xs sm:text-sm text-[#E0E6ED]/70 hidden sm:block mt-1">Всі документи з усіх джерел</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           {lastUpdated && <span className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">{lastUpdated.toLocaleTimeString()}</span>}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => fetchDocs()}
             disabled={loading}
-            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl h-9"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Оновити
+            <span className="hidden sm:inline">Оновити</span>
           </Button>
         </div>
       </div>
 
-      <div className="flex h-full overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Left panel */}
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
           {/* Sticky toolbar */}
-          <div className="shrink-0 pt-4 pb-3 space-y-3 border-b border-[#C9A84C]/10">
+          <div className="shrink-0 pt-3 pb-3 space-y-2.5 border-b border-[#C9A84C]/10">
 
             {/* Total info */}
             <div className="flex flex-wrap gap-2 items-center">
-              <span className="inline-flex items-center px-3 py-1.5 text-sm rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 text-[#C9A84C] font-semibold">
+              <span className="inline-flex items-center px-2.5 py-1 text-xs sm:text-sm rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 text-[#C9A84C] font-semibold">
                 {total.toLocaleString()} документів
               </span>
               {hasFilters && !loading && (
-                <span className="inline-flex items-center px-3 py-1.5 text-sm rounded-xl bg-[#0d1120] border border-[#C9A84C]/10 text-[#E0E6ED]/70">
+                <span className="inline-flex items-center px-2.5 py-1 text-xs sm:text-sm rounded-xl bg-[#0d1120] border border-[#C9A84C]/10 text-[#E0E6ED]/70">
                   {total} знайдено
                 </span>
               )}
@@ -464,68 +464,70 @@ export default function BasePage() {
             </div>
 
             {/* Search + filters + view toggle */}
-            <div className="flex gap-2 flex-wrap items-center">
-              {/* Search */}
-              <div className="relative flex-1 min-w-[200px] h-10">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C9A84C]/50 pointer-events-none" />
-                <Input
-                  placeholder="Пошук за назвою або ID документа..."
-                  type="search"
-                  value={searchInput}
-                  onChange={(e) => handleSearchInput(e.target.value)}
-                  className="pl-9 h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
-                />
-                {searchInput && (
-                  <button onClick={() => { setSearchInput(""); setSearch(""); setCurrentPage(1) }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#C9A84C]/50 hover:text-[#C9A84C] transition-colors">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
+            {/* Row 1: search (full width) */}
+            <div className="relative w-full h-10">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C9A84C]/50 pointer-events-none" />
+              <Input
+                placeholder="Пошук за назвою або ID..."
+                type="search"
+                value={searchInput}
+                onChange={(e) => handleSearchInput(e.target.value)}
+                className="pl-9 h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/20 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
+              />
+              {searchInput && (
+                <button onClick={() => { setSearchInput(""); setSearch(""); setCurrentPage(1) }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#C9A84C]/50 hover:text-[#C9A84C] transition-colors">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
+            {/* Row 2: filters + view toggle */}
+            <div className="flex gap-2 items-center flex-wrap">
               {/* Source filter */}
-              <div className="relative h-10 shrink-0">
+              <div className="relative h-9 flex-1 min-w-[110px]">
                 <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
                 <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
-                  className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
+                  className="w-full h-9 pl-8 pr-6 text-xs rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
                   {SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#C9A84C]/50 pointer-events-none" />
               </div>
 
               {/* Category filter */}
               {categoryOptions.length > 0 && (
-                <div className="relative h-10 shrink-0">
+                <div className="relative h-9 flex-1 min-w-[110px]">
                   <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
                   <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-                    className="h-10 pl-8 pr-7 text-sm rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
+                    className="w-full h-9 pl-8 pr-6 text-xs rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
                     <option value="">Всі категорії</option>
                     {categoryOptions.map((cat) => <option key={cat} value={cat}>{categoryLabel(cat)}</option>)}
                   </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#C9A84C]/50 pointer-events-none" />
                 </div>
               )}
 
               {/* Clear */}
               {hasFilters && (
                 <button
-                  className="h-10 px-3 flex items-center gap-1.5 text-xs text-[#C9A84C]/70 hover:text-[#C9A84C] shrink-0 transition-colors"
+                  className="h-9 px-3 flex items-center gap-1 text-xs text-[#C9A84C]/70 hover:text-[#C9A84C] shrink-0 transition-colors border border-[#C9A84C]/10 rounded-xl hover:border-[#C9A84C]/30"
                   onClick={clearFilters}
                 >
-                  <X className="w-3.5 h-3.5" /> Скинути
+                  <X className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Скинути</span>
                 </button>
               )}
 
-              {/* View toggle */}
-              <div className="hidden sm:flex rounded-xl border border-[#C9A84C]/20 overflow-hidden shrink-0">
+              {/* View toggle — desktop only */}
+              <div className="hidden sm:flex rounded-xl border border-[#C9A84C]/20 overflow-hidden shrink-0 ml-auto">
                 <button
-                  className={`h-10 px-3 flex items-center gap-1.5 text-xs transition-colors border-r border-[#C9A84C]/20 ${displayMode === "cards" ? "bg-[#C9A84C]/10 text-[#C9A84C]" : "text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"}`}
+                  className={`h-9 px-3 flex items-center gap-1.5 text-xs transition-colors border-r border-[#C9A84C]/20 ${displayMode === "cards" ? "bg-[#C9A84C]/10 text-[#C9A84C]" : "text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"}`}
                   onClick={() => setDisplayMode("cards")}
                 >
                   <LayoutGrid className="w-4 h-4" /><span className="hidden md:inline">Картки</span>
                 </button>
                 <button
-                  className={`h-10 px-3 flex items-center gap-1.5 text-xs transition-colors ${displayMode === "table" ? "bg-[#C9A84C]/10 text-[#C9A84C]" : "text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"}`}
+                  className={`h-9 px-3 flex items-center gap-1.5 text-xs transition-colors ${displayMode === "table" ? "bg-[#C9A84C]/10 text-[#C9A84C]" : "text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"}`}
                   onClick={() => setDisplayMode("table")}
                 >
                   <Table2 className="w-4 h-4" /><span className="hidden md:inline">Таблиця</span>

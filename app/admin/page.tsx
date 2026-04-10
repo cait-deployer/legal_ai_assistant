@@ -144,31 +144,28 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6 py-2">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-2xl shrink-0">
-            <LayoutDashboard className="w-8 h-8 text-[#C9A84C]" />
+      <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#C9A84C]/10">
+        <div className="flex items-center gap-3">
+          <div className="p-2 sm:p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-xl sm:rounded-2xl shrink-0">
+            <LayoutDashboard className="w-5 h-5 sm:w-8 sm:h-8 text-[#C9A84C]" />
           </div>
           <div>
-            <h1 className="text-3xl font-serif font-bold text-white">Огляд</h1>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Загальний стан системи URAI</p>
+            <h1 className="text-xl sm:text-3xl font-serif font-bold text-white">Огляд</h1>
+            <p className="text-xs sm:text-sm text-[#E0E6ED]/70 hidden sm:block mt-1">Загальний стан системи URAI</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           {lastUpdated && (
             <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">
               Оновлено {lastUpdated.toLocaleTimeString()}
             </p>
           )}
           <Button
-            variant="ghost"
-            size="sm"
-            onClick={fetchStats}
-            disabled={loading}
-            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
+            variant="ghost" size="sm" onClick={fetchStats} disabled={loading}
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl h-9"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Оновити
+            <span className="hidden sm:inline">Оновити</span>
           </Button>
         </div>
       </div>
