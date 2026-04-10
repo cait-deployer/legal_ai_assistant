@@ -352,11 +352,21 @@ def _do_rada(
             text_flags = detect_text_flags(text)
             log(f"  ✂️ {len(chunks)} чанків | {law_meta['status']} | {coll}")
 
-            # Batch embed усі чанки одним викликом
+            # Batch embed — по 5 чанків за раз (уникаємо ліміту токенів Google API)
+            vectors = []
             try:
-                vectors = embeddings.embed_documents(chunks)
+                for b in range(0, len(chunks), 5):
+                    vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
             except Exception as e:
-                log(f"  ❌ Embedding: {e}", "error")
+                log(f"  ⚠️ Batch embed помилка, перемикаємось на посткові: {e}", "warning")
+                vectors = []
+                for chunk in chunks:
+                    try:
+                        vectors.append(embeddings.embed_query(chunk))
+                    except Exception as e2:
+                        log(f"  ❌ embed_query: {e2}", "error")
+                        vectors.append(None)
+            if not vectors:
                 return 0
 
             base = {
@@ -370,6 +380,8 @@ def _do_rada(
                 **text_flags,
             }
             for j, (chunk, vector) in enumerate(zip(chunks, vectors)):
+                if vector is None:
+                    continue
                 try:
                     upload_to_qdrant(chunk, {**base, "chunk_index": j}, vector, coll, session_id=session_id)
                 except Exception as e:
