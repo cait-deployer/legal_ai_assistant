@@ -219,8 +219,8 @@ def _clear_state() -> None:
 _rada_http_sem = threading.Semaphore(2)
 
 # Кількість паралельних воркерів для обробки законів
-# 2 = безпечно (4 HTTP-з'єднання max), 3 = агресивніше (ризик 429)
-RADA_WORKERS = 2
+# Семафор(2) обмежує HTTP до ради незалежно від кількості воркерів — безпечно
+RADA_WORKERS = 3
 
 
 def _do_rada(
