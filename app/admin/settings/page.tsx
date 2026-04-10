@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import {
   Settings, Play, Pause, RotateCcw, Loader2, RefreshCw,
   CheckCircle, XCircle, Database, Scale, BookOpen, List, X,
-  TrendingUp, Timer, AlertTriangle, Info, Map,
+  TrendingUp, Timer, AlertTriangle, Info, Map, Gavel, LayoutGrid,
 } from "lucide-react"
 
 // Маппінг код розділу РАДИ → Qdrant колекція
@@ -183,12 +183,26 @@ const SOURCES = [
     resumeUrl: null,
     supportsPause: true,
   },
+  {
+    key: "ccu",
+    label: "КСУ",
+    description: "Рішення та висновки з ccu.gov.ua",
+    icon: Gavel,
+    iconColor: "text-amber-400",
+    iconBg: "bg-amber-500/10 border border-amber-500/20",
+    triggerUrl: "/api/admin/ccu/trigger",
+    logsUrl: "/api/admin/ccu/logs",
+    pauseUrl: "/api/admin/ccu/pause",
+    resumeUrl: null,
+    supportsPause: true,
+  },
 ]
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   rada:      { label: "РАДА",    color: "text-blue-400" },
   supreme:   { label: "ВС",     color: "text-purple-400" },
   wiki:      { label: "Wiki",   color: "text-emerald-400" },
+  ccu:       { label: "КСУ",    color: "text-amber-400" },
   templates: { label: "Шаблони", color: "text-amber-400" },
 }
 
@@ -209,6 +223,161 @@ function logColor(level: string) {
     case "warning": return "text-amber-400"
     default:        return "text-[#E0E6ED]/70"
   }
+}
+
+const QDRANT_MAP: { col: string; label: string; color: string; sections: { code: string; name: string }[] }[] = [
+  {
+    col: "rada_finance", label: "Фінанси", color: COLLECTION_COLOR.rada_finance,
+    sections: [
+      { code: "h2", name: "Бюджет" }, { code: "h3", name: "Фінансове право" },
+      { code: "h26", name: "Банки та кредит" }, { code: "h23", name: "Ціни та тарифи" },
+    ],
+  },
+  {
+    col: "rada_state", label: "Держустрій", color: COLLECTION_COLOR.rada_state,
+    sections: [{ code: "h4", name: "Держ. управління" }],
+  },
+  {
+    col: "rada_personnel", label: "Кадри", color: COLLECTION_COLOR.rada_personnel,
+    sections: [{ code: "h27", name: "Держ. служба / кадри" }],
+  },
+  {
+    col: "rada_court", label: "Суд / правосуддя", color: COLLECTION_COLOR.rada_court,
+    sections: [
+      { code: "h22", name: "Судоустрій" }, { code: "h30", name: "Судочинство" },
+      { code: "h1", name: "Конституційне право" },
+    ],
+  },
+  {
+    col: "rada_intl", label: "Міжнародне", color: COLLECTION_COLOR.rada_intl,
+    sections: [{ code: "h11", name: "Міжнародне право" }],
+  },
+  {
+    col: "rada_labor", label: "Трудове", color: COLLECTION_COLOR.rada_labor,
+    sections: [{ code: "h19", name: "Трудове право" }, { code: "h20", name: "Соціальний захист" }],
+  },
+  {
+    col: "rada_civil", label: "Цивільне", color: COLLECTION_COLOR.rada_civil,
+    sections: [
+      { code: "h5", name: "Цивільне право" }, { code: "h16", name: "Цивільний процес" },
+      { code: "h13", name: "Власність" },
+    ],
+  },
+  {
+    col: "rada_criminal", label: "Кримінальне", color: COLLECTION_COLOR.rada_criminal,
+    sections: [{ code: "h25", name: "Кримінальне право" }],
+  },
+  {
+    col: "rada_admin", label: "Адміністративне", color: COLLECTION_COLOR.rada_admin,
+    sections: [
+      { code: "h8", name: "Адміністративне право" }, { code: "h10", name: "Адмін. процес" },
+      { code: "h31", name: "Адмін. відповідальність" },
+    ],
+  },
+  {
+    col: "rada_housing", label: "Житлове", color: COLLECTION_COLOR.rada_housing,
+    sections: [{ code: "h6", name: "Житлове право" }, { code: "h21", name: "Комунальне госп." }],
+  },
+  {
+    col: "rada_land", label: "Земельне", color: COLLECTION_COLOR.rada_land,
+    sections: [{ code: "h9", name: "Земельне право" }, { code: "h18", name: "Природоресурсне" }],
+  },
+  {
+    col: "rada_industry", label: "Бізнес / Галузі", color: COLLECTION_COLOR.rada_industry,
+    sections: [
+      { code: "h7", name: "Підприємництво" }, { code: "h17", name: "Промисловість" },
+      { code: "h15", name: "Транспорт / зв'язок" },
+    ],
+  },
+  {
+    col: "rada_other", label: "Інше", color: COLLECTION_COLOR.rada_other,
+    sections: [
+      { code: "h12", name: "Митне право" }, { code: "h14", name: "Освіта / наука" },
+      { code: "h24", name: "Охорона здоров'я" }, { code: "h28", name: "Безпека / оборона" },
+      { code: "h29", name: "Довкілля" }, { code: "h32", name: "Інші галузі" },
+    ],
+  },
+]
+
+const OTHER_COLLECTIONS = [
+  { col: "laws_supreme", label: "Верховний суд", color: "bg-purple-500/15 text-purple-400 border-purple-500/20", desc: "PDF-огляди supreme.court.gov.ua" },
+  { col: "laws_wiki",    label: "Wiki",           color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20", desc: "Роз'яснення legalaid.wiki" },
+  { col: "laws_ccu",    label: "КСУ",             color: "bg-amber-500/15 text-amber-400 border-amber-500/20", desc: "Рішення та висновки ccu.gov.ua" },
+]
+
+function QdrantMapModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-3xl bg-[#0d1120] border border-[#C9A84C]/30 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#C9A84C]/10 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center">
+              <LayoutGrid className="w-4 h-4 text-[#C9A84C]" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-[#E0E6ED]">Карта Qdrant колекцій</h2>
+              <p className="text-xs text-[#E0E6ED]/50 mt-0.5">16 колекцій · розподіл розділів РАДИ</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-[#C9A84C]/50 hover:text-[#C9A84C]">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+          {/* Rada collections */}
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60 mb-3 flex items-center gap-2">
+              <Database className="w-3.5 h-3.5" /> РАДА (13 колекцій)
+            </p>
+            <div className="space-y-2">
+              {QDRANT_MAP.map(({ col, label, color, sections }) => (
+                <div key={col} className="flex gap-3 items-start">
+                  <span className={`shrink-0 mt-0.5 inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold min-w-[110px] justify-center ${color}`}>
+                    {label}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {sections.map(s => (
+                      <span key={s.code} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[10px] text-[#E0E6ED]/70">
+                        <span className="font-mono text-[#C9A84C]/50">{s.code}</span>
+                        {s.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Other collections */}
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60 mb-3 flex items-center gap-2">
+              <BookOpen className="w-3.5 h-3.5" /> Інші джерела (3 колекції)
+            </p>
+            <div className="space-y-2">
+              {OTHER_COLLECTIONS.map(({ col, label, color, desc }) => (
+                <div key={col} className="flex gap-3 items-center">
+                  <span className={`shrink-0 inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold min-w-[110px] justify-center ${color}`}>
+                    {label}
+                  </span>
+                  <span className="text-xs text-[#E0E6ED]/50">{col}</span>
+                  <span className="text-xs text-[#E0E6ED]/30">· {desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex px-6 py-4 border-t border-[#C9A84C]/10 shrink-0">
+          <Button variant="outline" onClick={onClose} className="ml-auto border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:text-[#E0E6ED]">
+            Закрити
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function SourceCard({ source }: { source: typeof SOURCES[0] }) {
@@ -561,6 +730,7 @@ export default function SettingsPage() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [syncStats, setSyncStats] = useState<SyncStats | null>(null)
+  const [showQdrantMap, setShowQdrantMap] = useState(false)
 
   const fetchHistory = async () => {
     setHistoryLoading(true)
@@ -581,6 +751,8 @@ export default function SettingsPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {showQdrantMap && <QdrantMapModal onClose={() => setShowQdrantMap(false)} />}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#C9A84C]/10 shrink-0">
         <div className="flex items-start gap-4">
@@ -592,16 +764,27 @@ export default function SettingsPage() {
             <p className="text-sm text-[#E0E6ED]/70 mt-1">Керування джерелами та запусками синхронізації</p>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={fetchHistory}
-          disabled={historyLoading}
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowQdrantMap(true)}
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl"
+          >
+            <LayoutGrid className="w-4 h-4" />
+            Карта колекцій
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={fetchHistory}
+            disabled={historyLoading}
           className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl shrink-0"
         >
           {historyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Оновити
         </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto py-6 space-y-8">
