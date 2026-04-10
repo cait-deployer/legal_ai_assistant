@@ -14,8 +14,8 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
   return (
     <div className="rounded-2xl border border-[#C9A84C]/10 overflow-hidden">
       <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-[#C9A84C]/10 bg-[#0A0E1A]/60">
+        <thead className="sticky top-0 z-10">
+          <tr className="border-b border-[#C9A84C]/10 bg-[#0d1120]">
             <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-[40%]">Назва</th>
             <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-28">Статус</th>
             <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Категорія</th>

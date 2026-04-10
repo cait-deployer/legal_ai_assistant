@@ -551,9 +551,8 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-6 space-y-6">
-
-        {/* Stats bar */}
+      {/* Stats bar — pinned */}
+      <div className="shrink-0 pt-5 pb-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {statsLoading ? (
             Array.from({ length: 5 }).map((_, i) => (
@@ -573,8 +572,10 @@ export default function UsersPage() {
             </>
           ) : null}
         </div>
+      </div>
 
-        {/* Filters */}
+      {/* Filters — pinned */}
+      <div className="shrink-0 pb-3 border-b border-[#C9A84C]/10">
         <div className="flex flex-wrap gap-2 items-center">
           {/* Search */}
           <div className="relative">
@@ -651,10 +652,13 @@ export default function UsersPage() {
             ]}
           />
         </div>
+      </div>
 
-        {/* Table */}
-        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-[#C9A84C]/10">
+      {/* Table — fills all remaining height */}
+      <div className="flex-1 min-h-0 flex flex-col pt-4 gap-3">
+        <div className="flex-1 min-h-0 flex flex-col bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
+          {/* Table info bar — pinned */}
+          <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[#C9A84C]/10">
             <p className="text-sm text-[#E0E6ED]/60">
               {loading ? "Завантаження..." : `${total} ${total === 1 ? "юзер" : total < 5 ? "юзери" : "юзерів"}`}
             </p>
@@ -663,10 +667,11 @@ export default function UsersPage() {
             </p>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Scrollable table body */}
+          <div className="flex-1 overflow-auto min-h-0">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#C9A84C]/10 bg-[#0A0E1A]/40">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-[#C9A84C]/10 bg-[#0d1120]">
                   <Th label="Юзер" />
                   <SortTh col="subscription_tier"   label="Тариф"       sort={sort} onSort={handleSort} />
                   <SortTh col="requests_this_month" label="Запити"      sort={sort} onSort={handleSort} className="hidden md:table-cell" />
@@ -777,10 +782,10 @@ export default function UsersPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </div>{/* end scrollable table body */}
 
-          {/* Pagination */}
-          <div className="flex items-center justify-between px-5 py-4 border-t border-[#C9A84C]/10">
+          {/* Pagination — pinned to bottom */}
+          <div className="shrink-0 flex items-center justify-between px-5 py-3 border-t border-[#C9A84C]/10">
             <Button
               variant="ghost" size="sm"
               disabled={page <= 1 || loading}
@@ -827,10 +832,10 @@ export default function UsersPage() {
               Наступна <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
-        </div>
+        </div>{/* end table card */}
 
         {/* Legend */}
-        <div className="flex items-center gap-4 text-[10px] text-[#E0E6ED]/30">
+        <div className="shrink-0 flex items-center gap-4 text-[10px] text-[#E0E6ED]/30 pb-2">
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> Виконано
           </span>
@@ -842,7 +847,7 @@ export default function UsersPage() {
           </span>
           <span className="text-[#E0E6ED]/20">· Кольорові точки: онбординг / email / тріал</span>
         </div>
-      </div>
+      </div>{/* end flex-1 table section */}
 
       {/* Drawer */}
       {selected && <UserDrawer user={selected} onClose={() => setSelected(null)} />}

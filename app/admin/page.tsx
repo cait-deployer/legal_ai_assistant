@@ -42,6 +42,7 @@ const COLLECTION_LABELS: Record<string, string> = {
   rada_other:     "Інше (РАДА)",
   laws_supreme:   "Верховний Суд",
   laws_wiki:      "Правова допомога",
+  laws_ccu:       "Конституційний Суд",
 }
 
 type SyncRun = {

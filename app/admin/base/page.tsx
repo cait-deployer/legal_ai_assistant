@@ -15,8 +15,9 @@ import { LawTable } from "../rada/law-table"
 import type { Law } from "../rada/laws-list"
 
 function getSourceLabel(law_id: string) {
-  if ((law_id ?? "").startsWith("sc_")) return "Верховний Суд"
+  if ((law_id ?? "").startsWith("sc_"))   return "Верховний Суд"
   if ((law_id ?? "").startsWith("wiki_")) return "Wiki"
+  if ((law_id ?? "").startsWith("ccu_"))  return "КСУ"
   return "РАДА"
 }
 
@@ -25,6 +26,8 @@ function getSourceStyle(law_id: string) {
     return "bg-purple-500/10 text-purple-400 border-purple-500/20"
   if ((law_id ?? "").startsWith("wiki_"))
     return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+  if ((law_id ?? "").startsWith("ccu_"))
+    return "bg-amber-500/10 text-amber-400 border-amber-500/20"
   return "bg-blue-500/10 text-blue-400 border-blue-500/20"
 }
 
@@ -34,6 +37,7 @@ const SOURCE_OPTIONS = [
   { value: "rada", label: "РАДА" },
   { value: "court", label: "Верховний Суд" },
   { value: "wiki", label: "Wiki" },
+  { value: "ccu", label: "КСУ" },
 ]
 
 // Маппінг кодів розділів Ради → читабельні назви
@@ -442,7 +446,7 @@ export default function BasePage() {
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
           {/* Sticky toolbar */}
-          <div className="shrink-0 pt-5 pb-3 space-y-3 border-b border-[#C9A84C]/10">
+          <div className="shrink-0 pt-4 pb-3 space-y-3 border-b border-[#C9A84C]/10">
 
             {/* Total info */}
             <div className="flex flex-wrap gap-2 items-center">
@@ -539,7 +543,7 @@ export default function BasePage() {
           </div>
 
           {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto py-4">
+          <div className="flex-1 overflow-y-auto min-h-0 py-4">
             {loading && (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -631,7 +635,7 @@ export default function BasePage() {
 
         {/* Right detail panel */}
         {activeDoc && (
-          <div className="w-[380px] shrink-0 border-l border-[#C9A84C]/10 overflow-y-auto mt-5">
+          <div className="w-[380px] shrink-0 border-l border-[#C9A84C]/10 overflow-y-auto mt-4 min-h-0">
             <DocDetail law={activeDoc} onClose={() => setActiveDoc(null)} />
           </div>
         )}

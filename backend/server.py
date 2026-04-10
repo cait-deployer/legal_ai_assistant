@@ -51,7 +51,7 @@ _SB_KEY = (
 )
 
 # ── In-memory стан по кожному джерелу ─────────────────────────────────────────
-_SOURCES = ("rada", "supreme", "wiki", "templates")
+_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu")
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -522,13 +522,13 @@ def _do_wiki(session_id: str) -> None:
     processed = 0
     try:
         from wiki_scanner import get_all_wiki_articles, scrape_wiki_article
-        from rada_to_supabase import get_existing_laws_meta
+        from qdrant_storage import get_existing_law_ids
 
         articles = get_all_wiki_articles()
         log(f"🔎 Знайдено статей: {len(articles)}")
 
-        existing_meta = get_existing_laws_meta()
-        log(f"📋 Вже в базі: {len(existing_meta)} документів")
+        existing_ids = get_existing_law_ids()
+        log(f"📋 Вже в базі: {len(existing_ids)} документів")
 
         total = len(articles)
 
@@ -554,7 +554,7 @@ def _do_wiki(session_id: str) -> None:
             try:
                 ok = scrape_wiki_article(
                     art["url"], art["title"],
-                    session_id=session_id, existing_meta=existing_meta,
+                    session_id=session_id, existing_ids=existing_ids,
                 )
                 if ok:
                     processed += 1
@@ -607,6 +607,69 @@ def _do_templates(session_id: str) -> None:
     )
     with _lock:
         _sync[src]["running"] = False
+
+
+def _do_ccu(session_id: str) -> None:
+    src = "ccu"
+    log = lambda m, lv="info": _log(src, m, lv)
+    log("=" * 50)
+    log(f"⚖️ CCU SYNC (сесія {session_id[:8]}...)")
+    log("=" * 50)
+    _sb_insert_log(src, session_id)
+    processed = 0
+    try:
+        from ccu_scanner import run_ccu_sync
+
+        def pause_check():
+            with _lock:
+                return _sync[src]["pause_requested"]
+
+        def log_callback(msg: str):
+            level = "error" if "❌" in msg else "success" if "✅" in msg else "warning" if "⚠️" in msg or "⏸️" in msg else "info"
+            log(msg, level)
+            with _lock:
+                _sync[src]["laws_processed"] = processed
+
+        ok, total = run_ccu_sync(
+            session_id=session_id,
+            log_callback=log_callback,
+            pause_check=pause_check,
+        )
+        processed = ok
+
+        with _lock:
+            paused = _sync[src]["pause_requested"]
+
+        if paused:
+            _sb_update_log(
+                session_id,
+                status="paused",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                laws_processed=processed,
+                error_message=f"Призупинено",
+            )
+        else:
+            _sb_update_log(
+                session_id,
+                status="success",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                laws_processed=processed,
+            )
+            log(f"✅ КСУ синхронізацію завершено. Оброблено: {processed}/{total}.", "success")
+
+    except Exception as e:
+        log(f"❌ Критична помилка: {e}", "error")
+        _sb_update_log(
+            session_id,
+            status="error",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            laws_processed=processed,
+            error_message=str(e),
+        )
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
 
 
 def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
@@ -917,6 +980,41 @@ async def templates_logs():
     }
 
 
+# ── /admin/ccu/* ──────────────────────────────────────────────────────────────
+
+@app.post("/admin/ccu/trigger")
+async def trigger_ccu():
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("ccu", _do_ccu, session_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/ccu/pause")
+async def pause_ccu():
+    with _lock:
+        if not _sync["ccu"]["running"]:
+            raise HTTPException(400, "Синхронізація не виконується")
+        _sync["ccu"]["pause_requested"] = True
+    return {"ok": True, "message": "Пауза запрошена"}
+
+
+@app.get("/admin/ccu/logs")
+async def ccu_logs():
+    with _lock:
+        running   = _sync["ccu"]["running"]
+        pause_req = _sync["ccu"]["pause_requested"]
+        logs      = list(_sync["ccu"]["live_logs"])
+    return {
+        "running":        running,
+        "pause_requested": pause_req,
+        "live_logs":      logs,
+        "history":        _sb_get_logs("ccu", 20),
+    }
+
+
 # ── /admin/logs (unified history across all sources) ─────────────────────────
 
 @app.get("/admin/logs")
@@ -1133,6 +1231,8 @@ async def get_base_docs(
             target_cols = ["laws_supreme"]
         elif source == "wiki":
             target_cols = ["laws_wiki"]
+        elif source == "ccu":
+            target_cols = ["laws_ccu"]
         else:
             target_cols = ALL_COLLECTIONS
 
@@ -1544,6 +1644,8 @@ async def ask(body: AskRequest):
             target_collections.append("laws_supreme")
         if "wiki" in allowed:
             target_collections.append("laws_wiki")
+        if "ccu" in allowed:
+            target_collections.append("laws_ccu")
         if not target_collections:
             target_collections = ALL_COLLECTIONS
     else:

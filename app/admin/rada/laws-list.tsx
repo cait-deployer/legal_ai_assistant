@@ -281,7 +281,7 @@ export function LawsListTab() {
         </div>
 
         {/* ── middle: scrollable content ── */}
-        <div className="flex-1 overflow-y-auto py-4">
+        <div className="flex-1 overflow-y-auto min-h-0 py-4">
 
           {/* skeleton */}
           {loading && (
@@ -399,7 +399,7 @@ export function LawsListTab() {
 
       {/* ── right panel: law detail ── */}
       {activeLaw && (
-        <div className="w-[380px] shrink-0 border-l border-border overflow-y-auto bg-card mt-6">
+        <div className="w-[380px] shrink-0 border-l border-border overflow-y-auto min-h-0 bg-card mt-4">
           <LawDetail
             law={activeLaw}
             onClose={() => setActiveLaw(null)}
