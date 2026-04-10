@@ -237,7 +237,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     setError("")
     if (themes.length === 0) {
       try {
-        const r = await fetch("/backend/admin/rada/themes")
+        const r = await fetch("/api/admin/rada/themes")
         if (r.ok) setThemes(await r.json())
       } catch { /* show modal anyway */ }
     }

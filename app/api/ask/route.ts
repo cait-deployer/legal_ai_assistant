@@ -39,16 +39,23 @@ export async function POST(request: Request) {
   const body = await request.json()
   const { question } = body
 
-  // 2. Get user's subscription_tier (= plan id: "free", "daily", "standard", "pro")
+  // 2. Get user's subscription_tier + onboarding profile
   const { data: profile } = await admin()
     .from("profiles")
-    .select("subscription_tier")
+    .select("subscription_tier, role, sub_role, segment")
     .eq("id", user.id)
     .single()
 
   let filter_sources: string[] | null = null
   let response_features: string[] = []
   let max_docs = 8
+
+  // Build user profile for prompt personalization
+  const user_profile = profile ? {
+    role:     profile.role     ?? null,
+    sub_role: profile.sub_role ?? [],
+    segment:  profile.segment  ?? [],
+  } : null
 
   if (profile?.subscription_tier) {
     const planId = profile.subscription_tier
@@ -90,7 +97,7 @@ export async function POST(request: Request) {
     const res = await fetch(`${BACKEND}/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, max_docs, filter_sources, response_features }),
+      body: JSON.stringify({ question, max_docs, filter_sources, response_features, user_profile }),
       signal: AbortSignal.timeout(120_000),
     })
 

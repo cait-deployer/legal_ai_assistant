@@ -703,8 +703,15 @@ async def get_stats():
     )
 
     history = _sb_get_logs("rada", limit=1)
+
+    # Per-collection breakdown for new multi-collection architecture
+    from qdrant_storage import get_collection_stats
+    collection_stats = get_collection_stats()
+    total = sum(collection_stats.values())
+
     return {
-        "doc_count": _qdrant_doc_count(),
+        "doc_count": total,
+        "collection_stats": collection_stats,
         "last_sync": history[0] if history else None,
         "schedule_enabled": settings_cache.get_bool("schedule_enabled", False),
         "scraping_running": running,
@@ -1502,6 +1509,7 @@ class AskRequest(BaseModel):
     filter_domains: list[str] | None = None    # kept for backward compat (unused)
     filter_sources: list[str] | None = None    # e.g. ["rada", "wiki", "supreme", "ccu"]
     response_features: list[str] = []          # enabled response quality features from plan
+    user_profile: dict | None = None           # {role, sub_role, segment} from onboarding
 
 
 _CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
@@ -1524,69 +1532,23 @@ async def ask(body: AskRequest):
     except Exception as e:
         raise HTTPException(500, f"Embedding error: {e}")
 
-    # 2. Routing — визначаємо в яких колекціях шукати
+    # 2. Визначаємо колекції — завжди ALL, фільтр тільки по плану (filter_sources)
     from qdrant_storage import search_qdrant, RADA_COLLECTIONS, ALL_COLLECTIONS
 
-    def _route_collections(q: str, filter_sources: list | None) -> list:
-        """
-        Keyword-роутер: повертає список колекцій для пошуку.
-        Якщо filter_sources вказано — обмежуємо по джерелу.
-        """
-        q_low = q.lower()
+    if body.filter_sources:
+        allowed = set(body.filter_sources)
+        target_collections: list[str] = []
+        if "rada" in allowed:
+            target_collections += RADA_COLLECTIONS
+        if "supreme" in allowed:
+            target_collections.append("laws_supreme")
+        if "wiki" in allowed:
+            target_collections.append("laws_wiki")
+        if not target_collections:
+            target_collections = ALL_COLLECTIONS
+    else:
+        target_collections = ALL_COLLECTIONS
 
-        # Маппінг ключових слів → колекції
-        domain_keywords: list[tuple[list[str], str]] = [
-            (["трудов", "зарплат", "звільнен", "відпустк", "кзпп", "роботодав",
-              "найман", "декрет", "лікарнян", "соціальн", "допомог", "пенсі",
-              "виплат", "непрацездатн", "страхов"], "rada_labor"),
-            (["податк", "пдв", "фоп", "єдин", "оподаткуван", "митн", "акциз",
-              "прибутк", "бухгалтер", "фінанс", "бюджет", "банк", "кредит",
-              "рро", "єсв", "зед"], "rada_finance"),
-            (["цивільн", "договір", "угод", "зобов'яз", "власніст", "спадщин",
-              "аліменти", "шлюб", "розлучен", "дитин", "сім'я", "опіка",
-              "нотаріус", "адвокат"], "rada_civil"),
-            (["кримінальн", "злочин", "покаран", "вирок", "арешт",
-              "обвинувачен", "кпк", "досудов", "слідств"], "rada_criminal"),
-            (["суд", "позов", "оскарж", "апеляц", "касац", "рішення суду",
-              "судова практик", "верховний суд"], "rada_court"),
-            (["адміністратив", "штраф", "порушен", "дозвіл", "ліцензі",
-              "реєстраці", "держ орган"], "rada_admin"),
-            (["житл", "квартир", "оренд", "комунальн", "будинок",
-              "нерухомість", "приватизац", "будівництв", "осбб"], "rada_housing"),
-            (["земельн", "ділянк", "кадастр", "агро", "сільськ", "фермер"], "rada_land"),
-            (["підприємств", "бізнес", "корпоратив", "акціонер", "торгівл",
-              "транспорт", "перевезен", "промислов", "енергетик"], "rada_industry"),
-            (["військ", "мобіліз", "убд", "зсу", "воєнн", "збройн"], "rada_other"),
-            (["міжнародн", "конвенці", "ратифікац", "договір між"], "rada_intl"),
-        ]
-
-        matched: list[str] = []
-        for keywords, collection in domain_keywords:
-            if any(kw in q_low for kw in keywords):
-                matched.append(collection)
-
-        # Завжди додаємо судову практику якщо є слово "суд"
-        if "суд" in q_low and "laws_supreme" not in matched:
-            matched.append("laws_supreme")
-
-        # Якщо нічого не знайдено — шукаємо по всіх
-        targets = list(dict.fromkeys(matched)) or ALL_COLLECTIONS  # унікальні, зберігаючи порядок
-
-        # Фільтр по filter_sources якщо вказано
-        if filter_sources:
-            allowed = set(filter_sources)
-            filtered: list[str] = []
-            if "rada" in allowed:
-                filtered += [c for c in targets if c.startswith("rada_")]
-            if "supreme" in allowed:
-                filtered.append("laws_supreme")
-            if "wiki" in allowed:
-                filtered.append("laws_wiki")
-            targets = filtered or targets
-
-        return targets
-
-    target_collections = _route_collections(question, body.filter_sources)
     fetch_k = body.max_docs * 2
     match_threshold = settings_cache.get_float("match_threshold_docs", 0.4)
     results = await _asyncio.to_thread(
@@ -1594,7 +1556,25 @@ async def ask(body: AskRequest):
     )
     results = results[:body.max_docs]
 
-    # 3. Build citations (Citation format expected by frontend)
+    # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
+    min_score = settings_cache.get_float("min_relevance_score", 0.35)
+    if not results or results[0]["similarity"] < min_score:
+        return {
+            "answer": (
+                "На жаль, у базі знань не знайдено достатньо інформації для відповіді на це питання. "
+                "Спробуйте переформулювати запит або зверніться до юриста."
+            ),
+            "references": [],
+            "templates": [],
+            "_meta": {
+                "processing_time_ms": int((time.time() - start_time) * 1000),
+                "tokens_used": 0,
+                "category": "Загальне",
+                **_CLF_FALLBACK,
+            },
+        }
+
+    # 3. Будуємо збагачений контекст для LLM + citations для фронтенду
     citations: list[dict] = []
     context_parts: list[str] = []
 
@@ -1606,10 +1586,10 @@ async def ask(body: AskRequest):
         law_id = meta.get("law_id", "")
         source_domain = meta.get("source_domain", "")
         law_url = meta.get("law_url", "")
-        if not law_url and "rada.gov.ua" in source_domain and law_id:
+        if not law_url and source_domain and "rada.gov.ua" in source_domain and law_id:
             law_url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
 
-        # Clean passage: strip markdown code fences and excess whitespace
+        # Чистий уривок для citations на фронтенді
         clean_passage = re.sub(r"```[a-z]*", "", content)
         clean_passage = re.sub(r"\n{3,}", "\n\n", clean_passage).strip()[:600]
 
@@ -1622,8 +1602,39 @@ async def ask(body: AskRequest):
             "chunk_index": meta.get("chunk_index", 0),
         })
 
-        if content:
-            context_parts.append(f"[{num}] {title}\n{content}")
+        if not content:
+            continue
+
+        # Збагачений заголовок — LLM бачить всі деталі для точного цитування
+        status = meta.get("status", "")
+        doc_type = meta.get("doc_type", "")
+        effective_date = meta.get("effective_date", "") or (meta.get("scraped_at", "") or "")[:10]
+
+        # Попередження про спеціальний правовий статус
+        warnings: list[str] = []
+        if meta.get("wartime_only"):
+            warnings.append("⚠️ ДІЄ ЛИШЕ В УМОВАХ ВОЄННОГО СТАНУ")
+        if meta.get("is_suspended"):
+            warnings.append("⚠️ ДІЮ ПРИЗУПИНЕНО / МОРАТОРІЙ")
+        if meta.get("is_retroactive"):
+            warnings.append("⚠️ МАЄ ЗВОРОТНЮ ДІЮ")
+
+        header_parts = [f"[{num}] {title}"]
+        if doc_type:
+            header_parts.append(doc_type)
+        if law_id:
+            header_parts.append(f"№ {law_id}")
+        if status:
+            header_parts.append(f"Статус: {status}")
+        if effective_date:
+            header_parts.append(f"Дата: {effective_date}")
+
+        chunk_text = " | ".join(header_parts)
+        if warnings:
+            chunk_text += "\n" + "\n".join(warnings)
+        chunk_text += f"\n---\n{content}"
+
+        context_parts.append(chunk_text)
 
     context = "\n\n".join(context_parts) if context_parts else "Контекст відсутній."
 
@@ -1671,7 +1682,24 @@ async def ask(body: AskRequest):
             "Якщо контекст не містить потрібної інформації — чесно повідом про це."
         )
 
+        # Build user profile block if available
+        profile_block = ""
+        if body.user_profile:
+            _role     = body.user_profile.get("role") or ""
+            _sub_role = body.user_profile.get("sub_role") or []
+            _segment  = body.user_profile.get("segment") or []
+            _parts: list[str] = []
+            if _role:
+                _parts.append(f"Роль: {_role}")
+            if _sub_role:
+                _parts.append(f"Спеціалізація: {', '.join(_sub_role)}")
+            if _segment:
+                _parts.append(f"Сфери інтересів: {', '.join(_segment)}")
+            if _parts:
+                profile_block = "Профіль користувача:\n" + "\n".join(_parts) + "\n\n"
+
         prompt = (
+            f"{profile_block}"
             f"Контекст з українського законодавства (кожен фрагмент пронумерований):\n\n{context}\n\n"
             f"---\nПитання: {question}\n\n"
             + " ".join(response_instructions)

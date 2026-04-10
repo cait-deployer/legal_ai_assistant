@@ -116,7 +116,7 @@ export default function RadaPage() {
     // Lazy-load themes from backend if not yet loaded
     if (themes.length === 0) {
       try {
-        const res = await fetch("/backend/admin/rada/themes")
+        const res = await fetch("/api/admin/rada/themes")
         if (res.ok) setThemes(await res.json())
       } catch { /* ignore, modal still opens */ }
     }
@@ -128,7 +128,7 @@ export default function RadaPage() {
     setShowThemesModal(false)
     setScraping(true)
     try {
-      const res = await fetch("/backend/admin/rada/trigger", {
+      const res = await fetch("/api/admin/rada/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ section_codes: sectionCodes }),

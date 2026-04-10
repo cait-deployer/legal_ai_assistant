@@ -12,6 +12,7 @@ import {
 
 type Stats = {
   doc_count: number
+  collection_stats?: Record<string, number>
   last_sync: {
     status: string
     started_at: string
@@ -23,6 +24,24 @@ type Stats = {
   scraping_running: boolean
   can_resume: boolean
   resume_progress?: { next_index: number; total: number } | null
+}
+
+const COLLECTION_LABELS: Record<string, string> = {
+  rada_finance:   "Фінанси / Податки",
+  rada_state:     "Держустрій",
+  rada_personnel: "Кадри",
+  rada_court:     "Суд / Правосуддя",
+  rada_intl:      "Міжнародне",
+  rada_labor:     "Трудове / Соціальне",
+  rada_civil:     "Цивільне / Сімейне",
+  rada_criminal:  "Кримінальне",
+  rada_admin:     "Адміністративне",
+  rada_housing:   "Житлове / Будівництво",
+  rada_land:      "Земельне / АПК",
+  rada_industry:  "Бізнес / Промисловість",
+  rada_other:     "Інше (РАДА)",
+  laws_supreme:   "Верховний Суд",
+  laws_wiki:      "Правова допомога",
 }
 
 type SyncRun = {
@@ -170,7 +189,24 @@ export default function AdminDashboard() {
               {stats?.doc_count?.toLocaleString() ?? "—"}
             </div>
           )}
-          <p className="text-xs text-[#C9A84C]/50 mt-2 font-medium uppercase tracking-wider">Векторних чанків у Supabase</p>
+          <p className="text-xs text-[#C9A84C]/50 mt-2 font-medium uppercase tracking-wider">Векторних чанків у Qdrant</p>
+          {stats?.collection_stats && (
+            <div className="mt-3 space-y-1 max-h-40 overflow-y-auto pr-1">
+              {Object.entries(stats.collection_stats)
+                .filter(([, count]) => count > 0)
+                .sort(([, a], [, b]) => b - a)
+                .map(([col, count]) => (
+                  <div key={col} className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-[#C9A84C]/50 truncate">
+                      {COLLECTION_LABELS[col] ?? col}
+                    </span>
+                    <span className="text-[10px] font-bold text-[#C9A84C]/80 tabular-nums shrink-0">
+                      {count.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
 
         {/* Schedule toggle */}
