@@ -6,8 +6,42 @@ import { Button } from "@/components/ui/button"
 import {
   Settings, Play, Pause, RotateCcw, Loader2, RefreshCw,
   CheckCircle, XCircle, Database, Scale, BookOpen, List, X,
-  TrendingUp, Timer, AlertTriangle, Info,
+  TrendingUp, Timer, AlertTriangle, Info, Map,
 } from "lucide-react"
+
+// Маппінг код розділу РАДИ → Qdrant колекція
+const SECTION_TO_COLLECTION: Record<string, string> = {
+  h2: "rada_finance", h3: "rada_finance", h26: "rada_finance", h23: "rada_finance",
+  h4: "rada_state",
+  h27: "rada_personnel",
+  h22: "rada_court", h30: "rada_court", h1: "rada_court",
+  h11: "rada_intl",
+  h19: "rada_labor", h20: "rada_labor",
+  h5: "rada_civil", h16: "rada_civil", h13: "rada_civil",
+  h25: "rada_criminal",
+  h8: "rada_admin", h10: "rada_admin", h31: "rada_admin",
+  h6: "rada_housing", h21: "rada_housing",
+  h9: "rada_land", h18: "rada_land",
+  h7: "rada_industry", h17: "rada_industry", h15: "rada_industry",
+  h12: "rada_other", h14: "rada_other", h24: "rada_other",
+  h28: "rada_other", h29: "rada_other", h32: "rada_other",
+}
+
+const COLLECTION_COLOR: Record<string, string> = {
+  rada_finance:   "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
+  rada_state:     "bg-blue-500/15 text-blue-400 border-blue-500/20",
+  rada_personnel: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  rada_court:     "bg-red-500/15 text-red-400 border-red-500/20",
+  rada_intl:      "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
+  rada_labor:     "bg-green-500/15 text-green-400 border-green-500/20",
+  rada_civil:     "bg-pink-500/15 text-pink-400 border-pink-500/20",
+  rada_criminal:  "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  rada_admin:     "bg-slate-500/15 text-slate-400 border-slate-500/20",
+  rada_housing:   "bg-teal-500/15 text-teal-400 border-teal-500/20",
+  rada_land:      "bg-lime-500/15 text-lime-400 border-lime-500/20",
+  rada_industry:  "bg-indigo-500/15 text-indigo-400 border-indigo-500/20",
+  rada_other:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/20",
+}
 
 type SyncRun = {
   status: "success" | "error" | "paused"
@@ -437,11 +471,30 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex gap-3 px-6 py-3 border-b border-[#C9A84C]/10 shrink-0">
+            <div className="flex gap-3 px-6 py-3 border-b border-[#C9A84C]/10 shrink-0 flex-wrap">
               <button onClick={() => setSelectedCodes(new Set(themes.map(t => t.code)))} className="text-xs font-semibold text-[#C9A84C] hover:underline">Вибрати всі</button>
               <span className="text-[#C9A84C]/30">·</span>
               <button onClick={() => setSelectedCodes(new Set())} className="text-xs font-semibold text-[#C9A84C] hover:underline">Зняти всі</button>
               {selectedCodes.size > 0 && <span className="text-xs text-[#E0E6ED]/40 ml-auto">Вибрано: {selectedCodes.size} / {themes.length}</span>}
+            </div>
+            {/* Legend */}
+            <div className="px-6 py-2 border-b border-[#C9A84C]/10 shrink-0">
+              <p className="text-[10px] text-[#E0E6ED]/30 mb-1.5 font-black uppercase tracking-wider flex items-center gap-1.5">
+                <Map className="w-3 h-3" /> Розділ → Qdrant колекція
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries({
+                  rada_finance: "Фінанси", rada_state: "Держустрій", rada_personnel: "Кадри",
+                  rada_court: "Суд", rada_intl: "Міжнар.", rada_labor: "Трудове",
+                  rada_civil: "Цивільне", rada_criminal: "Кримінальне", rada_admin: "Адмін.",
+                  rada_housing: "Житлове", rada_land: "Земельне", rada_industry: "Бізнес",
+                  rada_other: "Інше",
+                }).map(([col, label]) => (
+                  <span key={col} className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-bold ${COLLECTION_COLOR[col]}`}>
+                    {label}
+                  </span>
+                ))}
+              </div>
             </div>
             <div className="overflow-y-auto flex-1 px-6 py-4">
               {themes.length === 0 ? (
@@ -450,13 +503,21 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {themes.map(t => (
-                    <label key={t.code} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${selectedCodes.has(t.code) ? "border-[#C9A84C]/50 bg-[#C9A84C]/5" : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"}`}>
-                      <input type="checkbox" checked={selectedCodes.has(t.code)} onChange={() => toggleTheme(t.code)} className="accent-[#C9A84C] shrink-0" />
-                      <span className="font-mono text-[10px] text-[#C9A84C]/40 shrink-0 w-8">{t.code}</span>
-                      <span className="text-xs text-[#E0E6ED]/80 leading-tight">{t.label}</span>
-                    </label>
-                  ))}
+                  {themes.map(t => {
+                    const col = SECTION_TO_COLLECTION[t.code] ?? "rada_other"
+                    const colColor = COLLECTION_COLOR[col] ?? COLLECTION_COLOR.rada_other
+                    const colLabel = col.replace("rada_", "")
+                    return (
+                      <label key={t.code} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${selectedCodes.has(t.code) ? "border-[#C9A84C]/50 bg-[#C9A84C]/5" : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"}`}>
+                        <input type="checkbox" checked={selectedCodes.has(t.code)} onChange={() => toggleTheme(t.code)} className="accent-[#C9A84C] shrink-0" />
+                        <span className="font-mono text-[10px] text-[#C9A84C]/40 shrink-0 w-7">{t.code}</span>
+                        <span className="text-xs text-[#E0E6ED]/80 leading-tight flex-1 min-w-0">{t.label}</span>
+                        <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border text-[9px] font-bold ${colColor}`}>
+                          {colLabel}
+                        </span>
+                      </label>
+                    )
+                  })}
                 </div>
               )}
             </div>

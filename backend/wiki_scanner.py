@@ -3,13 +3,17 @@ import os
 import httpx
 import time
 import re
-from datetime import datetime
-from rada_to_supabase import embeddings, upload_chunk_to_supabase, text_splitter, delete_old_law_chunks, get_existing_laws_meta
+from datetime import datetime, timezone
+from rada_to_supabase import embeddings, upload_chunk_to_supabase, delete_old_law_chunks
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Використовуємо API поінт для MediaWiki
 WIKI_API_URL = "https://legalaid.wiki/api.php"
 WIKI_BASE_URL = "https://legalaid.wiki"
 HEADERS = {"User-Agent": "LawyerAssistantBot/1.0 (Mariia Project)"}
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
+
 
 def get_all_wiki_articles():
     """Отримує ВСІ статті з legalaid.wiki через API allpages (з пагінацією)."""
@@ -41,13 +45,13 @@ def get_all_wiki_articles():
     return articles
 
 
-def get_wiki_latest_articles(limit=2):
-    """Отримує список нових сторінок через API (набагато надійніше)"""
+def get_wiki_latest_articles(limit=50):
+    """Отримує список нових сторінок через API."""
     params = {
         "action": "query",
         "list": "recentchanges",
         "rclimit": limit,
-        "rcnamespace": 0,  # Тільки основні статті
+        "rcnamespace": 0,
         "format": "json"
     }
     try:
@@ -64,44 +68,34 @@ def get_wiki_latest_articles(limit=2):
         print(f"❌ Помилка отримання списку через API: {e}")
         return []
 
-def scrape_wiki_article(url, title, session_id=None, existing_meta=None):
-    """Отримує чистий текст статті та оновлює базу, якщо потрібно."""
+
+def scrape_wiki_article(url, title, session_id=None, existing_ids=None):
+    """Отримує чистий текст статті та завантажує в laws_wiki колекцію."""
     clean_id = re.sub(r'[^\w]', '_', title)
     law_id = f"wiki_{clean_id}"
 
-    # ПЕРЕВІРКА ДАТИ: Wiki оновлюємо раз на 14 днів
-    if existing_meta and law_id in existing_meta:
-        meta = existing_meta[law_id]
-        scraped_at_str = meta.get("scraped_at", "") if isinstance(meta, dict) else str(meta)
-        try:
-            last_scraped = datetime.fromisoformat(scraped_at_str.replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc) if last_scraped.tzinfo else datetime.now()
-            if (now - last_scraped).days < 14:
-                return True  # Пропускаємо, ще свіжа
-        except Exception:
-            pass
-        
-        # Якщо застаріла — видаляємо старе перед записом
-        delete_old_law_chunks(law_id)
-  
-    # 1. Запит на отримання контенту сторінки
+    # Пропускаємо якщо вже є в базі
+    if existing_ids and law_id in existing_ids:
+        print(f"⏭️ Пропускаємо '{title}' — вже є в базі")
+        return True
+
     params = {
         "action": "parse",
         "page": title,
-        "prop": "text|links|iwlinks", # Отримуємо текст і посилання
+        "prop": "text",
         "format": "json",
-        "disableeditsection": 1
+        "disableeditsection": 1,
     }
-    
+
     try:
         r = httpx.get(WIKI_API_URL, params=params, headers=HEADERS, timeout=20)
         data = r.json().get("parse", {})
-        
-        # Отримуємо чистий HTML контенту
-        html_content = data.get("text", {}).get("*", "")
-        if not html_content: return False
 
-        # Швидкий пошук шаблонів документів у тексті (регулярним виразом)
+        html_content = data.get("text", {}).get("*", "")
+        if not html_content:
+            return False
+
+        # Шукаємо посилання на файл (шаблон/документ)
         file_url = None
         file_match = re.search(r'href="([^"]+\.(?:docx?|pdf|rtf))"', html_content, re.I)
         if file_match:
@@ -109,22 +103,17 @@ def scrape_wiki_article(url, title, session_id=None, existing_meta=None):
             if not file_url.startswith("http"):
                 file_url = WIKI_BASE_URL + file_url
 
-        # Очищаємо текст від HTML-тегів (MediaWiki API віддає HTML, але без сміття навігації)
-        from bs4 import BeautifulSoup # Залишаємо тільки для фінального очищення тексту
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(html_content, "html.parser")
-        
-        # Видаляємо технічні блоки, якщо вони лишилися
         for junk in soup.find_all(["table", "div"], class_=["toc", "mw-empty-elt", "navbox"]):
             junk.decompose()
-            
-        text = soup.get_text(separator="\n", strip=True)
-        if len(text) < 200: return False
 
-        # Далі стандартний процес чанкування та завантаження
+        text = soup.get_text(separator="\n", strip=True)
+        if len(text) < 200:
+            return False
+
         chunks = text_splitter.split_text(text)
-        scraped_at = datetime.now().isoformat()
-        clean_id = re.sub(r'[^\w]', '_', title)
-        law_id = f"wiki_{clean_id}"
+        scraped_at = datetime.now(timezone.utc).isoformat()
 
         for i, chunk_text in enumerate(chunks):
             vector = embeddings.embed_query(chunk_text)
@@ -133,34 +122,61 @@ def scrape_wiki_article(url, title, session_id=None, existing_meta=None):
                 "law_id": law_id,
                 "category": "Роз'яснення та шаблони",
                 "law_url": url,
-                "file_url": file_url,
+                "source_domain": "legalaid.wiki",
+                "file_url": file_url or "",
                 "is_template": bool(file_url),
                 "scraped_at": scraped_at,
-                "chunk_index": i
+                "chunk_index": i,
             }
-            upload_chunk_to_supabase(chunk_text, metadata, vector, session_id=session_id)
-            time.sleep(0.3)
-            
+            upload_chunk_to_supabase(
+                chunk_text, metadata, vector,
+                session_id=session_id,
+                collection_name="laws_wiki",   # ← правильна колекція
+            )
+            time.sleep(0.2)
+
+        print(f"✅ Wiki '{title}' → laws_wiki ({len(chunks)} чанків)")
         return True
+
     except Exception as e:
-        print(f"❌ Помилка API Wiki ({title}): {e}")
+        print(f"❌ Помилка Wiki ({title}): {e}")
         return False
 
-def run_wiki_sync(limit=2, session_id=None, log_callback=None):
-    """Головний цикл синхронізації"""
+
+def run_wiki_sync(session_id=None, log_callback=None, full=True):
+    """
+    Головний цикл синхронізації Wiki → laws_wiki.
+    full=True  → всі статті (get_all_wiki_articles)
+    full=False → тільки нещодавні зміни (get_wiki_latest_articles)
+    """
+    from qdrant_storage import get_existing_law_ids
+
     def log(msg):
         print(msg)
-        if log_callback: log_callback(msg)
+        if log_callback:
+            log_callback(msg)
 
-    articles = get_wiki_latest_articles(limit=limit)
-    log(f"📚 Знайдено {len(articles)} статей на Wiki...")
-    
-    for art in articles:
-        log(f"📖 Обробка: {art['title']}")
-        success = scrape_wiki_article(art['url'], art['title'], session_id=session_id)
-        if success:
-            log(f"✅ Готово: {art['title']}")
+    log("📚 Починаємо синхронізацію legalaid.wiki → laws_wiki...")
+
+    if full:
+        articles = get_all_wiki_articles()
+    else:
+        articles = get_wiki_latest_articles(limit=100)
+
+    log(f"🔎 Знайдено статей: {len(articles)}")
+
+    existing_ids = get_existing_law_ids()
+    log(f"📋 Вже в базі: {len(existing_ids)} документів")
+
+    ok = 0
+    for i, art in enumerate(articles):
+        log(f"📖 [{i+1}/{len(articles)}] {art['title']}")
+        if scrape_wiki_article(art["url"], art["title"], session_id=session_id, existing_ids=existing_ids):
+            ok += 1
         time.sleep(1)
 
+    log(f"✅ Wiki синхронізація завершена. Додано: {ok} статей.")
+
+
 if __name__ == "__main__":
-    run_wiki_sync(limit=None) # Зміни на None для повної синхронізації
+    run_wiki_sync(full=True)
