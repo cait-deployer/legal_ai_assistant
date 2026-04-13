@@ -112,7 +112,7 @@ def get_ccu_docs_on_page(page: int) -> list[dict]:
         for cell in cells:
             for a in cell.find_all("a", href=True):
                 href = a["href"]
-                if re.search(r"\.pdf", href, re.IGNORECASE):
+                if re.search(r"\.(pdf|docx?)", href, re.IGNORECASE):
                     pdf_url = href if href.startswith("http") else CCU_BASE_URL + href
                     break
                 elif re.search(r"/docs/\d+", href) and not doc_url:
@@ -194,7 +194,7 @@ def _get_pdf_url_from_doc_page(doc_url: str) -> str | None:
         soup = BeautifulSoup(r.text, "html.parser")
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if re.search(r"\.pdf", href, re.IGNORECASE):
+            if re.search(r"\.(pdf|docx?)", href, re.IGNORECASE):
                 return href if href.startswith("http") else CCU_BASE_URL + href
         return None
     except Exception as e:
@@ -202,39 +202,55 @@ def _get_pdf_url_from_doc_page(doc_url: str) -> str | None:
         return None
 
 
-def _extract_pdf_text(pdf_url: str) -> str:
-    """Завантажує PDF і повертає чистий текст."""
+def _extract_pdf_text(file_url: str) -> str:
+    """Завантажує PDF або DOC/DOCX і повертає чистий текст."""
+    is_doc = re.search(r"\.docx?$", file_url, re.IGNORECASE)
+    suffix = ".docx" if (is_doc and "docx" in file_url.lower()) else (".doc" if is_doc else ".pdf")
+
     try:
         with _ccu_http_sem:
-            r = httpx.get(pdf_url, headers=HEADERS, timeout=60, follow_redirects=True)
+            r = httpx.get(file_url, headers=HEADERS, timeout=60, follow_redirects=True)
         r.raise_for_status()
     except Exception as e:
-        print(f"❌ PDF download ({pdf_url}): {e}")
+        print(f"❌ File download ({file_url}): {e}")
         return ""
 
-    # Зберігаємо у tmp-файл і парсимо через langchain PyPDFLoader
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(r.content)
         tmp_path = tmp.name
 
     text = ""
     try:
-        from langchain_community.document_loaders import PyPDFLoader
-        loader = PyPDFLoader(tmp_path)
-        pages = loader.load()
-        text = "\n".join(p.page_content for p in pages)
-    except Exception as e:
-        print(f"⚠️ PyPDFLoader ({pdf_url}): {e}")
-        # Fallback — спробуємо pypdf напряму
-        try:
-            import pypdf
-            with open(tmp_path, "rb") as f:
-                reader = pypdf.PdfReader(f)
-                text = "\n".join(
-                    page.extract_text() or "" for page in reader.pages
-                )
-        except Exception as e2:
-            print(f"❌ pypdf fallback ({pdf_url}): {e2}")
+        if suffix == ".pdf":
+            try:
+                from langchain_community.document_loaders import PyPDFLoader
+                pages = PyPDFLoader(tmp_path).load()
+                text = "\n".join(p.page_content for p in pages)
+            except Exception as e:
+                print(f"⚠️ PyPDFLoader ({file_url}): {e}")
+                try:
+                    import pypdf
+                    with open(tmp_path, "rb") as f:
+                        reader = pypdf.PdfReader(f)
+                        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                except Exception as e2:
+                    print(f"❌ pypdf fallback ({file_url}): {e2}")
+        else:
+            # DOC / DOCX
+            try:
+                import docx
+                doc = docx.Document(tmp_path)
+                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            except Exception as e:
+                print(f"⚠️ python-docx ({file_url}): {e}")
+                # Fallback: витягуємо текст з бінарного .doc (CP1251)
+                try:
+                    raw = r.content.decode("cp1251", errors="ignore")
+                    # Фільтруємо латинський/кириличний текст, прибираємо сміття
+                    text = re.sub(r"[^\x20-\x7E\u0400-\u04FF\n\r\t]+", " ", raw)
+                    text = re.sub(r" {4,}", " ", text).strip()
+                except Exception as e2:
+                    print(f"❌ DOC binary fallback ({file_url}): {e2}")
     finally:
         try:
             os.unlink(tmp_path)
