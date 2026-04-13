@@ -1542,7 +1542,7 @@ async def get_rada_coverage(refresh: bool = False):
     import time as _time
     from qdrant_client.models import Filter, FieldCondition, MatchValue
     from qdrant_storage import get_client, RADA_COLLECTIONS
-    from rada_scanner import ALL_THEMES, get_total_pages
+    from rada_scanner import ALL_THEMES, get_section_doc_count
 
     # ── 1. Qdrant: збираємо chunk_index=0 по всіх РАДА-колекціях ──
     client = get_client()
@@ -1589,8 +1589,8 @@ async def get_rada_coverage(refresh: bool = False):
         sem = _asyncio.Semaphore(5)
         async def _fetch(code: str) -> tuple[str, int]:
             async with sem:
-                pages = await _asyncio.to_thread(get_total_pages, code)
-                return code, pages * 50
+                exact, _ = await _asyncio.to_thread(get_section_doc_count, code)
+                return code, exact
         results = await _asyncio.gather(*[_fetch(code) for code, _ in ALL_THEMES])
         _rada_totals_cache = dict(results)
         _rada_cache_time = now

@@ -56,20 +56,25 @@ def is_already_scraped(index: dict, law_id: str) -> bool:
 # ПАГІНАЦІЯ: скільки сторінок у розділі
 
 def get_total_pages(code: str) -> int:
+    """Повертає кількість сторінок. Залишено для сумісності."""
+    return get_section_doc_count(code)[1]
+
+
+def get_section_doc_count(code: str) -> tuple[int, int]:
     """
-    Заходить на першу сторінку розділу і шукає кількість сторінок.
-    Пробує два способи:
-      1. Шукає посилання виду /laws/main/h14/page5 — беремо максимальне число
-      2. Шукає текст "з 1234 документів" і рахуємо сторінки по 50
+    Повертає (exact_count, total_pages) для розділу Ради.
+    exact_count — точна кількість документів з тексту "з 1234 документів".
+    Якщо текст не знайдено — fallback: pages * 50.
     """
     url = f"{BASE}/laws/main/{code}/page?lang=uk"
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
     except Exception:
-        return 1
+        return 0, 1
 
     max_page = 1
+    exact_count: int | None = None
 
     # Спосіб 1: посилання пагінатора
     for a in soup.find_all("a", href=True):
@@ -77,16 +82,19 @@ def get_total_pages(code: str) -> int:
         if m:
             max_page = max(max_page, int(m.group(1)))
 
-    # Спосіб 2: текст "з 1234 документів"
+    # Спосіб 2: текст "з 1234 документів" — точне число
     for tag in soup.find_all(string=True):
         t = tag.strip()
         m = re.search(r'з\s+([\d\s]+)', t)
         if m and "документ" in t.lower():
-            total_docs = int(m.group(1).replace(" ", ""))
-            max_page = max(max_page, (total_docs + 49) // 50)
+            exact_count = int(m.group(1).replace(" ", ""))
+            max_page = max(max_page, (exact_count + 49) // 50)
             break
 
-    return max_page
+    if exact_count is None:
+        exact_count = max_page * 50  # fallback — може бути завищено
+
+    return exact_count, max_page
 
 
 def parse_laws_from_page(html: str, category: str) -> list[dict]:
