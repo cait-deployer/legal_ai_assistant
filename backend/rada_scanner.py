@@ -179,9 +179,11 @@ def get_laws_from_section(code: str, label: str, limit: int = None, log=None) ->
         if limit and len(all_laws) >= limit:
             break
 
-        # Перша сторінка — без цифри в URL, решта — /page2, /page3 ...
-        suffix = "" if page == 1 else str(page)
-        url = f"{BASE}/laws/main/{code}/page{suffix}?lang=uk"
+        # Перша сторінка — без /page, решта — /page2, /page3 ...
+        if page == 1:
+            url = f"{BASE}/laws/main/{code}?lang=uk"
+        else:
+            url = f"{BASE}/laws/main/{code}/page{page}?lang=uk"
 
         try:
             r = requests.get(url, headers=HEADERS, timeout=15)
