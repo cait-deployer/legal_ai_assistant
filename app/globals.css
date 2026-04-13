@@ -12,6 +12,21 @@ button, a {
   touch-action: manipulation;
 }
 
+/* Pointer cursor on all interactive elements */
+button:not(:disabled),
+a,
+[role="button"],
+[role="tab"],
+[role="option"],
+[role="menuitem"],
+label[for],
+select {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

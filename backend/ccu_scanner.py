@@ -348,21 +348,31 @@ def run_ccu_sync(
     session_id: str | None = None,
     log_callback=None,
     pause_check=None,
+    on_pause=None,
+    start_index: int = 0,
+    docs_cached: list | None = None,
 ) -> tuple[int, int]:
     """
     Синхронізує КСУ → laws_ccu.
     Повертає (ok_count, total_count).
     pause_check: callable() → bool, True = пауза.
+    on_pause: callable(docs, next_idx, ok) — зберегти стан при паузі.
+    start_index: індекс для resume.
+    docs_cached: список документів для resume (щоб не парсити Раду знову).
     """
     def log(msg, level="info"):
         print(msg)
         if log_callback:
             log_callback(msg, level)
 
-    log("⚖️ Починаємо синхронізацію КСУ → laws_ccu...")
-    log("🔍 Збираємо список рішень та висновків КСУ...")
+    if docs_cached and start_index > 0:
+        docs = docs_cached
+        log(f"▶️  Відновлення КСУ з індексу {start_index}")
+    else:
+        log("⚖️ Починаємо синхронізацію КСУ → laws_ccu...")
+        log("🔍 Збираємо список рішень та висновків КСУ...")
+        docs = get_all_ccu_docs(log=log)
 
-    docs = get_all_ccu_docs(log=log)
     total = len(docs)
     log(f"📋 Після фільтрації: {total} документів (рішення + висновки)")
 
@@ -373,14 +383,16 @@ def run_ccu_sync(
     log(f"🔄 Нових для обробки: {total - skipped} (вже в базі: {skipped})")
 
     ok = 0
-    i = 0
+    i = start_index
     while i < total:
         if pause_check and pause_check():
+            if on_pause:
+                on_pause(docs, i, ok)
             log(f"⏸️  Призупинено на {i}/{total}. Оброблено: {ok}", "warning")
             return ok, total
 
-        batch_end   = min(i + CCU_WORKERS, total)
-        batch       = docs[i:batch_end]
+        batch_end = min(i + CCU_WORKERS, total)
+        batch     = docs[i:batch_end]
         log(f"📥 Батч [{i + 1}–{batch_end}/{total}]: {', '.join(d['doc_num'] for d in batch)}")
 
         with ThreadPoolExecutor(max_workers=CCU_WORKERS) as pool:
@@ -405,7 +417,7 @@ def run_ccu_sync(
                     log(f"  ❌ {doc['doc_num']}: {e}", "error")
 
         i = batch_end
-        time.sleep(1.0)  # пауза між батчами
+        time.sleep(1.0)
 
     log(f"✅ КСУ синхронізацію завершено. Додано/оновлено: {ok}/{total}.", "success")
     return ok, total

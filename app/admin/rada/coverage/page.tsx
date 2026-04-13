@@ -17,6 +17,7 @@ type Section = {
   code: string
   label: string
   rada_total: number | null
+  rada_estimated: boolean
   our_total: number
   our_restricted: number
   our_public: number
@@ -345,7 +346,7 @@ function RadaTab({ data }: { data: CoverageData }) {
                 </div>
                 <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
                   У нас: <span className="text-[#E0E6ED]/70 font-semibold">{fmt(s.our_total)}</span>
-                  {s.rada_total != null && <> / Рада: ~{fmt(s.rada_total)}</>}
+                  {s.rada_total != null && <> / Рада: {s.rada_estimated ? "~" : ""}{fmt(s.rada_total)}</>}
                   {s.our_restricted > 0 && <> · <Lock className="w-2.5 h-2.5 text-amber-400 inline" /> {s.our_restricted}</>}
                 </p>
               </div>
@@ -397,7 +398,7 @@ function RadaTab({ data }: { data: CoverageData }) {
                   </div>
                 </div>
                 <span className="text-right w-20 text-sm font-mono text-[#E0E6ED]/70">
-                  {s.rada_total != null ? `~${fmt(s.rada_total)}` : "—"}
+                  {s.rada_total != null ? `${s.rada_estimated ? "~" : ""}${fmt(s.rada_total)}` : "—"}
                 </span>
                 <span className="text-right w-16 text-sm font-mono font-semibold text-[#E0E6ED]">
                   {fmt(s.our_total)}

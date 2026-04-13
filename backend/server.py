@@ -40,9 +40,11 @@ from dotenv import load_dotenv
 load_dotenv()
 import settings_cache  # noqa: E402 — треба після load_dotenv
 
-# ── Шлях до файлу збереженого стану (resume) ─────────────────────────────────
+# ── Шляхи до файлів збереженого стану (resume) ───────────────────────────────
 BASE_DIR = Path(__file__).parent
-SYNC_STATE_FILE = BASE_DIR / "sync_state.json"
+SYNC_STATE_FILE     = BASE_DIR / "sync_state.json"       # РАДА
+WIKI_STATE_FILE     = BASE_DIR / "wiki_state.json"        # Wiki
+CCU_STATE_FILE      = BASE_DIR / "ccu_state.json"         # КСУ
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -558,7 +560,7 @@ def _do_supreme(session_id: str) -> None:
             _sync[src]["pause_requested"] = False
 
 
-def _do_wiki(session_id: str) -> None:
+def _do_wiki(session_id: str, start_index: int = 0, articles_cached: list | None = None) -> None:
     src = "wiki"
     log = lambda m, lv="info": _log(src, m, lv)
     log("=" * 50)
@@ -570,20 +572,37 @@ def _do_wiki(session_id: str) -> None:
         from wiki_scanner import get_all_wiki_articles, scrape_wiki_article
         from qdrant_storage import get_existing_law_ids
 
-        articles = get_all_wiki_articles()
-        log(f"🔎 Знайдено статей: {len(articles)}")
+        if articles_cached:
+            articles = articles_cached
+            log(f"▶️  Відновлення з індексу {start_index}")
+        else:
+            articles = get_all_wiki_articles()
 
+        log(f"🔎 Знайдено статей: {len(articles)}")
         existing_ids = get_existing_law_ids()
         log(f"📋 Вже в базі: {len(existing_ids)} документів")
-
         total = len(articles)
 
         for i, art in enumerate(articles):
+            if i < start_index:
+                continue
+
             # ── Перевірка запиту на паузу ─────────────────────────────────
             with _lock:
                 pause = _sync[src]["pause_requested"]
             if pause:
-                log(f"⏸️  Призупинено на {i}/{total}. Оброблено: {processed}", "warning")
+                # Зберігаємо стан для відновлення
+                WIKI_STATE_FILE.write_text(
+                    json.dumps({
+                        "source": "wiki",
+                        "articles": articles,
+                        "next_index": i,
+                        "session_id": session_id,
+                        "saved_at": datetime.now(timezone.utc).isoformat(),
+                    }, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                log(f"⏸️  Призупинено на {i}/{total}. Оброблено: {processed}. Стан збережено.", "warning")
                 _sb_update_log(
                     session_id,
                     status="paused",
@@ -617,6 +636,9 @@ def _do_wiki(session_id: str) -> None:
 
             time.sleep(1)
 
+        # Успішно завершено — очищаємо збережений стан
+        if WIKI_STATE_FILE.exists():
+            WIKI_STATE_FILE.unlink()
         _sb_update_log(
             session_id,
             status="success",
@@ -655,7 +677,7 @@ def _do_templates(session_id: str) -> None:
         _sync[src]["running"] = False
 
 
-def _do_ccu(session_id: str) -> None:
+def _do_ccu(session_id: str, start_index: int = 0, docs_cached: list | None = None) -> None:
     src = "ccu"
     log = lambda m, lv="info": _log(src, m, lv)
     log("=" * 50)
@@ -666,9 +688,25 @@ def _do_ccu(session_id: str) -> None:
     try:
         from ccu_scanner import run_ccu_sync
 
+        _state_holder = {"next_index": start_index, "docs": docs_cached}
+
         def pause_check():
             with _lock:
                 return _sync[src]["pause_requested"]
+
+        def on_pause(docs: list, next_idx: int, ok: int) -> None:
+            """Зберігає стан при паузі."""
+            CCU_STATE_FILE.write_text(
+                json.dumps({
+                    "source": "ccu",
+                    "docs": docs,
+                    "next_index": next_idx,
+                    "session_id": session_id,
+                    "saved_at": datetime.now(timezone.utc).isoformat(),
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            log(f"💾 Стан КСУ збережено (індекс {next_idx})", "warning")
 
         def log_callback(msg: str, level: str = "info"):
             _lvl = level if level != "info" else (
@@ -684,6 +722,9 @@ def _do_ccu(session_id: str) -> None:
             session_id=session_id,
             log_callback=log_callback,
             pause_check=pause_check,
+            on_pause=on_pause,
+            start_index=start_index,
+            docs_cached=docs_cached,
         )
         processed = ok
 
@@ -696,9 +737,12 @@ def _do_ccu(session_id: str) -> None:
                 status="paused",
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 laws_processed=processed,
-                error_message=f"Призупинено",
+                error_message="Призупинено",
             )
         else:
+            # Успішно — очищаємо збережений стан
+            if CCU_STATE_FILE.exists():
+                CCU_STATE_FILE.unlink()
             _sb_update_log(
                 session_id,
                 status="success",
@@ -997,18 +1041,6 @@ async def pause_wiki():
     return {"ok": True}
 
 
-@app.get("/admin/wiki/logs")
-async def wiki_logs():
-    with _lock:
-        running = _sync["wiki"]["running"]
-        logs = list(_sync["wiki"]["live_logs"])
-    return {
-        "running": running,
-        "live_logs": logs,
-        "history": _sb_get_logs("wiki", 20),
-    }
-
-
 # ── /admin/templates/* ────────────────────────────────────────────────────────
 
 @app.post("/admin/templates/trigger")
@@ -1060,12 +1092,78 @@ async def ccu_logs():
         running   = _sync["ccu"]["running"]
         pause_req = _sync["ccu"]["pause_requested"]
         logs      = list(_sync["ccu"]["live_logs"])
+    state = None
+    if CCU_STATE_FILE.exists():
+        try:
+            s = json.loads(CCU_STATE_FILE.read_text(encoding="utf-8"))
+            state = {"next_index": s.get("next_index"), "saved_at": s.get("saved_at"), "total": len(s.get("docs", []))}
+        except Exception:
+            pass
     return {
-        "running":        running,
+        "running":         running,
         "pause_requested": pause_req,
-        "live_logs":      logs,
-        "history":        _sb_get_logs("ccu", 20),
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+        "history":         _sb_get_logs("ccu", 20),
     }
+
+
+@app.post("/admin/ccu/resume")
+async def resume_ccu():
+    if _sync["ccu"]["running"]:
+        raise HTTPException(409, "КСУ вже виконується")
+    if not CCU_STATE_FILE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    try:
+        state = json.loads(CCU_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"Помилка читання стану: {e}")
+    session_id = str(uuid.uuid4())
+    _start_sync("ccu", _do_ccu, session_id,
+                start_index=state["next_index"],
+                docs_cached=state.get("docs"))
+    return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
+
+
+@app.get("/admin/wiki/logs")
+async def wiki_logs():
+    with _lock:
+        running   = _sync["wiki"]["running"]
+        pause_req = _sync["wiki"]["pause_requested"]
+        logs      = list(_sync["wiki"]["live_logs"])
+    state = None
+    if WIKI_STATE_FILE.exists():
+        try:
+            s = json.loads(WIKI_STATE_FILE.read_text(encoding="utf-8"))
+            state = {"next_index": s.get("next_index"), "saved_at": s.get("saved_at"), "total": len(s.get("articles", []))}
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+        "history":         _sb_get_logs("wiki", 20),
+    }
+
+
+@app.post("/admin/wiki/resume")
+async def resume_wiki():
+    if _sync["wiki"]["running"]:
+        raise HTTPException(409, "Wiki вже виконується")
+    if not WIKI_STATE_FILE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    try:
+        state = json.loads(WIKI_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"Помилка читання стану: {e}")
+    session_id = str(uuid.uuid4())
+    _start_sync("wiki", _do_wiki, session_id,
+                start_index=state["next_index"],
+                articles_cached=state.get("articles"))
+    return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
 
 
 # ── /admin/logs (unified history across all sources) ─────────────────────────
@@ -1526,7 +1624,8 @@ async def get_sync_stats():
 # ── /admin/rada/coverage — покриття бази знань по розділах ────────────────────
 
 # Кеш Ради (щоб не довбати сайт при кожному запиті)
-_rada_totals_cache: dict[str, int] = {}   # code -> total_docs_on_rada
+_rada_totals_cache: dict[str, int] = {}    # code -> total_docs_on_rada
+_rada_estimated_cache: dict[str, bool] = {}  # code -> True якщо число-оцінка (pages*50)
 _rada_cache_time: float = 0.0
 _RADA_CACHE_TTL = 24 * 60 * 60  # 24 год
 
@@ -1582,17 +1681,18 @@ async def get_rada_coverage(refresh: bool = False):
             qdrant[cat]["last_scraped_at"] = sat
 
     # ── 2. Rada totals — з кешу або свіжий запит ──────────────────────────
-    global _rada_totals_cache, _rada_cache_time
+    global _rada_totals_cache, _rada_estimated_cache, _rada_cache_time
     now = _time.time()
     if refresh or not _rada_totals_cache or (now - _rada_cache_time) > _RADA_CACHE_TTL:
         # Паралельний запит до Ради (max 5 одночасно)
         sem = _asyncio.Semaphore(5)
-        async def _fetch(code: str) -> tuple[str, int]:
+        async def _fetch(code: str) -> tuple[str, int, bool]:
             async with sem:
-                exact, _ = await _asyncio.to_thread(get_section_doc_count, code)
-                return code, exact
+                exact, _, is_exact = await _asyncio.to_thread(get_section_doc_count, code)
+                return code, exact, is_exact
         results = await _asyncio.gather(*[_fetch(code) for code, _ in ALL_THEMES])
-        _rada_totals_cache = dict(results)
+        _rada_totals_cache      = {code: cnt  for code, cnt, _  in results}
+        _rada_estimated_cache   = {code: not is_ex for code, _, is_ex in results}
         _rada_cache_time = now
 
     # ── 3. Останній синк Ради з sync_logs ─────────────────────────────────
@@ -1639,6 +1739,7 @@ async def get_rada_coverage(refresh: bool = False):
             "code":            code,
             "label":           label,
             "rada_total":      rada,
+            "rada_estimated":  _rada_estimated_cache.get(code, True),
             "our_total":       our_total,
             "our_restricted":  our_restricted,
             "our_public":      our_public,
