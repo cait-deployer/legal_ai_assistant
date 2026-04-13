@@ -294,6 +294,7 @@ def _do_rada(
                 stored_coll    = meta.get("collection_name", coll)
                 if stored_date and list_date:
                     if stored_date == list_date:
+                        log(f"  ⏭ [{i + 1}] {law_id} — вже є (дата {stored_date})")
                         return 0
                     log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
                     delete_law_chunks(law_id, stored_coll)
@@ -303,6 +304,7 @@ def _do_rada(
                         last = datetime.fromisoformat(last_str)
                         now  = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
                         if (now - last).days < 7:
+                            log(f"  ⏭ [{i + 1}] {law_id} — скраповано {(now - last).days} дн. тому")
                             return 0
                         log(f"🔄 Оновлення: {law_id} (вік: {(now - last).days} дн.)")
                         delete_law_chunks(law_id, stored_coll)
@@ -345,7 +347,7 @@ def _do_rada(
                 return 1
 
             if not text:
-                log(f"  ⚠️ Порожній текст — пропускаємо", "warning")
+                log(f"  ⚠️ Порожній текст ({law_id}) — пропускаємо", "warning")
                 return 0
 
             chunks     = splitter.split_text(text)
@@ -796,12 +798,15 @@ async def get_stats():
     history = _sb_get_logs("rada", limit=1)
 
     # Per-collection breakdown for new multi-collection architecture
-    from qdrant_storage import get_collection_stats
+    from qdrant_storage import get_collection_stats, get_unique_law_count
     collection_stats = get_collection_stats()
     total = sum(collection_stats.values())
+    law_count_data = get_unique_law_count()
 
     return {
         "doc_count": total,
+        "law_count": law_count_data["total"],
+        "law_count_per_collection": law_count_data["per_collection"],
         "collection_stats": collection_stats,
         "last_sync": history[0] if history else None,
         "schedule_enabled": settings_cache.get_bool("schedule_enabled", False),

@@ -80,15 +80,15 @@ function StatCard({
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5 flex gap-4 items-start"
+      className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-3 sm:p-5 flex gap-3 sm:gap-4 items-start"
     >
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}18` }}>
-        <Icon className="w-5 h-5" style={{ color }} />
+      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}18` }}>
+        <Icon className="w-4 h-4 sm:w-5 sm:h-5" style={{ color }} />
       </div>
-      <div>
-        <p className="text-xs text-[#6B7CA3] font-medium uppercase tracking-widest mb-0.5">{label}</p>
-        <p className="text-2xl font-bold text-[#E0E6ED]">{value}</p>
-        {sub && <p className="text-xs text-[#6B7CA3] mt-0.5">{sub}</p>}
+      <div className="min-w-0">
+        <p className="text-[9px] sm:text-xs text-[#6B7CA3] font-medium uppercase tracking-widest mb-0.5 leading-tight">{label}</p>
+        <p className="text-xl sm:text-2xl font-bold text-[#E0E6ED]">{value}</p>
+        {sub && <p className="text-[10px] sm:text-xs text-[#6B7CA3] mt-0.5 truncate">{sub}</p>}
       </div>
     </motion.div>
   )
@@ -222,6 +222,7 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30)
   const [activeQuery, setActiveQuery] = useState<QueryRow | null>(null)
+  const [statsOpen, setStatsOpen] = useState(false)
   const { data, isLoading } = useSWR<AnalyticsData>(
     `/api/admin/analytics?days=${days}`,
     fetcher,
@@ -234,20 +235,25 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-serif font-bold text-[#E0E6ED]">Аналітика запитів</h1>
-          <p className="text-sm text-[#6B7CA3] mt-0.5">
-            Всього запитів у системі: <span className="text-[#C9A84C] font-semibold">{data?.total ?? "—"}</span>
-          </p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2 sm:p-3 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-xl sm:rounded-2xl shrink-0">
+            <BarChart2 className="w-5 h-5 sm:w-8 sm:h-8 text-[#C9A84C]" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-serif font-bold text-[#E0E6ED]">Аналітика запитів</h1>
+            <p className="text-xs sm:text-sm text-[#6B7CA3] mt-0.5 hidden sm:block">
+              Всього запитів у системі: <span className="text-[#C9A84C] font-semibold">{data?.total ?? "—"}</span>
+            </p>
+          </div>
         </div>
         {/* Period selector */}
-        <div className="flex gap-1 bg-[#0d1120] border border-[#C9A84C]/15 rounded-xl p-1">
+        <div className="flex gap-1 bg-[#0d1120] border border-[#C9A84C]/15 rounded-xl p-1 shrink-0">
           {[7, 14, 30].map(d => (
             <button
               key={d}
               onClick={() => setDays(d)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                 days === d
                   ? "bg-[#C9A84C] text-[#0A0E1A]"
                   : "text-[#6B7CA3] hover:text-[#E0E6ED]"
@@ -263,66 +269,29 @@ export default function AnalyticsPage() {
         <div className="flex items-center justify-center h-40 text-[#6B7CA3]">Завантаження…</div>
       ) : (
         <>
-          {/* Stat cards */}
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-            <StatCard
-              icon={MessageSquare}
-              label={`Запити (${days}д)`}
-              value={periodTotal}
-              sub={`Всього: ${data?.total ?? 0}`}
-            />
-            <StatCard
-              icon={Clock}
-              label="Сер. час відповіді"
-              value={formatTime(data?.avgProcessingTimeMs ?? null)}
-              color="#4E9FBF"
-            />
-            <StatCard
-              icon={Brain}
-              label="Сер. складність"
-              value={data?.avgComplexity ?? "—"}
-              sub="Шкала 1–5"
-              color="#8B6FBF"
-            />
-            <StatCard
-              icon={Users}
-              label="Найактивніший юзер"
-              value={data?.topUsers?.[0]?.count ?? "—"}
-              sub={data?.topUsers?.[0]?.full_name ?? data?.topUsers?.[0]?.email ?? "—"}
-              color="#10B981"
-            />
-          </div>
+          {/* Stats toggle — mobile only */}
+          <button
+            onClick={() => setStatsOpen(o => !o)}
+            className="sm:hidden flex items-center justify-between w-full px-4 py-2.5 bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl text-xs font-semibold text-[#C9A84C]/70"
+          >
+            <span>Статистика</span>
+            <span className={`transition-transform ${statsOpen ? "rotate-180" : ""}`}>▼</span>
+          </button>
 
-          {/* Extra stat cards */}
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-            <StatCard
-              icon={UserPlus}
-              label={`Нових юзерів (${days}д)`}
-              value={data?.newUsersTotal ?? "—"}
-              sub={`Всього: ${data?.totalUsers ?? 0}`}
-              color="#4E9FBF"
-            />
-            <StatCard
-              icon={Repeat2}
-              label="Retention"
-              value={data?.retentionRate != null ? `${data.retentionRate}%` : "—"}
-              sub="Повернулись >1 разу"
-              color="#8B6FBF"
-            />
-            <StatCard
-              icon={Target}
-              label="Конверсія"
-              value={data?.conversionRate != null ? `${data.conversionRate}%` : "—"}
-              sub={`Активних: ${data?.activeUsers ?? 0} / ${data?.totalUsers ?? 0}`}
-              color="#10B981"
-            />
-            <StatCard
-              icon={Timer}
-              label="Сер. тривалість сесії"
-              value={data?.avgSessionMs ? formatTime(data.avgSessionMs) : "—"}
-              sub="Від першого до останнього"
-              color="#F59E0B"
-            />
+          {/* Stat cards — collapsible on mobile */}
+          <div className={`${statsOpen ? "flex" : "hidden"} sm:flex flex-col gap-4`}>
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+              <StatCard icon={MessageSquare} label={`Запити (${days}д)`} value={periodTotal} sub={`Всього: ${data?.total ?? 0}`} />
+              <StatCard icon={Clock} label="Сер. час відповіді" value={formatTime(data?.avgProcessingTimeMs ?? null)} color="#4E9FBF" />
+              <StatCard icon={Brain} label="Сер. складність" value={data?.avgComplexity ?? "—"} sub="Шкала 1–5" color="#8B6FBF" />
+              <StatCard icon={Users} label="Найактивніший" value={data?.topUsers?.[0]?.count ?? "—"} sub={data?.topUsers?.[0]?.full_name ?? data?.topUsers?.[0]?.email ?? "—"} color="#10B981" />
+            </div>
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+              <StatCard icon={UserPlus} label={`Нових (${days}д)`} value={data?.newUsersTotal ?? "—"} sub={`Всього: ${data?.totalUsers ?? 0}`} color="#4E9FBF" />
+              <StatCard icon={Repeat2} label="Retention" value={data?.retentionRate != null ? `${data.retentionRate}%` : "—"} sub="Повернулись >1 разу" color="#8B6FBF" />
+              <StatCard icon={Target} label="Конверсія" value={data?.conversionRate != null ? `${data.conversionRate}%` : "—"} sub={`Активних: ${data?.activeUsers ?? 0}/${data?.totalUsers ?? 0}`} color="#10B981" />
+              <StatCard icon={Timer} label="Сер. сесія" value={data?.avgSessionMs ? formatTime(data.avgSessionMs) : "—"} sub="Від першого до останнього" color="#F59E0B" />
+            </div>
           </div>
 
           {/* Daily trend + Sentiments */}
@@ -475,7 +444,35 @@ export default function AnalyticsPage() {
               <MessageSquare className="w-4 h-4 text-[#C9A84C]" />
               <h2 className="text-sm font-semibold text-[#E0E6ED]">Останні запити</h2>
             </div>
-            <div className="overflow-x-auto">
+            {/* Mobile: card list */}
+            <div className="sm:hidden divide-y divide-[#C9A84C]/5">
+              {(data?.recent ?? []).map((row) => {
+                const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
+                return (
+                  <div key={row.id} onClick={() => setActiveQuery(row)}
+                    className="px-4 py-3 cursor-pointer hover:bg-[#C9A84C]/5 active:bg-[#C9A84C]/10 transition-colors">
+                    <p className="text-sm text-[#E0E6ED]/80 line-clamp-2 mb-1">{row.query_text}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {row.category && (
+                        <span className="bg-[#C9A84C]/10 text-[#C9A84C] px-2 py-0.5 rounded-full text-[10px] font-medium">{row.category}</span>
+                      )}
+                      {sentCfg && (
+                        <span className="flex items-center gap-1 text-[10px]" style={{ color: sentCfg.color }}>
+                          <sentCfg.icon className="w-3 h-3" />{sentCfg.label}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-[#6B7CA3] ml-auto">
+                        {new Date(row.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+              {(data?.recent?.length ?? 0) === 0 && (
+                <div className="px-4 py-8 text-center text-sm text-[#6B7CA3]">Записів поки немає</div>
+              )}
+            </div>
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-[#C9A84C]/10">

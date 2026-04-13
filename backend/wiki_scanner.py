@@ -112,6 +112,12 @@ def scrape_wiki_article(url, title, session_id=None, existing_ids=None):
         if len(text) < 200:
             return False
 
+        # Пропускаємо статті не українською — кирилиця має бути > 30% тексту
+        cyrillic = len(re.findall(r'[а-яА-ЯіїєёІЇЄЁ]', text))
+        if cyrillic / max(len(text), 1) < 0.3:
+            print(f"⏭️ Пропускаємо '{title}' — не українська мова ({cyrillic} кирил. симв.)")
+            return False
+
         chunks = text_splitter.split_text(text)
         scraped_at = datetime.now(timezone.utc).isoformat()
 
@@ -151,10 +157,10 @@ def run_wiki_sync(session_id=None, log_callback=None, full=True):
     """
     from qdrant_storage import get_existing_law_ids
 
-    def log(msg):
+    def log(msg, level="info"):
         print(msg)
         if log_callback:
-            log_callback(msg)
+            log_callback(msg, level)
 
     log("📚 Починаємо синхронізацію legalaid.wiki → laws_wiki...")
 

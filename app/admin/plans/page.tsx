@@ -37,88 +37,128 @@ function PeriodLabel({ period }: { period: string }) {
   return <span className="text-[#E0E6ED]/40">/ міс</span>
 }
 
+function Badge({ text, color }: { text: string; color: string }) {
+  return (
+    <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border whitespace-nowrap ${
+      color === "emerald"
+        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+        : "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/20"
+    }`}>
+      {text}
+    </span>
+  )
+}
+
 function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: number }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: plan.id })
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined }
+
+  const priceLabel = plan.price_uah === 0 ? "Безкоштовно" : `${plan.price_uah} грн`
+  const periodLabel = plan.billing_period === "forever" ? "" : plan.billing_period === "day" ? "/ день" : "/ міс"
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-4 px-5 py-4 rounded-2xl border transition-all ${
+      className={`rounded-2xl border transition-all ${
         isDragging
           ? "border-[#C9A84C]/40 bg-[#0d1120] shadow-2xl shadow-black/40"
           : "border-[#C9A84C]/10 bg-[#0d1120]/60 hover:border-[#C9A84C]/25"
       }`}
     >
-      {/* Drag handle */}
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-[#C9A84C]/20 hover:text-[#C9A84C]/50 cursor-grab active:cursor-grabbing shrink-0"
-      >
-        <GripVertical className="w-5 h-5" />
-      </button>
+      {/* ── MOBILE layout ── */}
+      <div className="flex sm:hidden items-center gap-3 px-3 py-3">
+        {/* Drag handle */}
+        <button {...attributes} {...listeners}
+          className="text-[#C9A84C]/20 hover:text-[#C9A84C]/50 cursor-grab active:cursor-grabbing shrink-0">
+          <GripVertical className="w-4 h-4" />
+        </button>
 
-      {/* Sort order badge */}
-      <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
-        <span className="text-[10px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
+        {/* Number */}
+        <div className="w-6 h-6 rounded-md bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+          <span className="text-[10px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
+        </div>
+
+        {/* Name + details */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-serif font-bold text-white text-sm">{plan.name}</span>
+            {plan.badge_text && <Badge text={plan.badge_text} color={plan.badge_color} />}
+          </div>
+          <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+            {plan.request_limit == null ? "∞ запитів" : `${plan.request_limit} запитів`}
+            {" · "}{featureCount} фіч
+          </p>
+        </div>
+
+        {/* Price + active + edit */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="text-right">
+            <p className="text-sm font-bold text-[#C9A84C] leading-tight">{priceLabel}</p>
+            {periodLabel && <p className="text-[10px] text-[#E0E6ED]/40">{periodLabel}</p>}
+          </div>
+          {plan.is_active
+            ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            : <XCircle className="w-4 h-4 text-[#C9A84C]/20 shrink-0" />
+          }
+          <Link href={`/admin/plans/${plan.id}`} className="shrink-0">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 rounded-lg">
+              <Pencil className="w-3 h-3" />
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      {/* Name + badge */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-serif font-bold text-white text-base">{plan.name}</span>
-          {plan.badge_text && (
-            <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
-              plan.badge_color === "emerald"
-                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                : "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/20"
-            }`}>
-              {plan.badge_text}
-            </span>
+      {/* ── DESKTOP layout ── */}
+      <div className="hidden sm:flex items-center gap-4 px-5 py-4">
+        <button {...attributes} {...listeners}
+          className="text-[#C9A84C]/20 hover:text-[#C9A84C]/50 cursor-grab active:cursor-grabbing shrink-0">
+          <GripVertical className="w-5 h-5" />
+        </button>
+
+        <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
+          <span className="text-[10px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-serif font-bold text-white text-base">{plan.name}</span>
+            {plan.badge_text && <Badge text={plan.badge_text} color={plan.badge_color} />}
+          </div>
+          {plan.main_benefit && (
+            <p className="text-xs text-[#E0E6ED]/40 mt-0.5 truncate">→ {plan.main_benefit}</p>
           )}
         </div>
-        {plan.main_benefit && (
-          <p className="text-xs text-[#E0E6ED]/40 mt-0.5 truncate">→ {plan.main_benefit}</p>
-        )}
-      </div>
 
-      {/* Price */}
-      <div className="shrink-0 text-right">
-        <div className="font-bold text-[#C9A84C] text-lg">
-          {plan.price_uah === 0 ? "Безкоштовно" : `${plan.price_uah} грн`}
+        <div className="shrink-0 text-right">
+          <div className="font-bold text-[#C9A84C] text-lg">{priceLabel}</div>
+          {plan.price_uah > 0 && <PeriodLabel period={plan.billing_period} />}
         </div>
-        {plan.price_uah > 0 && <PeriodLabel period={plan.billing_period} />}
-      </div>
 
-      {/* Requests */}
-      <div className="shrink-0 w-32 text-center">
-        {plan.request_limit == null
-          ? <Infinity className="w-4 h-4 text-[#C9A84C]/60 mx-auto" />
-          : <span className="text-sm text-[#E0E6ED]/60">{plan.request_limit} запитів</span>
-        }
-      </div>
+        <div className="shrink-0 w-32 text-center">
+          {plan.request_limit == null
+            ? <Infinity className="w-4 h-4 text-[#C9A84C]/60 mx-auto" />
+            : <span className="text-sm text-[#E0E6ED]/60">{plan.request_limit} запитів</span>
+          }
+        </div>
 
-      {/* Feature count */}
-      <div className="shrink-0 w-20 text-center">
-        <span className="text-xs text-[#C9A84C]/50">{featureCount} фіч</span>
-      </div>
+        <div className="shrink-0 w-20 text-center">
+          <span className="text-xs text-[#C9A84C]/50">{featureCount} фіч</span>
+        </div>
 
-      {/* Active toggle */}
-      <div className="shrink-0">
-        {plan.is_active
-          ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          : <XCircle className="w-4 h-4 text-[#C9A84C]/20" />
-        }
-      </div>
+        <div className="shrink-0">
+          {plan.is_active
+            ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            : <XCircle className="w-4 h-4 text-[#C9A84C]/20" />
+          }
+        </div>
 
-      {/* Edit */}
-      <Link href={`/admin/plans/${plan.id}`} className="shrink-0">
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 rounded-xl">
-          <Pencil className="w-3.5 h-3.5" />
-        </Button>
-      </Link>
+        <Link href={`/admin/plans/${plan.id}`} className="shrink-0">
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-[#C9A84C]/40 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 rounded-xl">
+            <Pencil className="w-3.5 h-3.5" />
+          </Button>
+        </Link>
+      </div>
     </div>
   )
 }
@@ -195,8 +235,8 @@ export default function PlansListPage() {
         </Button>
       </div>
 
-      {/* Column headers */}
-      <div className="flex items-center gap-4 px-5 text-[9px] font-black text-[#C9A84C]/30 uppercase tracking-[0.2em]">
+      {/* Column headers — desktop only */}
+      <div className="hidden sm:flex items-center gap-4 px-5 text-[9px] font-black text-[#C9A84C]/30 uppercase tracking-[0.2em]">
         <div className="w-5 shrink-0" />
         <div className="w-7 shrink-0" />
         <div className="flex-1">Назва</div>

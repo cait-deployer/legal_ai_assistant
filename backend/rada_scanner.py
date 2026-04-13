@@ -405,32 +405,55 @@ def get_law_text(law_id: str) -> str:
         low = text.lower()
         return any(p in low for p in _RESTRICTED_PHRASES)
 
-    # ── Спроба 1: /print — завжди статичний, без JS-рендерингу ──────────────
+    _JUNK_TAGS = ["script", "style", "nav", "button", "form", "header", "footer",
+                  "noscript", "iframe", "aside"]
+
+    def _extract_md(container) -> str:
+        for junk in container.find_all(_JUNK_TAGS):
+            junk.decompose()
+        md = md_convert(str(container), heading_style="ATX",
+                        strip=_JUNK_TAGS)
+        return re.sub(r'\n{3,}', '\n\n', md).strip()
+
+    def _find_container(soup):
+        """Перебирає всі відомі контейнери тексту закону по пріоритету."""
+        return (
+            soup.find("div", id="article")         or   # /print — основний
+            soup.find("div", id="lawText")         or   # альтернативна /print
+            soup.find("div", id="lawContentBody")  or   # звичайна сторінка
+            soup.find("div", id="norms")           or   # деякі кодекси
+            soup.find("div", id="Text")            or   # стара розмітка
+            soup.find("div", id="text")            or   # ID в нижньому регістрі
+            soup.find("div", class_="article")     or   # клас
+            soup.find("div", class_="txt")         or   # ще один клас
+            soup.find("div", class_="law-text")    or   # можлива розмітка
+            soup.find("article")                   or   # семантичний тег
+            soup.find("main")                           # семантичний тег
+        )
+
+    # ── Спроба 1: /print — статична сторінка без JavaScript ──────────────────
     print_url = f"{BASE}/laws/show/{law_id}/print"
     try:
         r = httpx.get(print_url, headers=HEADERS, timeout=20.0, follow_redirects=True)
         if r.status_code == 200:
             soup = BeautifulSoup(r.text, "html.parser")
-            container = soup.find("div", id="article") or soup.find("body")
+            container = _find_container(soup)
+            if not container:
+                # Крайній fallback: весь body без шапки/навігації
+                container = soup.find("body")
             if container:
-                for junk in container.find_all(["script", "style", "nav", "button",
-                                                "form", "header", "footer"]):
-                    junk.decompose()
-                md = md_convert(
-                    str(container),
-                    heading_style="ATX",
-                    strip=["script", "style", "nav", "button", "form", "header", "footer"],
-                )
-                md = re.sub(r'\n{3,}', '\n\n', md).strip()
-                if len(md) > 100:
+                md = _extract_md(container)
+                if len(md) > 50:
                     if _is_restricted(md):
                         print(f"🔒 {law_id}: службового використання — фіксуємо як ДСК")
                         return "__RESTRICTED__"
                     return md
+                else:
+                    print(f"⚠️  {law_id}: /print знайдено контейнер але текст замалий ({len(md)} симв.)")
     except Exception as e:
         print(f"⚠️  get_law_text /print ({law_id}): {e}")
 
-    # ── Спроба 2: звичайна сторінка, шукаємо lawContentBody ─────────────────
+    # ── Спроба 2: звичайна сторінка ──────────────────────────────────────────
     url = f"{BASE}/laws/show/{law_id}#Text"
     try:
         r = httpx.get(url, headers=HEADERS, timeout=20.0, follow_redirects=True)
@@ -438,24 +461,19 @@ def get_law_text(law_id: str) -> str:
             return ""
 
         soup = BeautifulSoup(r.text, "html.parser")
-        container = (
-            soup.find("div", id="lawContentBody") or
-            soup.find("div", id="Text") or
-            soup.find("div", class_="article")
-        )
+        container = _find_container(soup)
         if not container:
+            print(f"⚠️  {law_id}: контейнер не знайдено на жодній сторінці")
             return ""
 
-        for junk in container.find_all(["script", "style", "nav", "button", "form"]):
-            junk.decompose()
-
-        md = md_convert(str(container), heading_style="ATX")
-        md = re.sub(r'\n{3,}', '\n\n', md).strip()
-        if len(md) > 100:
+        md = _extract_md(container)
+        if len(md) > 50:
             if _is_restricted(md):
                 print(f"🔒 {law_id}: службового використання — фіксуємо як ДСК")
                 return "__RESTRICTED__"
             return md
+
+        print(f"⚠️  {law_id}: текст знайдено але замалий ({len(md)} симв.) — пропускаємо")
         return ""
 
     except Exception as e:

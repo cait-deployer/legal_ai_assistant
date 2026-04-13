@@ -464,6 +464,7 @@ export default function UsersPage() {
   const [sort, setSort]             = useState<SortState>({ col: "created_at", dir: "desc" })
   const [page, setPage]             = useState(1)
   const [selected, setSelected]     = useState<User | null>(null)
+  const [statsOpen, setStatsOpen]   = useState(false)
   const PER_PAGE = 25
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -527,7 +528,7 @@ export default function UsersPage() {
   const tierItems  = ["", "free", "daily", "standard", "pro"]
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col gap-0">
 
       {/* Header */}
       <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#C9A84C]/10 shrink-0">
@@ -551,24 +552,27 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      {/* Stats bar — pinned */}
-      <div className="shrink-0 pt-5 pb-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* Stats bar — collapsible on mobile */}
+      <div className="shrink-0 pt-4 pb-3">
+        <button
+          onClick={() => setStatsOpen(o => !o)}
+          className="sm:hidden flex items-center justify-between w-full px-1 py-2 text-xs font-black text-[#C9A84C]/60 uppercase tracking-widest mb-2"
+        >
+          <span>Статистика</span>
+          <span className={`transition-transform ${statsOpen ? "rotate-180" : ""}`}>▼</span>
+        </button>
+        <div className={`${statsOpen ? "grid" : "hidden"} sm:grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3`}>
           {statsLoading ? (
             Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 h-24 animate-pulse" />
+              <div key={i} className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 h-20 animate-pulse" />
             ))
           ) : stats ? (
             <>
-              <StatCard label="Всього юзерів"    value={stats.total}         />
-              <StatCard label="Активних (7 днів)" value={stats.active_7d}    accent sub={`${stats.total ? Math.round((stats.active_7d / stats.total) * 100) : 0}% від усіх`} />
-              <StatCard label="Без онбордингу"    value={stats.not_onboarded} />
-              <StatCard label="Тріал використали" value={stats.trial_used}   />
-              <StatCard
-                label="По тарифах"
-                value={`${stats.by_tier.standard ?? 0} / ${stats.by_tier.pro ?? 0}`}
-                sub={`Std / Pro · Free: ${stats.by_tier.free ?? 0}`}
-              />
+              <StatCard label="Всього юзерів"    value={stats.total} />
+              <StatCard label="Активних (7д)" value={stats.active_7d} accent sub={`${stats.total ? Math.round((stats.active_7d / stats.total) * 100) : 0}% від усіх`} />
+              <StatCard label="Без онбордингу" value={stats.not_onboarded} />
+              <StatCard label="Тріал" value={stats.trial_used} />
+              <StatCard label="Std / Pro" value={`${stats.by_tier.standard ?? 0}/${stats.by_tier.pro ?? 0}`} sub={`Free: ${stats.by_tier.free ?? 0}`} />
             </>
           ) : null}
         </div>
@@ -654,9 +658,9 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Table — fills all remaining height */}
-      <div className="flex-1 min-h-0 flex flex-col pt-4 gap-3">
-        <div className="flex-1 min-h-0 flex flex-col bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
+      {/* Table */}
+      <div className="pt-3 pb-8">
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
           {/* Table info bar — pinned */}
           <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[#C9A84C]/10">
             <p className="text-sm text-[#E0E6ED]/60">
@@ -667,8 +671,48 @@ export default function UsersPage() {
             </p>
           </div>
 
+          {/* Mobile: user cards */}
+          <div className="sm:hidden divide-y divide-[#C9A84C]/5">
+            {loading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="px-4 py-3 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/5 animate-pulse shrink-0" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3.5 w-32 rounded bg-[#C9A84C]/5 animate-pulse" />
+                    <div className="h-3 w-24 rounded bg-[#C9A84C]/5 animate-pulse" />
+                  </div>
+                </div>
+              ))
+            ) : users.length === 0 ? (
+              <div className="py-10 text-center text-sm text-[#E0E6ED]/30">Юзерів не знайдено</div>
+            ) : (
+              users.map(user => {
+                const rel = formatRelative(user.last_active_at)
+                const tier = TIER_CFG[user.subscription_tier] ?? TIER_CFG.free
+                return (
+                  <div key={user.id} onClick={() => setSelected(user)}
+                    className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-[#C9A84C]/5 active:bg-[#C9A84C]/10 transition-colors">
+                    <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/15 flex items-center justify-center text-[#C9A84C] font-bold text-sm shrink-0">
+                      {initials(user)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[#E0E6ED]/90 truncate">{user.full_name || user.email}</p>
+                      {user.full_name && <p className="text-[10px] text-[#E0E6ED]/40 truncate">{user.email}</p>}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border ${tier.bg} ${tier.text} ${tier.border}`}>
+                        {tier.label}
+                      </span>
+                      <p className={`text-[10px] mt-0.5 ${rel.cls}`}>{rel.text}</p>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
           {/* Scrollable table body */}
-          <div className="flex-1 overflow-auto min-h-0">
+          <div className="hidden sm:block overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-[#C9A84C]/10 bg-[#0d1120]">

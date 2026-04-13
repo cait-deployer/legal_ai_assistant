@@ -307,3 +307,31 @@ def get_collection_stats() -> dict:
 def get_total_doc_count() -> int:
     """Загальна кількість векторів у всіх колекціях."""
     return sum(get_collection_stats().values())
+
+
+def get_unique_law_count() -> dict:
+    """
+    Повертає кількість унікальних законів (не чанків) у кожній колекції
+    та загальну суму. Рахуємо тільки точки з chunk_index == 0
+    (перший чанк кожного закону = рівно 1 на закон).
+    """
+    client = get_client()
+    first_chunk_filter = Filter(
+        must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+    )
+    per_collection: dict[str, int] = {}
+    for name in ALL_COLLECTIONS:
+        try:
+            result = client.count(
+                collection_name=name,
+                count_filter=first_chunk_filter,
+                exact=False,   # approximate — швидко, достатньо для статистики
+            )
+            per_collection[name] = result.count or 0
+        except Exception:
+            per_collection[name] = 0
+
+    return {
+        "total": sum(per_collection.values()),
+        "per_collection": per_collection,
+    }
