@@ -12,6 +12,8 @@ import {
 
 type Stats = {
   doc_count: number
+  law_count?: number
+  law_count_per_collection?: Record<string, number>
   collection_stats?: Record<string, number>
   last_sync: {
     status: string
@@ -184,13 +186,17 @@ export default function AdminDashboard() {
             <div className="h-10 w-28 rounded-xl bg-[#C9A84C]/5 animate-pulse" />
           ) : (
             <div className="text-4xl font-serif font-bold text-white tabular-nums">
-              {stats?.doc_count?.toLocaleString() ?? "—"}
+              {(stats?.law_count ?? stats?.doc_count)?.toLocaleString("uk-UA") ?? "—"}
             </div>
           )}
-          <p className="text-xs text-[#C9A84C]/50 mt-2 font-medium uppercase tracking-wider">Векторних чанків у Qdrant</p>
-          {stats?.collection_stats && (
+          <p className="text-xs text-[#C9A84C]/50 mt-2 font-medium uppercase tracking-wider">
+            {stats?.law_count
+              ? `Унікальних законів · ${stats.doc_count?.toLocaleString("uk-UA")} чанків`
+              : "Векторних чанків у Qdrant"}
+          </p>
+          {(stats?.law_count_per_collection || stats?.collection_stats) && (
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto pr-1">
-              {Object.entries(stats.collection_stats)
+              {Object.entries(stats.law_count_per_collection ?? stats.collection_stats ?? {})
                 .filter(([, count]) => count > 0)
                 .sort(([, a], [, b]) => b - a)
                 .map(([col, count]) => (
@@ -199,7 +205,7 @@ export default function AdminDashboard() {
                       {COLLECTION_LABELS[col] ?? col}
                     </span>
                     <span className="text-[10px] font-bold text-[#C9A84C]/80 tabular-nums shrink-0">
-                      {count.toLocaleString()}
+                      {count.toLocaleString("uk-UA")}
                     </span>
                   </div>
                 ))}

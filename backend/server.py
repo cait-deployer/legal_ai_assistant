@@ -801,12 +801,12 @@ async def get_stats():
     from qdrant_storage import get_collection_stats, get_unique_law_count
     collection_stats = get_collection_stats()
     total = sum(collection_stats.values())
-    law_count_data = get_unique_law_count()
+    law_count_data = get_unique_law_count()  # None якщо помилка
 
     return {
         "doc_count": total,
-        "law_count": law_count_data["total"],
-        "law_count_per_collection": law_count_data["per_collection"],
+        "law_count": law_count_data["total"] if law_count_data else None,
+        "law_count_per_collection": law_count_data["per_collection"] if law_count_data else None,
         "collection_stats": collection_stats,
         "last_sync": history[0] if history else None,
         "schedule_enabled": settings_cache.get_bool("schedule_enabled", False),

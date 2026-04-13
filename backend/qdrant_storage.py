@@ -309,29 +309,40 @@ def get_total_doc_count() -> int:
     return sum(get_collection_stats().values())
 
 
-def get_unique_law_count() -> dict:
+def get_unique_law_count() -> dict | None:
     """
     Повертає кількість унікальних законів (не чанків) у кожній колекції
     та загальну суму. Рахуємо тільки точки з chunk_index == 0
     (перший чанк кожного закону = рівно 1 на закон).
+    Повертає None якщо Qdrant недоступний або виникла помилка.
     """
-    client = get_client()
-    first_chunk_filter = Filter(
-        must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
-    )
-    per_collection: dict[str, int] = {}
-    for name in ALL_COLLECTIONS:
-        try:
-            result = client.count(
-                collection_name=name,
-                count_filter=first_chunk_filter,
-                exact=False,   # approximate — швидко, достатньо для статистики
-            )
-            per_collection[name] = result.count or 0
-        except Exception:
-            per_collection[name] = 0
+    try:
+        client = get_client()
+        first_chunk_filter = Filter(
+            must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+        )
+        per_collection: dict[str, int] = {}
+        any_success = False
+        for name in ALL_COLLECTIONS:
+            try:
+                result = client.count(
+                    collection_name=name,
+                    count_filter=first_chunk_filter,
+                    exact=True,
+                )
+                per_collection[name] = result.count or 0
+                any_success = True
+            except Exception as e:
+                print(f"⚠️ law_count [{name}]: {e}")
+                per_collection[name] = 0
 
-    return {
-        "total": sum(per_collection.values()),
-        "per_collection": per_collection,
-    }
+        if not any_success:
+            return None
+
+        return {
+            "total": sum(per_collection.values()),
+            "per_collection": per_collection,
+        }
+    except Exception as e:
+        print(f"⚠️ get_unique_law_count failed: {e}")
+        return None
