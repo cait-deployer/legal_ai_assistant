@@ -276,6 +276,11 @@ def _do_rada(
 
         total = len(all_laws)
 
+        # Захист від дублікатів при паралельній обробці:
+        # один закон може зустрічатись у кількох розділах Ради одночасно.
+        _in_progress: set[str] = set()
+        _in_progress_lock = threading.Lock()
+
         # ── Функція обробки одного закону (виконується в потоці) ──────────
         def _process_law(i: int) -> int:
             """Повертає 1 якщо закон оброблено, 0 якщо пропущено."""
@@ -286,111 +291,122 @@ def _do_rada(
             law_url   = f"{BASE}/laws/show/{law_id}"
             coll      = get_collection_for_category(category)
 
-            # Дедуплікація / оновлення
-            if law_id in existing_meta:
-                meta           = existing_meta[law_id]
-                stored_date    = meta.get("effective_date", "")
-                list_date      = law.get("list_date", "")
-                stored_coll    = meta.get("collection_name", coll)
-                if stored_date and list_date:
-                    if stored_date == list_date:
-                        log(f"  ⏭ [{i + 1}] {law_id} — вже є (дата {stored_date})")
-                        return 0
-                    log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
-                    delete_law_chunks(law_id, stored_coll)
-                else:
-                    try:
-                        last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
-                        last = datetime.fromisoformat(last_str)
-                        now  = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
-                        if (now - last).days < 7:
-                            log(f"  ⏭ [{i + 1}] {law_id} — скраповано {(now - last).days} дн. тому")
-                            return 0
-                        log(f"🔄 Оновлення: {law_id} (вік: {(now - last).days} дн.)")
-                        delete_law_chunks(law_id, stored_coll)
-                    except Exception:
-                        pass
+            # Захист від дублікатів: якщо інший потік вже обробляє цей закон — пропускаємо
+            with _in_progress_lock:
+                if law_id in _in_progress:
+                    log(f"  ⏭ [{i + 1}] {law_id} — вже обробляється паралельним потоком")
+                    return 0
+                _in_progress.add(law_id)
 
-            log(f"[{i + 1}/{total}] {law_title[:60]}")
-
-            # Паралельний fetch: текст + метадані з семафором на rada.gov.ua
-            def _fetch_text():
-                with _rada_http_sem:
-                    return get_law_text(law_id)
-
-            def _fetch_meta():
-                with _rada_http_sem:
-                    return get_law_metadata(law_id)
-
-            with _TPE(max_workers=2) as ex:
-                text_f = ex.submit(_fetch_text)
-                meta_f = ex.submit(_fetch_meta)
-                text     = text_f.result()
-                law_meta = meta_f.result()
-
-            scraped_at = datetime.now(timezone.utc).isoformat()
-
-            if text == "__RESTRICTED__":
-                log(f"  🔒 ДСК — зберігаємо без тексту", "warning")
-                try:
-                    v = embeddings.embed_query(law_title)
-                    upload_to_qdrant("", {
-                        "source": law_title, "law_id": law_id, "category": category,
-                        "status": "ДСК", "law_url": law_url,
-                        "source_domain": "zakon.rada.gov.ua",
-                        "scraped_at": scraped_at,
-                        "effective_date": law.get("list_date", ""),
-                        "chunk_index": 0,
-                    }, v, coll, session_id=session_id)
-                except Exception as e:
-                    log(f"  ❌ ДСК upload: {e}", "error")
-                return 1
-
-            if not text:
-                log(f"  ⚠️ Порожній текст ({law_id}) — пропускаємо", "warning")
-                return 0
-
-            chunks     = splitter.split_text(text)
-            text_flags = detect_text_flags(text)
-            log(f"  ✂️ {len(chunks)} чанків | {law_meta['status']} | {coll}")
-
-            # Batch embed — по 5 чанків за раз (уникаємо ліміту токенів Google API)
-            vectors = []
             try:
-                for b in range(0, len(chunks), 5):
-                    vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
-            except Exception as e:
-                log(f"  ⚠️ Batch embed помилка, перемикаємось на посткові: {e}", "warning")
-                vectors = []
-                for chunk in chunks:
+                # Дедуплікація / оновлення
+                if law_id in existing_meta:
+                    meta           = existing_meta[law_id]
+                    stored_date    = meta.get("effective_date", "")
+                    list_date      = law.get("list_date", "")
+                    stored_coll    = meta.get("collection_name", coll)
+                    if stored_date and list_date:
+                        if stored_date == list_date:
+                            log(f"  ⏭ [{i + 1}] {law_id} — вже є (дата {stored_date})")
+                            return 0
+                        log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
+                        delete_law_chunks(law_id, stored_coll)
+                    else:
+                        try:
+                            last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
+                            last = datetime.fromisoformat(last_str)
+                            now  = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
+                            if (now - last).days < 7:
+                                log(f"  ⏭ [{i + 1}] {law_id} — скраповано {(now - last).days} дн. тому")
+                                return 0
+                            log(f"🔄 Оновлення: {law_id} (вік: {(now - last).days} дн.)")
+                            delete_law_chunks(law_id, stored_coll)
+                        except Exception:
+                            pass
+
+                log(f"[{i + 1}/{total}] {law_title[:60]}")
+
+                # Паралельний fetch: текст + метадані з семафором на rada.gov.ua
+                def _fetch_text():
+                    with _rada_http_sem:
+                        return get_law_text(law_id)
+
+                def _fetch_meta():
+                    with _rada_http_sem:
+                        return get_law_metadata(law_id)
+
+                with _TPE(max_workers=2) as ex:
+                    text_f = ex.submit(_fetch_text)
+                    meta_f = ex.submit(_fetch_meta)
+                    text     = text_f.result()
+                    law_meta = meta_f.result()
+
+                scraped_at = datetime.now(timezone.utc).isoformat()
+
+                if text == "__RESTRICTED__":
+                    log(f"  🔒 ДСК — зберігаємо без тексту", "warning")
                     try:
-                        vectors.append(embeddings.embed_query(chunk))
-                    except Exception as e2:
-                        log(f"  ❌ embed_query: {e2}", "error")
-                        vectors.append(None)
-            if not vectors:
-                return 0
+                        v = embeddings.embed_query(law_title)
+                        upload_to_qdrant("", {
+                            "source": law_title, "law_id": law_id, "category": category,
+                            "status": "ДСК", "law_url": law_url,
+                            "source_domain": "zakon.rada.gov.ua",
+                            "scraped_at": scraped_at,
+                            "effective_date": law.get("list_date", ""),
+                            "chunk_index": 0,
+                        }, v, coll, session_id=session_id)
+                    except Exception as e:
+                        log(f"  ❌ ДСК upload: {e}", "error")
+                    return 1
 
-            base = {
-                "source": law_title, "law_id": law_id, "category": category,
-                "status": law_meta["status"], "law_url": law_url,
-                "source_domain": "zakon.rada.gov.ua", "scraped_at": scraped_at,
-                "effective_date": law.get("list_date", ""),
-                "doc_type": law_meta.get("doc_type", ""),
-                "author": law_meta.get("author", ""),
-                "superseded_by": law_meta.get("superseded_by", ""),
-                **text_flags,
-            }
-            for j, (chunk, vector) in enumerate(zip(chunks, vectors)):
-                if vector is None:
-                    continue
+                if not text:
+                    log(f"  ⚠️ Порожній текст ({law_id}) — пропускаємо", "warning")
+                    return 0
+
+                chunks     = splitter.split_text(text)
+                text_flags = detect_text_flags(text)
+                log(f"  ✂️ {len(chunks)} чанків | {law_meta['status']} | {coll}")
+
+                # Batch embed — по 5 чанків за раз (уникаємо ліміту токенів Google API)
+                vectors = []
                 try:
-                    upload_to_qdrant(chunk, {**base, "chunk_index": j}, vector, coll, session_id=session_id)
+                    for b in range(0, len(chunks), 5):
+                        vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
                 except Exception as e:
-                    log(f"  ❌ Чанк {j}: {e}", "error")
+                    log(f"  ⚠️ Batch embed помилка, перемикаємось на посткові: {e}", "warning")
+                    vectors = []
+                    for chunk in chunks:
+                        try:
+                            vectors.append(embeddings.embed_query(chunk))
+                        except Exception as e2:
+                            log(f"  ❌ embed_query: {e2}", "error")
+                            vectors.append(None)
+                if not vectors:
+                    return 0
 
-            log(f"  ✅ [{i + 1}/{total}] готово", "success")
-            return 1
+                base = {
+                    "source": law_title, "law_id": law_id, "category": category,
+                    "status": law_meta["status"], "law_url": law_url,
+                    "source_domain": "zakon.rada.gov.ua", "scraped_at": scraped_at,
+                    "effective_date": law.get("list_date", ""),
+                    "doc_type": law_meta.get("doc_type", ""),
+                    "author": law_meta.get("author", ""),
+                    "superseded_by": law_meta.get("superseded_by", ""),
+                    **text_flags,
+                }
+                for j, (chunk, vector) in enumerate(zip(chunks, vectors)):
+                    if vector is None:
+                        continue
+                    try:
+                        upload_to_qdrant(chunk, {**base, "chunk_index": j}, vector, coll, session_id=session_id)
+                    except Exception as e:
+                        log(f"  ❌ Чанк {j}: {e}", "error")
+
+                log(f"  ✅ [{i + 1}/{total}] готово", "success")
+                return 1
+            finally:
+                with _in_progress_lock:
+                    _in_progress.discard(law_id)
 
         # ── Батч-паралельний цикл ─────────────────────────────────────────
         i = start_index
