@@ -654,9 +654,13 @@ def _do_ccu(session_id: str) -> None:
             with _lock:
                 return _sync[src]["pause_requested"]
 
-        def log_callback(msg: str):
-            level = "error" if "❌" in msg else "success" if "✅" in msg else "warning" if "⚠️" in msg or "⏸️" in msg else "info"
-            log(msg, level)
+        def log_callback(msg: str, level: str = "info"):
+            _lvl = level if level != "info" else (
+                "error"   if "❌" in msg else
+                "success" if "✅" in msg else
+                "warning" if "⚠️" in msg or "⏸️" in msg else "info"
+            )
+            log(msg, _lvl)
             with _lock:
                 _sync[src]["laws_processed"] = processed
 
