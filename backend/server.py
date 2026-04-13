@@ -1647,8 +1647,84 @@ async def get_rada_coverage(refresh: bool = False):
             "health":          health,
         })
 
+    # ── 5. Інші джерела (КСУ, Вікі, Верховний суд) ───────────────────────────
+    NON_RADA_COLS = [
+        ("laws_ccu",     "Конституційний суд України",     "ccu"),
+        ("laws_wiki",    "Вікіпедія — правові статті",     "wiki"),
+        ("laws_supreme", "Верховний суд України",           "supreme"),
+    ]
+    other_sources = []
+    for col_name, col_label, sync_src in NON_RADA_COLS:
+        try:
+            cnt = client.count(
+                collection_name=col_name,
+                count_filter=Filter(
+                    must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+                ),
+                exact=True,
+            ).count or 0
+        except Exception:
+            cnt = 0
+
+        # Остання дата скрапінгу — беремо максимум scraped_at
+        last_sat: str | None = None
+        try:
+            chunk_pts, _ = client.scroll(
+                collection_name=col_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+                ),
+                with_payload=["scraped_at"],
+                limit=1000,
+            )
+            for pt in chunk_pts:
+                sat = (pt.payload or {}).get("scraped_at")
+                if sat and (not last_sat or sat > last_sat):
+                    last_sat = sat
+        except Exception:
+            pass
+
+        # Last sync з sync_logs
+        src_last_sync: str | None = None
+        try:
+            import httpx as _httpx2
+            r2 = _httpx2.get(
+                f"{_SB_URL}/rest/v1/sync_logs",
+                params={"source": f"eq.{sync_src}", "order": "finished_at.desc", "limit": "1"},
+                headers={**_sb_hdrs(), "Prefer": "return=representation"},
+                timeout=5,
+            )
+            rows2 = r2.json()
+            if rows2:
+                src_last_sync = rows2[0].get("finished_at")
+        except Exception:
+            pass
+
+        # Health: спираємось на вік останнього скрапінгу
+        if cnt == 0:
+            col_health = "critical"
+        elif last_sat:
+            try:
+                last_dt = datetime.fromisoformat(last_sat.replace("Z", "+00:00"))
+                age_days = (datetime.now(timezone.utc) - last_dt).days
+                col_health = "good" if age_days < 30 else "warning" if age_days < 90 else "critical"
+            except Exception:
+                col_health = "unknown"
+        else:
+            col_health = "unknown"
+
+        other_sources.append({
+            "id":              col_name,
+            "label":           col_label,
+            "our_total":       cnt,
+            "last_scraped_at": last_sat,
+            "last_sync_at":    src_last_sync,
+            "health":          col_health,
+        })
+
     return {
         "sections":      sections,
+        "other_sources": other_sources,
         "last_sync_at":  last_sync_at,
         "cache_age_sec": int(now - _rada_cache_time) if _rada_cache_time else None,
     }
