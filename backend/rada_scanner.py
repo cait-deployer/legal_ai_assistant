@@ -60,51 +60,65 @@ def get_total_pages(code: str) -> int:
     return get_section_doc_count(code)[1]  # tuple[count, pages, is_exact]
 
 
-def get_section_doc_count(code: str) -> tuple[int, int, bool]:
-    """
-    Повертає (exact_count, total_pages, is_exact) для розділу Ради.
-    is_exact=True якщо знайдено точне число з тексту сторінки.
-    Якщо текст не знайдено — fallback: pages * 50, is_exact=False.
-    """
-    url = f"{BASE}/laws/main/{code}/page?lang=uk"
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(r.text, "html.parser")
-    except Exception:
-        return 0, 1, False
-
+def _parse_doc_count_from_soup(soup, code: str) -> tuple[int | None, int]:
+    """Внутрішній хелпер: витягує (exact_count_or_None, max_page) з BeautifulSoup."""
     max_page = 1
-    exact_count: int | None = None
-
-    # Спосіб 1: посилання пагінатора
+    # Пагінатор — для кількості сторінок
     for a in soup.find_all("a", href=True):
         m = re.search(rf"/laws/main/{re.escape(code)}/page(\d+)", a["href"])
         if m:
             max_page = max(max_page, int(m.group(1)))
 
-    # Спосіб 2: шукаємо кількість у всьому тексті сторінки
-    # Рада може показувати: "з 4 128 документів", "Знайдено: 4128", "4 128 документів"
-    full_text = soup.get_text(" ", strip=True)
-    # Нормалізуємо нерозривні пробіли (&#160;) та звичайні між цифрами
-    full_text = full_text.replace("\xa0", " ")
+    # Точне число документів з тексту сторінки
+    full_text = soup.get_text(" ", strip=True).replace("\xa0", " ")
     for pattern in [
-        r'з\s+([\d][\d\s]{0,6}[\d])\s*документ',   # "з 4 128 документів"
-        r'([\d][\d\s]{0,6}[\d])\s*документ',        # "4 128 документів"
-        r'Знайдено[:\s]+([\d][\d\s]{0,6}[\d])',     # "Знайдено: 4128"
-        r'всього\s+([\d][\d\s]{0,6}[\d])',           # "всього 4128"
+        r'—\s*([\d][\d\s]{0,7}[\d])\s*документ',   # "— 8 779 документів" (заголовок Ради)
+        r'з\s+([\d][\d\s]{0,7}[\d])\s*документ',    # "з 4 128 документів"
+        r'([\d][\d\s]{0,7}[\d])\s*документ',         # "4 128 документів"
+        r'Знайдено[:\s]+([\d][\d\s]{0,7}[\d])',      # "Знайдено: 4128"
+        r'всього\s+([\d][\d\s]{0,7}[\d])',            # "всього 4128"
     ]:
         m = re.search(pattern, full_text, re.IGNORECASE)
         if m:
             raw = m.group(1).replace(" ", "").replace("\xa0", "")
-            if raw.isdigit():
-                exact_count = int(raw)
-                max_page = max(max_page, (exact_count + 49) // 50)
-                break
+            if raw.isdigit() and int(raw) > 0:
+                return int(raw), max(max_page, (int(raw) + 49) // 50)
+
+    return None, max_page
+
+
+def get_section_doc_count(code: str) -> tuple[int, int, bool]:
+    """
+    Повертає (exact_count, total_pages, is_exact) для розділу Ради.
+    Запитує ОБИДВІ сторінки:
+      1. /laws/main/{code}        → заголовок "— 8 779 документів"
+      2. /laws/main/{code}/page   → пагінатор для кількості сторінок
+    is_exact=True якщо знайдено точне число, False — fallback pages*50.
+    """
+    def _get(url: str):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            return BeautifulSoup(r.text, "html.parser")
+        except Exception:
+            return None
+
+    # Спочатку головна сторінка розділу (там є заголовок з точним числом)
+    main_soup = _get(f"{BASE}/laws/main/{code}?lang=uk")
+    page_soup = _get(f"{BASE}/laws/main/{code}/page?lang=uk")
+
+    max_page = 1
+    exact_count: int | None = None
+
+    for soup in filter(None, [main_soup, page_soup]):
+        cnt, pg = _parse_doc_count_from_soup(soup, code)
+        max_page = max(max_page, pg)
+        if cnt is not None and exact_count is None:
+            exact_count = cnt
 
     if exact_count is None:
         return max_page * 50, max_page, False
 
-    return exact_count, max_page, True
+    return exact_count, max(max_page, (exact_count + 49) // 50), True
 
 
 def parse_laws_from_page(html: str, category: str) -> list[dict]:
