@@ -106,20 +106,22 @@ def get_ccu_docs_on_page(page: int) -> list[dict]:
         title    = cells[2].get_text(strip=True) if len(cells) > 2 else ""
         author   = cells[3].get_text(strip=True) if len(cells) > 3 else ""
 
-        # Шукаємо PDF-посилання в останніх клітинках
-        # re.search щоб не пропустити URL з query-string після .pdf
+        # Шукаємо PDF-посилання або посилання на сторінку документа
         pdf_url = None
+        doc_url = None
         for cell in cells:
             for a in cell.find_all("a", href=True):
                 href = a["href"]
                 if re.search(r"\.pdf", href, re.IGNORECASE):
                     pdf_url = href if href.startswith("http") else CCU_BASE_URL + href
                     break
+                elif re.search(r"/docs/\d+", href) and not doc_url:
+                    doc_url = href if href.startswith("http") else CCU_BASE_URL + href
             if pdf_url:
                 break
 
-        if not pdf_url:
-            continue  # без файлу — не потрібно
+        if not pdf_url and not doc_url:
+            continue  # ні PDF, ні сторінки документа — пропускаємо
 
         docs.append({
             "doc_num":  doc_num,
@@ -127,6 +129,7 @@ def get_ccu_docs_on_page(page: int) -> list[dict]:
             "title":    title,
             "author":   author,
             "pdf_url":  pdf_url,
+            "doc_url":  doc_url,  # fallback: сторінка документа
         })
 
     return docs
@@ -181,6 +184,23 @@ def get_all_ccu_docs(log=None) -> list[dict]:
 
 
 # ── Обробка PDF ───────────────────────────────────────────────────────────────
+
+def _get_pdf_url_from_doc_page(doc_url: str) -> str | None:
+    """Заходить на сторінку документа КСУ і знаходить пряме посилання на PDF."""
+    try:
+        with _ccu_http_sem:
+            r = httpx.get(doc_url, headers=HEADERS, timeout=30, follow_redirects=True)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if re.search(r"\.pdf", href, re.IGNORECASE):
+                return href if href.startswith("http") else CCU_BASE_URL + href
+        return None
+    except Exception as e:
+        print(f"⚠️ _get_pdf_url_from_doc_page ({doc_url}): {e}")
+        return None
+
 
 def _extract_pdf_text(pdf_url: str) -> str:
     """Завантажує PDF і повертає чистий текст."""
@@ -239,7 +259,18 @@ def process_ccu_doc(
         print(f"⏭️ Пропускаємо '{doc['doc_num']}' — вже є в базі")
         return None  # None = вже є, True = успіх, False = помилка
 
-    text = _extract_pdf_text(doc["pdf_url"])
+    # Знаходимо PDF URL: або прямий з таблиці, або через сторінку документа
+    pdf_url = doc.get("pdf_url")
+    if not pdf_url:
+        doc_url = doc.get("doc_url")
+        if doc_url:
+            print(f"🔍 Шукаємо PDF на сторінці: {doc_url}")
+            pdf_url = _get_pdf_url_from_doc_page(doc_url)
+    if not pdf_url:
+        print(f"⚠️ Не знайдено PDF для '{doc['doc_num']}'")
+        return False
+
+    text = _extract_pdf_text(pdf_url)
     if len(text) < 200:
         print(f"⚠️ Порожній текст для '{doc['doc_num']}' ({len(text)} символів) — пропускаємо. URL: {doc['pdf_url']}")
         return False
