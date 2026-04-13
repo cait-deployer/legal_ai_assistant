@@ -237,11 +237,11 @@ def process_ccu_doc(
 
     if existing_ids and law_id in existing_ids:
         print(f"⏭️ Пропускаємо '{doc['doc_num']}' — вже є в базі")
-        return True
+        return None  # None = вже є, True = успіх, False = помилка
 
     text = _extract_pdf_text(doc["pdf_url"])
     if len(text) < 200:
-        print(f"⚠️ Порожній текст для '{doc['doc_num']}' — пропускаємо")
+        print(f"⚠️ Порожній текст для '{doc['doc_num']}' ({len(text)} символів) — пропускаємо. URL: {doc['pdf_url']}")
         return False
 
     # Визначаємо тип документа за номером
@@ -347,11 +347,14 @@ def run_ccu_sync(
             for fut in as_completed(futs):
                 doc = futs[fut]
                 try:
-                    if fut.result():
+                    result = fut.result()
+                    if result is True:
                         ok += 1
                         log(f"  ✅ {doc['doc_num']} ({ok})", "success")
+                    elif result is None:
+                        log(f"  ⏭ {doc['doc_num']} — вже є в базі")
                     else:
-                        log(f"  ⏭ {doc['doc_num']} — пропущено")
+                        log(f"  ⚠️ {doc['doc_num']} — порожній текст (PDF не розпізнано)", "warning")
                 except Exception as e:
                     log(f"  ❌ {doc['doc_num']}: {e}", "error")
 
