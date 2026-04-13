@@ -238,11 +238,10 @@ def _extract_pdf_text(file_url: str) -> str:
         else:
             # DOC / DOCX
             try:
-                import docx
-                doc = docx.Document(tmp_path)
-                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+                import docx2txt
+                text = docx2txt.process(tmp_path)
             except Exception as e:
-                print(f"⚠️ python-docx ({file_url}): {e}")
+                print(f"⚠️ docx2txt ({file_url}): {e}")
                 # Fallback: витягуємо текст з бінарного .doc (CP1251)
                 try:
                     raw = r.content.decode("cp1251", errors="ignore")
