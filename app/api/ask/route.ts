@@ -10,6 +10,8 @@ const SOURCE_FEATURE_MAP: Record<string, string> = {
   source_legalaid: "wiki",
   source_supreme:  "supreme",
   source_ccu:      "ccu",
+  source_lpd:      "lpd",
+  source_kmu:      "kmu",
 }
 
 // Response quality feature keys (passed as-is to backend)

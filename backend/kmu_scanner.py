@@ -1,7 +1,8 @@
 """
 kmu_scanner.py — Скрапер НПА Кабінету Міністрів України.
-Джерело: https://www.kmu.gov.ua/npas/
-Стратегія: sitemap XML → HTML сторінки НПА.
+Джерело: https://www.kmu.gov.ua/api/search?type=npa (JSON API)
+CSRF-сесія: отримуємо cookie з головної сторінки → пагінуємо API.
+Для повного тексту: zakon.rada.gov.ua (cross-ref за номером документа).
 Колекція: laws_kmu
 """
 import re
@@ -11,16 +12,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import httpx
-from bs4 import BeautifulSoup
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter
 from rada_to_supabase import embeddings
 from qdrant_storage import upload_to_qdrant, get_existing_law_ids
 
-# ── Константи ──────────────────────────────────────────────────────────────────
 KMU_BASE        = "https://www.kmu.gov.ua"
-KMU_SITEMAP_IDX = "https://www.kmu.gov.ua/sitemap.xml"
-WORKERS         = 2   # консервативно — ShieldSquare bot protection
-_http_sem       = threading.Semaphore(WORKERS)
+KMU_API_SEARCH  = f"{KMU_BASE}/api/search"
+RADA_BASE       = "https://zakon.rada.gov.ua"
+
+WORKERS   = 3
+PER_PAGE  = 100   # max items per API page
+text_splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
+_http_sem     = threading.Semaphore(WORKERS)
 
 HEADERS = {
     "User-Agent": (
@@ -28,205 +31,233 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection":      "keep-alive",
-    "Referer":         "https://www.kmu.gov.ua/",
+    "Accept":          "application/json, text/html,*/*",
+    "Accept-Language": "uk-UA,uk;q=0.9",
+    "Referer":         f"{KMU_BASE}/npas",
 }
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
 
+# ── CSRF-сесія ────────────────────────────────────────────────────────────────
 
-def _slug_from_url(url: str) -> str:
-    return url.rstrip("/").split("/")[-1]
-
-
-def _law_id_from_url(url: str) -> str:
-    slug = _slug_from_url(url)
-    clean = re.sub(r"[^\w-]", "_", slug)[:200]
-    return f"kmu_{clean}"
-
-
-# ── Парсинг sitemap ────────────────────────────────────────────────────────────
-
-def _get_npa_sitemaps(log=None) -> list[str]:
-    """Знаходить URL усіх NPA-sitemap через sitemap-index."""
+def _make_session() -> httpx.Client:
+    """Відкриває httpx-сесію з CSRF-cookie від kmu.gov.ua."""
+    session = httpx.Client(
+        headers=HEADERS,
+        follow_redirects=True,
+        verify=False,
+        timeout=30,
+    )
     try:
-        r = httpx.get(KMU_SITEMAP_IDX, headers=HEADERS, timeout=30, follow_redirects=True, verify=False)
-        r.raise_for_status()
-        # Шукаємо сітемапи НПА за відомим шаблоном
-        urls = re.findall(
-            r'https://[^\s<>"\']+sitemap-kitsoft-npa-models-act[^\s<>"\']+\.xml',
-            r.text,
-        )
-        if not urls:
-            # Широкий fallback — будь-які <loc> що містять "npa" або "act"
-            locs = re.findall(r'<loc>\s*([^<]+)\s*</loc>', r.text)
-            urls = [u.strip() for u in locs if ("npa" in u.lower() or "act" in u.lower()) and u.endswith(".xml")]
-        if log:
-            log(f"📋 Знайдено {len(urls)} NPA sitemap файлів")
-        return urls or [f"{KMU_BASE}/sitemap-kitsoft-npa-models-act-1.xml"]
+        # Отримуємо cookies (oct_session + CSRF) з будь-якої сторінки
+        r = session.get(f"{KMU_BASE}/npas", timeout=20)
+        # OctoberCMS: CSRF у meta-тегу або у cookie "XSRF-TOKEN"
+        csrf = ""
+        m = re.search(r'<meta[^>]+name=["\']csrf-token["\'][^>]+content=["\']([^"\']+)', r.text)
+        if m:
+            csrf = m.group(1)
+        elif "XSRF-TOKEN" in session.cookies:
+            csrf = session.cookies["XSRF-TOKEN"]
+        if csrf:
+            session.headers.update({"X-CSRF-TOKEN": csrf})
     except Exception as e:
-        if log:
-            log(f"⚠️ Помилка читання sitemap-index: {e}", "warning")
-        return [f"{KMU_BASE}/sitemap-kitsoft-npa-models-act-1.xml"]
+        print(f"⚠️ KMU CSRF init: {e}")
+    return session
 
 
-def _parse_sitemap(sitemap_url: str, log=None) -> list[dict]:
-    """Парсить один sitemap XML → [{url, lastmod, law_id}]."""
-    docs = []
-    try:
-        r = httpx.get(sitemap_url, headers=HEADERS, timeout=60, follow_redirects=True, verify=False)
-        r.raise_for_status()
-        locs     = re.findall(r'<loc>\s*([^<]+)\s*</loc>',         r.text)
-        lastmods = re.findall(r'<lastmod>\s*([^<]+)\s*</lastmod>', r.text)
-        if len(lastmods) < len(locs):
-            lastmods += [""] * (len(locs) - len(lastmods))
-        for loc, lastmod in zip(locs, lastmods):
-            loc = loc.strip()
-            if "/npas/" not in loc:
-                continue
-            docs.append({
-                "url":     loc,
-                "lastmod": lastmod.strip(),
-                "law_id":  _law_id_from_url(loc),
-            })
-        if log:
-            log(f"  {sitemap_url.split('/')[-1]}: {len(docs)} НПА")
-    except Exception as e:
-        if log:
-            log(f"⚠️ {sitemap_url.split('/')[-1]}: {e}", "warning")
-    return docs
-
+# ── Список НПА через API ──────────────────────────────────────────────────────
 
 def get_all_kmu_docs(log=None) -> list[dict]:
-    """Збирає всі НПА КМУ з усіх sitemap файлів."""
-    sitemap_urls = _get_npa_sitemaps(log)
+    """
+    Пагінує /api/search?type=npa → збирає всі НПА КМУ.
+    Повертає список dict з полями: law_id, title, url, date, doc_type.
+    """
+    _log = log or (lambda m, lv="info": print(m))
+    session = _make_session()
     all_docs: list[dict] = []
-    for url in sitemap_urls:
-        docs = _parse_sitemap(url, log)
-        all_docs.extend(docs)
+    page = 1
+
+    _log("🏛️  Отримуємо список НПА КМУ через API...")
+
+    while True:
+        params = {
+            "type":     "npa",
+            "per_page": PER_PAGE,
+            "page":     page,
+            "lang":     "uk",
+        }
+        try:
+            r = session.get(KMU_API_SEARCH, params=params)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            _log(f"⚠️ API сторінка {page}: {e}", "warning")
+            break
+
+        # Визначаємо де масив документів
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = (
+                data.get("items") or data.get("data") or
+                data.get("results") or data.get("documents") or []
+            )
+
+        if not items:
+            _log(f"📭 Сторінка {page}: порожньо — зупиняємось")
+            break
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            # Нормалізуємо поля — різні версії API можуть мати різні ключі
+            title   = (item.get("title") or item.get("name") or "").strip()
+            url_path = item.get("url") or item.get("link") or item.get("slug") or ""
+            date    = (
+                item.get("created_date") or item.get("date") or
+                item.get("published_at") or item.get("dateCreated") or ""
+            )
+            raw_id  = (
+                item.get("id") or item.get("_id") or
+                re.sub(r"[^\w-]", "_", url_path.rstrip("/").split("/")[-1])[:150]
+            )
+            doc_type = _detect_doc_type(title, url_path)
+
+            # Зберігаємо будь-який текст/опис з API
+            api_text = (
+                item.get("description") or item.get("content") or
+                item.get("body") or item.get("text") or item.get("annotation") or ""
+            ).strip()
+
+            full_url = (
+                url_path if url_path.startswith("http")
+                else f"{KMU_BASE}{url_path}" if url_path.startswith("/")
+                else f"{KMU_BASE}/npas/{url_path}" if url_path
+                else ""
+            )
+
+            all_docs.append({
+                "law_id":   f"kmu_{str(raw_id)[:150]}",
+                "title":    title or doc_type,
+                "url":      full_url,
+                "date":     str(date),
+                "doc_type": doc_type,
+                "api_text": api_text,
+                # Для cross-ref на zakon.rada.gov.ua — витягуємо номер документа
+                "doc_number": _extract_doc_number(title),
+            })
+
+        _log(f"  📄 Стор. {page}: +{len(items)} ({len(all_docs)} всього)")
+
+        # Перевіряємо чи є ще сторінки
+        total = None
+        if isinstance(data, dict):
+            total = (
+                data.get("total") or data.get("count") or
+                data.get("total_count") or data.get("meta", {}).get("total")
+            )
+        if total and len(all_docs) >= int(total):
+            break
+        if len(items) < PER_PAGE:
+            break  # остання сторінка
+
+        page += 1
         time.sleep(0.3)
-    if log:
-        log(f"📄 Всього НПА КМУ: {len(all_docs)} документів")
+
+    session.close()
+    _log(f"📋 Всього НПА КМУ: {len(all_docs)}")
     return all_docs
 
 
-# ── Парсинг HTML сторінки ──────────────────────────────────────────────────────
+def _detect_doc_type(title: str, url: str) -> str:
+    t = f"{title} {url}".lower()
+    if "розпорядж" in t: return "Розпорядження КМУ"
+    if "наказ"     in t: return "Наказ КМУ"
+    return "Постанова КМУ"
 
-def _extract_content(html: str, url: str) -> dict:
-    """Витягує заголовок, текст та тип документа з HTML сторінки НПА."""
-    soup = BeautifulSoup(html, "html.parser")
 
-    # Видаляємо шум
-    for tag in soup(["nav", "header", "footer", "script", "style", "aside"]):
-        tag.decompose()
-    for sel in [".breadcrumb", ".share-block", ".social-share", ".sidebar", ".cookie-bar"]:
-        for el in soup.select(sel):
-            el.decompose()
+def _extract_doc_number(title: str) -> str:
+    """Витягує '489' з 'Постанова від 10.04.2026 № 489'."""
+    m = re.search(r"№\s*(\d+)", title)
+    return m.group(1) if m else ""
 
-    # Заголовок — пробуємо кілька селекторів
-    title = ""
-    for sel in ["h1", ".entry-title", ".news-title", "h2.news-header", "h2"]:
-        el = soup.select_one(sel)
-        if el:
-            t = el.get_text(strip=True)
-            if len(t) > 10:
-                title = t
-                break
 
-    # Основний контент — пробуємо типові OctoberCMS та Bootstrap класи
-    text = ""
-    for sel in [
-        "div.news-body", "div.entry-body", "div.post-content",
-        "article.post", ".article-content", "article",
-        "main .col-xs-12.col-md-9", "main .col-md-9",
-        "main", "div#content", "div.content",
-    ]:
-        el = soup.select_one(sel)
-        if el:
-            t = el.get_text(separator="\n", strip=True)
-            if len(t) > 200:
-                text = t
-                break
+# ── Текст документа ───────────────────────────────────────────────────────────
 
-    # Fallback — весь body
-    if len(text) < 200:
-        body = soup.find("body")
-        if body:
-            text = body.get_text(separator="\n", strip=True)
-
-    # Чистимо зайві пустые рядки
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-
-    # Тип документа за заголовком/URL
-    combined = f"{title} {url}".lower()
-    if re.search(r"постанов", combined):
-        doc_type = "Постанова КМУ"
-    elif re.search(r"розпоряджен", combined):
-        doc_type = "Розпорядження КМУ"
-    elif re.search(r"\bнаказ", combined):
-        doc_type = "Наказ"
-    else:
-        doc_type = "НПА КМУ"
-
-    return {
-        "title":       title or doc_type,
-        "text":        text,
-        "doc_type":    doc_type,
-        "source_name": title if title else doc_type,
-    }
+def _get_text_from_rada(doc_number: str, date: str, session: httpx.Client) -> str:
+    """
+    Шукає документ КМУ на zakon.rada.gov.ua за номером і роком.
+    Повертає markdown-текст або "".
+    """
+    if not doc_number:
+        return ""
+    try:
+        year = re.search(r"\b(20\d{2})\b", date)
+        year_str = year.group(1) if year else ""
+        # Пошук через zakon.rada.gov.ua/find
+        search_url = f"{RADA_BASE}/find?type=2&search={doc_number}&org=KMU"
+        if year_str:
+            search_url += f"&date={year_str}"
+        r = session.get(search_url, timeout=15)
+        # Шукаємо перший закон в результатах
+        m = re.search(r'/laws/show/([a-zA-Z0-9\-]+)', r.text)
+        if not m:
+            return ""
+        law_id = m.group(1)
+        from rada_scanner import get_law_text
+        return get_law_text(law_id)
+    except Exception:
+        return ""
 
 
 # ── Обробка одного документа ──────────────────────────────────────────────────
 
 def process_kmu_doc(
     doc: dict,
+    session: httpx.Client,
     session_id: str | None = None,
     existing_ids: set | None = None,
 ) -> bool | None:
-    """
-    Завантажує та індексує один НПА КМУ.
-    True = успіх, None = вже є, False = помилка.
-    """
+    """True = успіх, None = вже є, False = помилка."""
     law_id = doc["law_id"]
     if existing_ids and law_id in existing_ids:
-        return None  # вже є — пропускаємо
+        return None
 
-    try:
+    # Спробуємо отримати повний текст
+    text = ""
+
+    # 1. Текст з API (якщо є)
+    if doc.get("api_text") and len(doc["api_text"]) > 200:
+        text = doc["api_text"]
+
+    # 2. zakon.rada.gov.ua за номером документа
+    if not text and doc.get("doc_number"):
         with _http_sem:
-            r = httpx.get(doc["url"], headers=HEADERS, timeout=30, follow_redirects=True, verify=False)
-        if r.status_code in (403, 429):
-            print(f"⚠️ KMU {r.status_code} (bot protection): {doc['url']}")
-            time.sleep(10)
-            return False
-        r.raise_for_status()
-    except Exception as e:
-        print(f"❌ KMU fetch ({doc['url']}): {e}")
+            text = _get_text_from_rada(doc["doc_number"], doc["date"], session)
+
+    # 3. Fallback: назва + дата + тип як мінімальний контент
+    if not text:
+        text = f"{doc['doc_type']}\n\n{doc['title']}"
+        if doc["date"]:
+            text += f"\n\nДата: {doc['date']}"
+        if doc["url"]:
+            text += f"\n\nДжерело: {doc['url']}"
+
+    if len(text) < 50:
         return False
 
-    content = _extract_content(r.text, doc["url"])
-    if len(content["text"]) < 100:
-        print(f"⚠️ KMU порожній текст ({len(content['text'])} с): {doc['url']}")
-        return False
-
-    chunks = text_splitter.split_text(content["text"])
+    chunks = text_splitter.split_text(text)
     scraped_at = datetime.now(timezone.utc).isoformat()
 
-    # Batch embed
     vectors: list = []
     try:
         for b in range(0, len(chunks), 5):
             vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
     except Exception as e:
-        print(f"⚠️ KMU batch embed → поштучно: {e}")
+        print(f"⚠️ KMU embed fallback: {e}")
         vectors = []
         for chunk in chunks:
-            try:
-                vectors.append(embeddings.embed_query(chunk))
-            except Exception:
-                vectors.append(None)
+            try:    vectors.append(embeddings.embed_query(chunk))
+            except: vectors.append(None)
 
     for i, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
         if vector is None:
@@ -234,27 +265,27 @@ def process_kmu_doc(
         upload_to_qdrant(
             chunk_text,
             {
-                "source":        content["source_name"],
+                "source":        doc["title"],
                 "law_id":        law_id,
-                "doc_type":      content["doc_type"],
-                "category":      content["doc_type"],
+                "doc_type":      doc["doc_type"],
+                "category":      doc["doc_type"],
                 "law_url":       doc["url"],
                 "source_domain": "kmu.gov.ua",
-                "lastmod":       doc.get("lastmod", ""),
+                "status":        "чинний",
+                "date":          doc["date"],
                 "scraped_at":    scraped_at,
                 "chunk_index":   i,
-                "status":        "чинний",
             },
             vector,
             collection_name="laws_kmu",
             session_id=session_id,
         )
 
-    print(f"✅ KMU '{content['source_name'][:60]}' → laws_kmu ({len(chunks)} ч.)")
+    print(f"✅ KMU '{doc['title'][:60]}' → laws_kmu ({len(chunks)} ч.)")
     return True
 
 
-# ── Головний цикл синхронізації ───────────────────────────────────────────────
+# ── Головний цикл ─────────────────────────────────────────────────────────────
 
 def run_kmu_sync(
     session_id: str | None = None,
@@ -264,10 +295,6 @@ def run_kmu_sync(
     start_index: int = 0,
     docs_cached: list | None = None,
 ) -> tuple[int, int]:
-    """
-    Синхронізує kmu.gov.ua → laws_kmu.
-    Повертає (ok_count, total_count).
-    """
     def log(msg: str, level: str = "info") -> None:
         print(msg)
         if log_callback:
@@ -277,59 +304,62 @@ def run_kmu_sync(
         docs = docs_cached
         log(f"▶️  Відновлення KMU з індексу {start_index}")
     else:
-        log("🏛️  Починаємо синхронізацію КМУ → laws_kmu...")
-        log("🔍 Читаємо sitemap kmu.gov.ua...")
+        log("🏛️  Синхронізація КМУ → laws_kmu (kmu.gov.ua API)...")
         docs = get_all_kmu_docs(log=log)
 
     total = len(docs)
-    log(f"📋 Знайдено: {total} НПА документів")
+    log(f"📋 Знайдено: {total} НПА КМУ")
 
     existing_ids = get_existing_law_ids()
-    log(f"📂 Вже в базі: {len(existing_ids)} документів")
+    kmu_existing = {lid for lid in existing_ids if lid.startswith("kmu_")}
+    log(f"📂 Вже в базі: {len(kmu_existing)}")
 
-    skipped = sum(1 for d in docs[start_index:] if d["law_id"] in existing_ids)
-    log(f"🔄 Нових для обробки: ~{total - start_index - skipped}")
+    # Одна сесія на весь sync — зберігаємо CSRF cookies
+    http_session = _make_session()
 
     ok = 0
     i = start_index
-    while i < total:
-        if pause_check and pause_check():
-            if on_pause:
-                on_pause(docs, i, ok)
-            log(f"⏸️  Призупинено на {i}/{total}. Додано: {ok}", "warning")
-            return ok, total
+    try:
+        while i < total:
+            if pause_check and pause_check():
+                if on_pause:
+                    on_pause(docs, i, ok)
+                log(f"⏸️  Призупинено {i}/{total}. Додано: {ok}", "warning")
+                return ok, total
 
-        batch_end = min(i + WORKERS, total)
-        batch = docs[i:batch_end]
-        log(f"📥 [{i + 1}–{batch_end}/{total}]")
+            batch_end = min(i + WORKERS, total)
+            batch = docs[i:batch_end]
+            log(f"📥 [{i + 1}–{batch_end}/{total}]")
 
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            futs = {
-                pool.submit(
-                    process_kmu_doc, doc,
-                    session_id=session_id,
-                    existing_ids=existing_ids,
-                ): doc
-                for doc in batch
-            }
-            for fut in as_completed(futs):
-                doc = futs[fut]
-                try:
-                    result = fut.result()
-                    if result is True:
-                        ok += 1
-                        log(f"  ✅ {doc['law_id'][:70]} ({ok})", "success")
-                    elif result is None:
-                        log(f"  ⏭ {doc['law_id'][:70]} — вже є")
-                    else:
-                        log(f"  ⚠️ {doc['law_id'][:70]} — помилка", "warning")
-                except Exception as e:
-                    log(f"  ❌ {doc['law_id'][:70]}: {e}", "error")
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                futs = {
+                    pool.submit(
+                        process_kmu_doc, doc, http_session,
+                        session_id=session_id,
+                        existing_ids=kmu_existing,
+                    ): doc
+                    for doc in batch
+                }
+                for fut in as_completed(futs):
+                    doc = futs[fut]
+                    try:
+                        result = fut.result()
+                        if result is True:
+                            ok += 1
+                            log(f"  ✅ {doc['law_id'][:70]} ({ok})", "success")
+                        elif result is None:
+                            log(f"  ⏭ {doc['law_id'][:70]} — вже є")
+                        else:
+                            log(f"  ⚠️ {doc['law_id'][:70]} — помилка", "warning")
+                    except Exception as e:
+                        log(f"  ❌ {doc['law_id'][:70]}: {e}", "error")
 
-        i = batch_end
-        time.sleep(2.0)  # пауза між батчами — bot protection
+            i = batch_end
+            time.sleep(0.5)
+    finally:
+        http_session.close()
 
-    log(f"✅ KMU синхронізацію завершено. Додано: {ok}/{total}.", "success")
+    log(f"✅ KMU завершено. Додано: {ok}/{total}.", "success")
     return ok, total
 
 
