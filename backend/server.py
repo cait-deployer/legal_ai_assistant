@@ -67,6 +67,7 @@ BASE_DIR = Path(__file__).parent
 SYNC_STATE_FILE     = BASE_DIR / "sync_state.json"       # РАДА
 WIKI_STATE_FILE     = BASE_DIR / "wiki_state.json"        # Wiki
 CCU_STATE_FILE      = BASE_DIR / "ccu_state.json"         # КСУ
+LPD_STATE_FILE      = BASE_DIR / "lpd_state.json"         # Правові позиції ВС
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -76,7 +77,7 @@ _SB_KEY = (
 )
 
 # ── In-memory стан по кожному джерелу ─────────────────────────────────────────
-_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu")
+_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd")
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -788,6 +789,80 @@ def _do_ccu(session_id: str, start_index: int = 0, docs_cached: list | None = No
             _sync[src]["pause_requested"] = False
 
 
+def _do_lpd(session_id: str, start_index: int = 0, positions_cached: list | None = None) -> None:
+    src = "lpd"
+    log = lambda m, lv="info": _log(src, m, lv)
+    log("=" * 50)
+    log(f"⚖️  LPD SYNC (сесія {session_id[:8]}...)")
+    log("=" * 50)
+    _sb_insert_log(src, session_id)
+    processed = 0
+    try:
+        from lpd_scanner import run_lpd_sync
+
+        def pause_check():
+            with _lock:
+                return _sync[src]["pause_requested"]
+
+        def on_pause(positions: list, next_idx: int, ok: int) -> None:
+            LPD_STATE_FILE.write_text(
+                json.dumps({
+                    "source":     "lpd",
+                    "positions":  positions,
+                    "next_index": next_idx,
+                    "session_id": session_id,
+                    "saved_at":   datetime.now(timezone.utc).isoformat(),
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            log(f"💾 Стан LPD збережено (індекс {next_idx})", "warning")
+
+        def log_callback(msg: str, level: str = "info"):
+            _lvl = level if level != "info" else (
+                "error"   if "❌" in msg else
+                "success" if "✅" in msg else
+                "warning" if "⚠️" in msg or "⏸️" in msg else "info"
+            )
+            log(msg, _lvl)
+            with _lock:
+                _sync[src]["laws_processed"] = processed
+
+        ok, total = run_lpd_sync(
+            session_id=session_id,
+            log_callback=log_callback,
+            pause_check=pause_check,
+            on_pause=on_pause,
+            start_index=start_index,
+            positions_cached=positions_cached,
+        )
+        processed = ok
+
+        with _lock:
+            paused = _sync[src]["pause_requested"]
+
+        if paused:
+            _sb_update_log(session_id, status="paused",
+                           finished_at=datetime.now(timezone.utc).isoformat(),
+                           laws_processed=processed, error_message="Призупинено")
+        else:
+            if LPD_STATE_FILE.exists():
+                LPD_STATE_FILE.unlink()
+            _sb_update_log(session_id, status="success",
+                           finished_at=datetime.now(timezone.utc).isoformat(),
+                           laws_processed=processed)
+            log(f"✅ LPD синхронізацію завершено. Оброблено: {processed}/{total}.", "success")
+
+    except Exception as e:
+        log(f"❌ Критична помилка: {e}", "error")
+        _sb_update_log(session_id, status="error",
+                       finished_at=datetime.now(timezone.utc).isoformat(),
+                       laws_processed=processed, error_message=str(e))
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
 def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
     """Запускає фонову задачу. Кидає ValueError якщо вже виконується."""
     with _lock:
@@ -1161,6 +1236,71 @@ async def resume_ccu():
     return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
 
 
+# ── /admin/lpd/* ──────────────────────────────────────────────────────────────
+
+@app.post("/admin/lpd/trigger")
+async def trigger_lpd():
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("lpd", _do_lpd, session_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/lpd/pause")
+async def pause_lpd():
+    with _lock:
+        if not _sync["lpd"]["running"]:
+            raise HTTPException(400, "Синхронізація не виконується")
+        _sync["lpd"]["pause_requested"] = True
+    return {"ok": True, "message": "Пауза запрошена"}
+
+
+@app.get("/admin/lpd/logs")
+async def lpd_logs():
+    with _lock:
+        running   = _sync["lpd"]["running"]
+        pause_req = _sync["lpd"]["pause_requested"]
+        logs      = list(_sync["lpd"]["live_logs"])
+    state = None
+    if LPD_STATE_FILE.exists():
+        try:
+            s = json.loads(LPD_STATE_FILE.read_text(encoding="utf-8"))
+            state = {
+                "next_index": s.get("next_index"),
+                "saved_at":   s.get("saved_at"),
+                "total":      len(s.get("positions", [])),
+            }
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+        "history":         _sb_get_logs("lpd", 20),
+    }
+
+
+@app.post("/admin/lpd/resume")
+async def resume_lpd():
+    if _sync["lpd"]["running"]:
+        raise HTTPException(409, "LPD вже виконується")
+    if not LPD_STATE_FILE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    try:
+        state = json.loads(LPD_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"Помилка читання стану: {e}")
+    session_id = str(uuid.uuid4())
+    _start_sync("lpd", _do_lpd, session_id,
+                start_index=state["next_index"],
+                positions_cached=state.get("positions"))
+    return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
+
+
 @app.get("/admin/wiki/logs")
 async def wiki_logs():
     with _lock:
@@ -1419,6 +1559,8 @@ async def get_base_docs(
             target_cols = ["laws_wiki"]
         elif source == "ccu":
             target_cols = ["laws_ccu"]
+        elif source == "lpd":
+            target_cols = ["laws_positions"]
         else:
             target_cols = ALL_COLLECTIONS
 
@@ -1785,9 +1927,10 @@ async def get_rada_coverage(refresh: bool = False):
 
     # ── 5. Інші джерела (КСУ, Вікі, Верховний суд) ───────────────────────────
     NON_RADA_COLS = [
-        ("laws_ccu",     "Конституційний суд України",     "ccu"),
-        ("laws_wiki",    "Вікіпедія — правові статті",     "wiki"),
-        ("laws_supreme", "Верховний суд України",           "supreme"),
+        ("laws_positions", "Правові позиції Верховного Суду", "lpd"),
+        ("laws_ccu",       "Конституційний суд України",      "ccu"),
+        ("laws_wiki",      "Вікіпедія — правові статті",      "wiki"),
+        ("laws_supreme",   "Верховний суд України",            "supreme"),
     ]
     other_sources = []
     for col_name, col_label, sync_src in NON_RADA_COLS:
@@ -1943,6 +2086,8 @@ async def ask(body: AskRequest):
             target_collections.append("laws_wiki")
         if "ccu" in allowed:
             target_collections.append("laws_ccu")
+        if "lpd" in allowed:
+            target_collections.append("laws_positions")
         if not target_collections:
             target_collections = ALL_COLLECTIONS
     else:
@@ -1987,7 +2132,10 @@ async def ask(body: AskRequest):
     if abs(rada_boost - 1.0) > 0.001:
         for r in results:
             col = r.get("_collection", "")
-            if col.startswith("rada_") or col == "laws_supreme":
+            # laws_positions — найвищий пріоритет: відформульовані позиції ВС
+            if col == "laws_positions":
+                r["similarity"] = min(r["similarity"] * rada_boost * 1.1, 1.0)
+            elif col.startswith("rada_") or col == "laws_supreme":
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 

@@ -17,7 +17,7 @@ import {
 import {
   LayoutDashboard, Menu, X, LogOut, ChevronLeft,
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
-  Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck, Gavel,
+  Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck, Gavel, BookMarked,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
@@ -27,6 +27,7 @@ const navigation = [
   { name: "Аналітика",     href: "/admin/analytics", icon: BarChart2       },
   { name: "Тарифи", href: "/admin/plans", icon: CreditCard },
   { name: "Синхронізація", href: "/admin/settings", icon: Settings },
+  { name: "Позиції ВС",   href: "/admin/lpd",      icon: BookMarked   },
   { name: "КСУ",          href: "/admin/ccu",      icon: Gavel        },
   { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck },
   { name: "AI Модель", href: "/admin/ai-settings", icon: Bot },
