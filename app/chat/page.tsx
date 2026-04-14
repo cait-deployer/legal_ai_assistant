@@ -240,10 +240,9 @@ function ChatPage() {
         }).catch(() => { });
 
         try {
-            // Build conversation history for context (last 6 turns, excluding the pending user msg)
+            // Build conversation history for context (bекенд сам обріже до потрібної кількості)
             const historyForBackend = messages
                 .filter(m => m.role === 'user' || m.role === 'ai')
-                .slice(-12) // last 12 messages = 6 turns
                 .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }));
 
             const res = await fetch(`/api/ask`, {

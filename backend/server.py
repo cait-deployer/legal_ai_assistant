@@ -31,7 +31,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1000,8 +1000,12 @@ async def get_schedule():
 
 
 @app.post("/admin/settings/refresh")
-async def refresh_settings():
-    """Перечитує налаштування з Supabase і оновлює кеш + Vertex AI."""
+async def refresh_settings(request: Request):
+    """Перечитує налаштування з Supabase і оновлює кеш + Vertex AI.
+    Доступно лише з localhost (викликається Next.js сервером)."""
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Forbidden: internal endpoint")
     await settings_cache.refresh()
     _init_vertex_ai()
     return {"ok": True}
@@ -1922,7 +1926,7 @@ async def ask(body: AskRequest):
     # Source priority boost — піднімаємо Раду відносно Wiki/інших
     # Значення > 1.0 = Рада іде вище; 1.0 = без буста (можна змінити в адмінці)
     rada_boost = settings_cache.get_float("rada_source_boost", 1.15)
-    if rada_boost != 1.0:
+    if abs(rada_boost - 1.0) > 0.001:
         for r in results:
             col = r.get("_collection", "")
             if col.startswith("rada_") or col == "laws_supreme":
@@ -2074,7 +2078,7 @@ async def ask(body: AskRequest):
         # Build conversation history block (last 6 turns max to stay within token budget)
         history_block = ""
         if body.history:
-            recent = body.history[-6:]
+            recent = body.history[-12:]  # 12 повідомлень = 6 turns (user+assistant)
             history_lines: list[str] = []
             for turn in recent:
                 role = turn.get("role", "")
