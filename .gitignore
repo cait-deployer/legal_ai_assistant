@@ -42,3 +42,6 @@ next-env.d.ts
 venv/
 __pycache__/
 backend/service-account.json
+
+# Claude Code local overrides (personal, not shared)
+.claude/settings.local.json
