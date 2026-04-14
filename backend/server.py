@@ -999,6 +999,14 @@ async def get_schedule():
     return {"enabled": settings_cache.get_bool("schedule_enabled", False)}
 
 
+@app.post("/admin/settings/refresh")
+async def refresh_settings():
+    """Перечитує налаштування з Supabase і оновлює кеш + Vertex AI."""
+    await settings_cache.refresh()
+    _init_vertex_ai()
+    return {"ok": True}
+
+
 @app.post("/admin/rada/schedule")
 async def set_schedule(body: ScheduleBody):
     _sb_update_schedule(body.enabled)

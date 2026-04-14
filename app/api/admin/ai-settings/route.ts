@@ -28,6 +28,8 @@ const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default
   top_p:                 { type: "float", default: 0.8 },
   match_threshold_docs:  { type: "float", default: 0.4 },
   min_relevance_score:   { type: "float", default: 0.28 },
+  rada_source_boost:     { type: "float", default: 1.15 },
+  llm_timeout_seconds:   { type: "float", default: 90 },
 }
 
 export async function GET() {
