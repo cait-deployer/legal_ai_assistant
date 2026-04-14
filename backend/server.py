@@ -915,6 +915,14 @@ async def lifespan(app: FastAPI):
     settings_cache.load()
     _init_vertex_ai()
 
+    # Створюємо всі Qdrant колекції якщо їх немає (безпечно — існуючі пропускає)
+    try:
+        from qdrant_storage import init_all_collections
+        init_all_collections()
+        print("✅ Qdrant collections ready.")
+    except Exception as e:
+        print(f"⚠️  Qdrant init warning: {e}")
+
     # Перевіряємо наявність збереженого стану
     state = _load_state()
     if state and state.get("source") == "rada":
@@ -1498,20 +1506,23 @@ async def get_law_text_endpoint(law_id: str):
         all_chunks: list = []
         # Шукаємо по всіх колекціях — law_id унікальний
         for col in ALL_COLLECTIONS:
-            next_page_offset = None
-            while True:
-                batch, next_page_offset = client.scroll(
-                    collection_name=col,
-                    scroll_filter=Filter(must=[
-                        FieldCondition(key="law_id", match=MatchValue(value=law_id))
-                    ]),
-                    with_payload=True,
-                    limit=500,
-                    offset=next_page_offset,
-                )
-                all_chunks.extend(batch)
-                if next_page_offset is None:
-                    break
+            try:
+                next_page_offset = None
+                while True:
+                    batch, next_page_offset = client.scroll(
+                        collection_name=col,
+                        scroll_filter=Filter(must=[
+                            FieldCondition(key="law_id", match=MatchValue(value=law_id))
+                        ]),
+                        with_payload=True,
+                        limit=500,
+                        offset=next_page_offset,
+                    )
+                    all_chunks.extend(batch)
+                    if next_page_offset is None:
+                        break
+            except Exception:
+                continue  # колекція не існує або недоступна — пропускаємо
             if all_chunks:
                 break  # знайшли колекцію — далі не шукаємо
 
@@ -1566,18 +1577,21 @@ async def get_base_docs(
 
         all_points: list = []
         for col in target_cols:
-            next_page_offset = None
-            while True:
-                batch, next_page_offset = client.scroll(
-                    collection_name=col,
-                    scroll_filter=scroll_filter,
-                    with_payload=True,
-                    limit=1000,
-                    offset=next_page_offset,
-                )
-                all_points.extend(batch)
-                if next_page_offset is None:
-                    break
+            try:
+                next_page_offset = None
+                while True:
+                    batch, next_page_offset = client.scroll(
+                        collection_name=col,
+                        scroll_filter=scroll_filter,
+                        with_payload=True,
+                        limit=1000,
+                        offset=next_page_offset,
+                    )
+                    all_points.extend(batch)
+                    if next_page_offset is None:
+                        break
+            except Exception:
+                continue  # колекція не існує або недоступна
 
         # Python-рівень: пошук по назві або law_id (Qdrant не підтримує substring без індексу)
         if search:
