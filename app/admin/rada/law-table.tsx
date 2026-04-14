@@ -51,10 +51,13 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                   </span>
                 </td>
 
-                <td className="px-4 py-3 hidden sm:table-cell">
+                <td className="px-4 py-3 hidden sm:table-cell max-w-[180px]">
                   {meta.category ? (
-                    <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap ${getCategoryStyle(meta.category)}`}>
-                      {getCategoryLabel(meta.category)}
+                    <span
+                      title={getCategoryLabel(meta.category)}
+                      className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border max-w-full ${getCategoryStyle(meta.category)}`}
+                    >
+                      <span className="truncate">{getCategoryLabel(meta.category)}</span>
                     </span>
                   ) : <span className="text-[#C9A84C]/50">—</span>}
                 </td>
