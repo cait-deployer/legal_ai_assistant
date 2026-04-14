@@ -1,0 +1,19 @@
+{
+  "model": "sonnet",
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "70"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | xargs -I{} sh -c 'case \"{}\" in *.env|*.env.*|*service-account*|*service_account*|*credentials*|*secret*) echo \"BLOCKED: protected file: {}\" >&2; exit 2;; esac'"
+          }
+        ]
+      }
+    ]
+  }
+}
