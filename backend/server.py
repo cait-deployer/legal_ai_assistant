@@ -1910,6 +1910,17 @@ async def ask(body: AskRequest):
     results = await _asyncio.to_thread(
         search_qdrant, query_vector, fetch_k, target_collections, match_threshold
     )
+
+    # Source priority boost — піднімаємо Раду відносно Wiki/інших
+    # Значення > 1.0 = Рада іде вище; 1.0 = без буста (можна змінити в адмінці)
+    rada_boost = settings_cache.get_float("rada_source_boost", 1.15)
+    if rada_boost != 1.0:
+        for r in results:
+            col = r.get("_collection", "")
+            if col.startswith("rada_") or col == "laws_supreme":
+                r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+
     results = results[:body.max_docs]
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо

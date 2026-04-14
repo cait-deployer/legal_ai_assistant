@@ -253,6 +253,7 @@ def _search_single(collection_name: str, query_vector: list, top_k: int, thresho
                 "out_content":  r.payload.get("content", ""),
                 "out_metadata": {k: v for k, v in r.payload.items() if k != "content"},
                 "similarity":   r.score,
+                "_collection":  collection_name,
             }
             for r in points
         ]
