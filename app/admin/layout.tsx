@@ -18,39 +18,58 @@ import {
   LayoutDashboard, Menu, X, LogOut, ChevronLeft,
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
   Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck, Gavel, BookMarked,
+  RefreshCw, Database, ChevronDown, LayoutGrid,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
-const navigation = [
+type NavChild = { name: string; href: string; icon: React.ElementType }
+type NavItem  = { name: string; href: string; icon: React.ElementType; children?: NavChild[] }
+
+const navigation: NavItem[] = [
   { name: "Огляд",         href: "/admin",          icon: LayoutDashboard },
   { name: "Користувачі",   href: "/admin/users",     icon: Users           },
   { name: "Аналітика",     href: "/admin/analytics", icon: BarChart2       },
-  { name: "Тарифи", href: "/admin/plans", icon: CreditCard },
-  { name: "Синхронізація", href: "/admin/settings", icon: Settings },
-  { name: "Позиції ВС",   href: "/admin/lpd",      icon: BookMarked   },
-  { name: "КСУ",          href: "/admin/ccu",      icon: Gavel        },
+  { name: "Тарифи",        href: "/admin/plans",     icon: CreditCard      },
+  {
+    name: "Синхронізація",
+    href: "/admin/sync",
+    icon: RefreshCw,
+    children: [
+      { name: "Зведення",      href: "/admin/sync",     icon: LayoutGrid  },
+      { name: "Рада",          href: "/admin/settings", icon: Database    },
+      { name: "Верховний Суд", href: "/admin/supreme",  icon: Scale       },
+      { name: "КСУ",           href: "/admin/ccu",      icon: Gavel       },
+      { name: "Позиції ВС",    href: "/admin/lpd",      icon: BookMarked  },
+    ],
+  },
   { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck },
-  { name: "AI Модель", href: "/admin/ai-settings", icon: Bot },
-  { name: "Онбординг", href: "/admin/onboarding", icon: Scale },
-  { name: "База знань", href: "/admin/base", icon: BookOpen },
+  { name: "AI Модель",     href: "/admin/ai-settings",   icon: Bot         },
+  { name: "Онбординг",     href: "/admin/onboarding",    icon: Scale       },
+  { name: "База знань",    href: "/admin/base",          icon: BookOpen    },
 ]
 
-const COLLAPSED_KEY = "admin_sidebar_collapsed"
+const SYNC_HREFS = ["/admin/sync", "/admin/settings", "/admin/supreme", "/admin/ccu", "/admin/lpd"]
+const COLLAPSED_KEY    = "admin_sidebar_collapsed"
+const SYNC_OPEN_KEY    = "admin_sync_open"
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
+  const router   = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
-  const [mounted, setMounted] = useState(false)
+  const [collapsed,  setCollapsed]  = useState(false)
+  const [mounted,    setMounted]    = useState(false)
+  const [syncOpen,   setSyncOpen]   = useState(true)
 
   useEffect(() => {
-    const saved = localStorage.getItem(COLLAPSED_KEY)
+    const savedCollapsed = localStorage.getItem(COLLAPSED_KEY)
+    const savedSync      = localStorage.getItem(SYNC_OPEN_KEY)
+    const onSyncPage     = SYNC_HREFS.some(h => pathname === h || pathname.startsWith(h + "/"))
     startTransition(() => {
-      setCollapsed(saved === "true")
+      setCollapsed(savedCollapsed === "true")
+      setSyncOpen(savedSync === null ? onSyncPage : savedSync === "true")
       setMounted(true)
     })
-  }, [])
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (pathname === "/admin/login") return <>{children}</>
 
@@ -61,10 +80,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     })
   }
 
+  const toggleSync = () => {
+    setSyncOpen((v) => {
+      localStorage.setItem(SYNC_OPEN_KEY, String(!v))
+      return !v
+    })
+  }
+
   const handleLogout = async () => {
     await fetch("/api/admin/logout", { method: "POST" })
     router.push("/admin/login")
   }
+
+  // Is any sync child active?
+  const syncActive = SYNC_HREFS.some(h => pathname === h || pathname.startsWith(h + "/"))
 
   return (
     <>
@@ -140,6 +169,90 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {/* Nav */}
             <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto overflow-x-hidden">
               {navigation.map((item) => {
+                if (item.children) {
+                  // ── Group item (Синхронізація) ──
+                  const isCollapsedSidebar = mounted && collapsed
+
+                  if (isCollapsedSidebar) {
+                    // Collapsed sidebar: just show icon linking to overview
+                    return (
+                      <Tooltip key={item.name}>
+                        <TooltipTrigger>
+                          <div className="hidden lg:block">
+                            <Link href={item.href}>
+                              <Button
+                                variant="ghost"
+                                className={cn(
+                                  "w-full h-10 font-medium transition-all duration-200 lg:justify-center lg:px-0",
+                                  syncActive
+                                    ? "bg-[#C9A84C]/10 text-[#C9A84C] hover:bg-[#C9A84C]/15 hover:text-[#C9A84C] border border-[#C9A84C]/20"
+                                    : "hover:bg-[#C9A84C]/5 text-[#E0E6ED]/70 hover:text-[#E0E6ED]",
+                                )}
+                                onClick={() => setMobileOpen(false)}
+                              >
+                                <item.icon className={cn("shrink-0 lg:w-5 lg:h-5 w-4 h-4", syncActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/70")} />
+                              </Button>
+                            </Link>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="font-medium bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">{item.name}</TooltipContent>
+                      </Tooltip>
+                    )
+                  }
+
+                  // Expanded sidebar: show collapsible group
+                  return (
+                    <div key={item.name}>
+                      {/* Group header button */}
+                      <button
+                        onClick={toggleSync}
+                        className={cn(
+                          "w-full h-10 rounded-md px-3 flex items-center gap-3 font-medium text-sm transition-all duration-200",
+                          syncActive
+                            ? "text-[#C9A84C] hover:bg-[#C9A84C]/10"
+                            : "text-[#E0E6ED]/70 hover:text-[#E0E6ED] hover:bg-[#C9A84C]/5",
+                        )}
+                      >
+                        <item.icon className={cn("shrink-0 w-4 h-4", syncActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/70")} />
+                        <span className="flex-1 text-left truncate">{item.name}</span>
+                        <ChevronDown className={cn(
+                          "w-3.5 h-3.5 shrink-0 transition-transform duration-200",
+                          syncActive ? "text-[#C9A84C]/60" : "text-[#E0E6ED]/40",
+                          syncOpen && "rotate-180",
+                        )} />
+                      </button>
+
+                      {/* Children */}
+                      {syncOpen && (
+                        <div className="mt-0.5 ml-3 pl-3 border-l border-[#C9A84C]/15 space-y-0.5">
+                          {item.children.map((child) => {
+                            const isActive = pathname === child.href || (child.href !== "/admin/sync" && pathname.startsWith(child.href))
+                            return (
+                              <Link key={child.name} href={child.href}>
+                                <Button
+                                  variant="ghost"
+                                  className={cn(
+                                    "w-full h-9 text-sm font-normal justify-start gap-2.5 px-2.5 transition-all duration-200",
+                                    isActive
+                                      ? "bg-[#C9A84C]/10 text-[#C9A84C] hover:bg-[#C9A84C]/15 hover:text-[#C9A84C] border border-[#C9A84C]/20"
+                                      : "hover:bg-[#C9A84C]/5 text-[#E0E6ED]/60 hover:text-[#E0E6ED]",
+                                  )}
+                                  onClick={() => setMobileOpen(false)}
+                                >
+                                  <child.icon className={cn("shrink-0 w-3.5 h-3.5", isActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/50")} />
+                                  <span className="truncate">{child.name}</span>
+                                  {isActive && <ChevronRight className="w-3 h-3 ml-auto text-[#C9A84C]/60" />}
+                                </Button>
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
+
+                // ── Regular flat item ──
                 const isActive = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(item.href))
                 const btn = (
                   <Link key={item.name} href={item.href}>
@@ -240,7 +353,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <Scale className="w-4 h-4" />
                   <span className="text-[#C9A84C]/50">/</span>
                   <span className="text-[#E0E6ED]/80 font-medium">
-                    {navigation.find((n) => n.href === pathname)?.name ?? "Адмін"}
+                    {(() => {
+                      // Check sync children first
+                      const syncChild = navigation
+                        .find(n => n.children)
+                        ?.children?.find(c => c.href === pathname || (c.href !== "/admin/sync" && pathname.startsWith(c.href)))
+                      if (syncChild) return syncChild.name
+                      return navigation.find(n => !n.children && (n.href === pathname || (n.href !== "/admin" && pathname.startsWith(n.href))))?.name ?? "Адмін"
+                    })()}
                   </span>
                 </div>
                 <div className="flex-1 lg:flex-none" />
