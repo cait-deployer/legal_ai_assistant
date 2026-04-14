@@ -68,6 +68,7 @@ SYNC_STATE_FILE     = BASE_DIR / "sync_state.json"       # РАДА
 WIKI_STATE_FILE     = BASE_DIR / "wiki_state.json"        # Wiki
 CCU_STATE_FILE      = BASE_DIR / "ccu_state.json"         # КСУ
 LPD_STATE_FILE      = BASE_DIR / "lpd_state.json"         # Правові позиції ВС
+KMU_STATE_FILE      = BASE_DIR / "kmu_state.json"         # НПА КМУ
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -77,7 +78,7 @@ _SB_KEY = (
 )
 
 # ── In-memory стан по кожному джерелу ─────────────────────────────────────────
-_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd")
+_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu")
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -863,6 +864,80 @@ def _do_lpd(session_id: str, start_index: int = 0, positions_cached: list | None
             _sync[src]["pause_requested"] = False
 
 
+def _do_kmu(session_id: str, start_index: int = 0, docs_cached: list | None = None) -> None:
+    src = "kmu"
+    log = lambda m, lv="info": _log(src, m, lv)
+    log("=" * 50)
+    log(f"🏛️  KMU SYNC (сесія {session_id[:8]}...)")
+    log("=" * 50)
+    _sb_insert_log(src, session_id)
+    processed = 0
+    try:
+        from kmu_scanner import run_kmu_sync
+
+        def pause_check():
+            with _lock:
+                return _sync[src]["pause_requested"]
+
+        def on_pause(docs: list, next_idx: int, ok: int) -> None:
+            KMU_STATE_FILE.write_text(
+                json.dumps({
+                    "source":     "kmu",
+                    "docs":       docs,
+                    "next_index": next_idx,
+                    "session_id": session_id,
+                    "saved_at":   datetime.now(timezone.utc).isoformat(),
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            log(f"💾 Стан KMU збережено (індекс {next_idx})", "warning")
+
+        def log_callback(msg: str, level: str = "info"):
+            _lvl = level if level != "info" else (
+                "error"   if "❌" in msg else
+                "success" if "✅" in msg else
+                "warning" if "⚠️" in msg or "⏸️" in msg else "info"
+            )
+            log(msg, _lvl)
+            with _lock:
+                _sync[src]["laws_processed"] = processed
+
+        ok, total = run_kmu_sync(
+            session_id=session_id,
+            log_callback=log_callback,
+            pause_check=pause_check,
+            on_pause=on_pause,
+            start_index=start_index,
+            docs_cached=docs_cached,
+        )
+        processed = ok
+
+        with _lock:
+            paused = _sync[src]["pause_requested"]
+
+        if paused:
+            _sb_update_log(session_id, status="paused",
+                           finished_at=datetime.now(timezone.utc).isoformat(),
+                           laws_processed=processed, error_message="Призупинено")
+        else:
+            if KMU_STATE_FILE.exists():
+                KMU_STATE_FILE.unlink()
+            _sb_update_log(session_id, status="success",
+                           finished_at=datetime.now(timezone.utc).isoformat(),
+                           laws_processed=processed)
+            log(f"✅ KMU синхронізацію завершено. Оброблено: {processed}/{total}.", "success")
+
+    except Exception as e:
+        log(f"❌ Критична помилка: {e}", "error")
+        _sb_update_log(session_id, status="error",
+                       finished_at=datetime.now(timezone.utc).isoformat(),
+                       laws_processed=processed, error_message=str(e))
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
 def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
     """Запускає фонову задачу. Кидає ValueError якщо вже виконується."""
     with _lock:
@@ -1415,6 +1490,71 @@ async def resume_wiki():
     return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
 
 
+# ── /admin/kmu/* ──────────────────────────────────────────────────────────────
+
+@app.post("/admin/kmu/trigger")
+async def trigger_kmu():
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("kmu", _do_kmu, session_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/kmu/pause")
+async def pause_kmu():
+    with _lock:
+        if not _sync["kmu"]["running"]:
+            raise HTTPException(400, "Синхронізація не виконується")
+        _sync["kmu"]["pause_requested"] = True
+    return {"ok": True, "message": "Пауза запрошена"}
+
+
+@app.get("/admin/kmu/logs")
+async def kmu_logs():
+    with _lock:
+        running   = _sync["kmu"]["running"]
+        pause_req = _sync["kmu"]["pause_requested"]
+        logs      = list(_sync["kmu"]["live_logs"])
+    state = None
+    if KMU_STATE_FILE.exists():
+        try:
+            s = json.loads(KMU_STATE_FILE.read_text(encoding="utf-8"))
+            state = {
+                "next_index": s.get("next_index"),
+                "saved_at":   s.get("saved_at"),
+                "total":      len(s.get("docs", [])),
+            }
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+        "history":         _sb_get_logs("kmu", 20),
+    }
+
+
+@app.post("/admin/kmu/resume")
+async def resume_kmu():
+    if _sync["kmu"]["running"]:
+        raise HTTPException(409, "KMU вже виконується")
+    if not KMU_STATE_FILE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    try:
+        state = json.loads(KMU_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"Помилка читання стану: {e}")
+    session_id = str(uuid.uuid4())
+    _start_sync("kmu", _do_kmu, session_id,
+                start_index=state["next_index"],
+                docs_cached=state.get("docs"))
+    return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
+
+
 # ── /admin/logs (unified history across all sources) ─────────────────────────
 
 @app.get("/admin/logs")
@@ -1711,6 +1851,8 @@ async def get_base_docs(
             target_cols = ["laws_ccu"]
         elif source == "lpd":
             target_cols = ["laws_positions"]
+        elif source == "kmu":
+            target_cols = ["laws_kmu"]
         else:
             target_cols = ALL_COLLECTIONS
 
@@ -2191,8 +2333,8 @@ def _route_collections(question: str, all_collections: list) -> list[str]:
     """
     q = question.lower()
 
-    # Базові колекції — завжди шукаємо (найвища якість)
-    selected: set[str] = {"laws_positions", "laws_supreme"}
+    # Базові колекції — завжди шукаємо (найвища якість + вторинне законодавство КМУ)
+    selected: set[str] = {"laws_positions", "laws_supreme", "laws_kmu"}
 
     # ── Правила: (ключові слова-підрядки, колекції) ───────────────────────────
     # Використовуємо підрядки-стеми, бо українські слова мають відмінювання:
@@ -2436,6 +2578,8 @@ async def ask(body: AskRequest):
             target_collections.append("laws_ccu")
         if "lpd" in allowed:
             target_collections.append("laws_positions")
+        if "kmu" in allowed:
+            target_collections.append("laws_kmu")
         if not target_collections:
             target_collections = ALL_COLLECTIONS
     else:
@@ -2510,9 +2654,10 @@ async def ask(body: AskRequest):
         }
 
     # 3. Будуємо збагачений контекст для LLM + citations для фронтенду
-    # law_chunks — закони та постанови; court_chunks — позиції ВС/КСУ (завжди в кінці)
+    # law_chunks — закони Ради; kmu_chunks — постанови КМУ; court_chunks — судова практика
     citations: list[dict] = []
     law_chunks:   list[str] = []
+    kmu_chunks:   list[str] = []
     court_chunks: list[str] = []
 
     for i, r in enumerate(results):
@@ -2571,17 +2716,24 @@ async def ask(body: AskRequest):
             chunk_text += "\n" + "\n".join(warnings)
         chunk_text += f"\n---\n{content}"
 
-        # Розподіляємо: судова практика завжди йде в кінці контексту
+        # Розподіляємо за правовою ієрархією: закони → КМУ → суди
         col = r.get("_collection", "")
         if col in ("laws_positions", "laws_supreme", "laws_ccu"):
             court_chunks.append(chunk_text)
+        elif col == "laws_kmu":
+            kmu_chunks.append(chunk_text)
         else:
             law_chunks.append(chunk_text)
 
-    # Контекст: спочатку закони/постанови, потім судова практика якщо є
+    # Контекст: 1) закони Ради, 2) постанови КМУ, 3) судова практика
     parts: list[str] = []
     if law_chunks:
         parts.append("\n\n".join(law_chunks))
+    if kmu_chunks:
+        parts.append(
+            "--- Постанови та розпорядження КМУ ---\n\n"
+            + "\n\n".join(kmu_chunks)
+        )
     if court_chunks:
         parts.append(
             "--- Судова практика та правові позиції ---\n\n"

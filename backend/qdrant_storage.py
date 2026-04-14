@@ -80,7 +80,7 @@ RADA_COLLECTIONS: list[str] = [
 ]
 
 # Всі колекції системи
-ALL_COLLECTIONS: list[str] = RADA_COLLECTIONS + ["laws_supreme", "laws_wiki", "laws_ccu", "laws_positions"]
+ALL_COLLECTIONS: list[str] = RADA_COLLECTIONS + ["laws_supreme", "laws_wiki", "laws_ccu", "laws_positions", "laws_kmu"]
 
 _client: QdrantClient | None = None
 

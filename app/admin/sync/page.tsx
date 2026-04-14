@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import {
   RefreshCw, Database, Scale, Gavel, BookMarked,
   CheckCircle, XCircle, Loader2, Play, ExternalLink,
-  AlertCircle, Clock, Globe,
+  AlertCircle, Clock, Globe, Building2,
 } from "lucide-react"
 
 type SourceStatus = {
@@ -30,6 +30,7 @@ const SOURCES = [
   { key: "wiki",    name: "Wiki",          href: null,              icon: Globe,      color: "teal",   apiLogs: "/api/admin/wiki/logs",     apiTrigger: "/api/admin/wiki/trigger" },
   { key: "ccu",     name: "КСУ",           href: "/admin/ccu",      icon: Gavel,      color: "red",    apiLogs: "/api/admin/ccu/logs",      apiTrigger: "/api/admin/ccu/trigger" },
   { key: "lpd",     name: "Позиції ВС",    href: "/admin/lpd",      icon: BookMarked, color: "amber",  apiLogs: "/api/admin/lpd/logs",      apiTrigger: "/api/admin/lpd/trigger" },
+  { key: "kmu",     name: "КМУ",           href: "/admin/kmu",      icon: Building2,  color: "orange", apiLogs: "/api/admin/kmu/logs",      apiTrigger: "/api/admin/kmu/trigger" },
 ] as const
 
 const colorMap: Record<string, string> = {
@@ -38,6 +39,7 @@ const colorMap: Record<string, string> = {
   teal:   "from-teal-500/10 to-teal-500/5 border-teal-500/20",
   red:    "from-red-500/10 to-red-500/5 border-red-500/20",
   amber:  "from-amber-500/10 to-amber-500/5 border-amber-500/20",
+  orange: "from-orange-500/10 to-orange-500/5 border-orange-500/20",
 }
 
 const iconColorMap: Record<string, string> = {
@@ -46,6 +48,7 @@ const iconColorMap: Record<string, string> = {
   teal:   "text-teal-400",
   red:    "text-red-400",
   amber:  "text-amber-400",
+  orange: "text-orange-400",
 }
 
 function StatusBadge({ status }: { status: SourceStatus["lastStatus"] | "idle" }) {

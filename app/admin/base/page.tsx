@@ -18,6 +18,8 @@ function getSourceLabel(law_id: string) {
   if ((law_id ?? "").startsWith("sc_"))   return "Верховний Суд"
   if ((law_id ?? "").startsWith("wiki_")) return "Wiki"
   if ((law_id ?? "").startsWith("ccu_"))  return "КСУ"
+  if ((law_id ?? "").startsWith("lpd_"))  return "Позиції ВС"
+  if ((law_id ?? "").startsWith("kmu_"))  return "КМУ"
   return "РАДА"
 }
 
@@ -28,16 +30,22 @@ function getSourceStyle(law_id: string) {
     return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
   if ((law_id ?? "").startsWith("ccu_"))
     return "bg-amber-500/10 text-amber-400 border-amber-500/20"
+  if ((law_id ?? "").startsWith("lpd_"))
+    return "bg-amber-500/10 text-amber-400 border-amber-500/20"
+  if ((law_id ?? "").startsWith("kmu_"))
+    return "bg-orange-500/10 text-orange-400 border-orange-500/20"
   return "bg-blue-500/10 text-blue-400 border-blue-500/20"
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SOURCE_OPTIONS = [
-  { value: "", label: "Всі джерела" },
-  { value: "rada", label: "РАДА" },
-  { value: "court", label: "Верховний Суд" },
-  { value: "wiki", label: "Wiki" },
-  { value: "ccu", label: "КСУ" },
+  { value: "",       label: "Всі джерела" },
+  { value: "rada",   label: "РАДА" },
+  { value: "supreme", label: "Верховний Суд" },
+  { value: "wiki",   label: "Wiki" },
+  { value: "ccu",    label: "КСУ" },
+  { value: "lpd",    label: "Позиції ВС" },
+  { value: "kmu",    label: "КМУ" },
 ]
 
 // Маппінг кодів розділів Ради → читабельні назви
