@@ -2009,50 +2009,6 @@ async def get_rada_coverage(refresh: bool = False):
     }
 
 
-# ── Document tier classifier ──────────────────────────────────────────────────
-
-def _doc_tier(meta: dict) -> int:
-    """
-    Класифікує документ за правовою ієрархією:
-      1 — базова норма (закон, кодекс, конституція)
-      2 — підзаконний акт (постанова КМУ, наказ міністерства, інструкція)
-      3 — правова позиція / судова практика (ВС, КСУ)
-    """
-    col = meta.get("_collection", "")
-    if col in ("laws_positions", "laws_supreme", "laws_ccu"):
-        return 3
-
-    title_raw = (
-        meta.get("source", "")
-        or meta.get("title", "")
-        or meta.get("doc_type", "")
-    ).lower()
-
-    # Tier 1 — базові норми
-    if any(kw in title_raw for kw in [
-        "закон україни", "кодекс", "конституція", "основи законодавства",
-        "декларац", "хартія", "статут",
-    ]):
-        return 1
-
-    # Tier 2 — підзаконні акти
-    if any(kw in title_raw for kw in [
-        "постанова", "наказ", "розпорядження", "інструкція",
-        "порядок", "положення", "правила", "регламент",
-        "кабінет міністрів", "кабміну", "кму",
-    ]):
-        return 2
-
-    return 1  # за замовчуванням — базова норма
-
-
-_TIER_LABELS = {
-    1: "📋 БАЗОВА НОРМА (Закон / Кодекс)",
-    2: "📑 ПІДЗАКОННИЙ АКТ (Постанова КМУ / Наказ)",
-    3: "⚖️ СУДОВА ПРАКТИКА (Правові позиції ВС / КСУ)",
-}
-
-
 # ── Collection router ─────────────────────────────────────────────────────────
 
 def _route_collections(question: str, all_collections: list) -> list[str]:
@@ -2401,9 +2357,10 @@ async def ask(body: AskRequest):
         }
 
     # 3. Будуємо збагачений контекст для LLM + citations для фронтенду
-    # Документи розподіляємо за правовою ієрархією (3 рівні)
+    # law_chunks — закони та постанови; court_chunks — позиції ВС/КСУ (завжди в кінці)
     citations: list[dict] = []
-    tier_buckets: dict[int, list[str]] = {1: [], 2: [], 3: []}
+    law_chunks:   list[str] = []
+    court_chunks: list[str] = []
 
     for i, r in enumerate(results):
         num = i + 1
@@ -2461,21 +2418,23 @@ async def ask(body: AskRequest):
             chunk_text += "\n" + "\n".join(warnings)
         chunk_text += f"\n---\n{content}"
 
-        # Розподіляємо у відповідний рівень правової ієрархії
-        tier = _doc_tier({**meta, "_collection": r.get("_collection", "")})
-        tier_buckets[tier].append(chunk_text)
-
-    # Збираємо контекст: спочатку закони, потім підзаконні акти, потім судова практика
-    context_sections: list[str] = []
-    for tier in (1, 2, 3):
-        chunks = tier_buckets[tier]
-        if chunks:
-            section = f"=== {_TIER_LABELS[tier]} ===\n\n" + "\n\n".join(chunks)
-            context_sections.append(section)
+        # Розподіляємо: судова практика завжди йде в кінці контексту
+        col = r.get("_collection", "")
+        if col in ("laws_positions", "laws_supreme", "laws_ccu"):
+            court_chunks.append(chunk_text)
         else:
-            context_sections.append(f"=== {_TIER_LABELS[tier]} ===\n(не знайдено у базі)")
+            law_chunks.append(chunk_text)
 
-    context = "\n\n".join(context_sections) if context_sections else "Контекст відсутній."
+    # Контекст: спочатку закони/постанови, потім судова практика якщо є
+    parts: list[str] = []
+    if law_chunks:
+        parts.append("\n\n".join(law_chunks))
+    if court_chunks:
+        parts.append(
+            "--- Судова практика та правові позиції ---\n\n"
+            + "\n\n".join(court_chunks)
+        )
+    context = "\n\n".join(parts) if parts else "Контекст відсутній."
 
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
@@ -2484,14 +2443,14 @@ async def ask(body: AskRequest):
             "system_prompt",
             (
                 "Ти — досвідчений український адвокат. "
-                "Аналізуй питання послідовно у три кроки:\n"
-                "1. БАЗОВА НОРМА — що каже закон або кодекс.\n"
-                "2. ПІДЗАКОННИЙ АКТ — як постанова КМУ або наказ міністерства конкретизує цю норму.\n"
-                "3. СУДОВА ПРАКТИКА — чи є правові позиції Верховного Суду або КСУ щодо цього питання.\n"
-                "Якщо якийсь рівень відсутній у наданому контексті — чесно скажи про це одним реченням і рухайся далі. "
+                "Відповідаючи, дотримуйся правової ієрархії: "
+                "спочатку назви що каже закон або кодекс, "
+                "потім як це конкретизує постанова КМУ або наказ міністерства (якщо є в контексті), "
+                "і лише на кінці — чи підтверджує або уточнює це судова практика ВС чи КСУ (якщо є в контексті). "
+                "Не вигадуй рівні яких немає — якщо постанови КМУ або судової практики в контексті нема, просто не згадуй. "
                 "Відповідай лаконічно і по суті — максимум 400 слів якщо не потрібно більше. "
                 "Не повторюй рекомендацію «зверніться до юриста» більше одного разу. "
-                "Не вигадуй інформацію якої немає в контексті."
+                "Не вигадуй інформацію якої немає в контексті — чесно скажи що не знайдено."
             ),
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
