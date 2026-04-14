@@ -15,6 +15,7 @@ type Settings = {
   top_p: number
   match_threshold_docs: number
   min_relevance_score: number
+  rada_source_boost: number
 }
 
 type SaInfo = { project_id: string; client_email: string } | null
@@ -37,6 +38,7 @@ const DEFAULTS: Settings = {
   top_p: 0.8,
   match_threshold_docs: 0.4,
   min_relevance_score: 0.28,
+  rada_source_boost: 1.15,
 }
 
 function parseSaInfo(json: string): SaInfo {
@@ -453,6 +455,14 @@ export default function AiSettingsPage() {
               tooltip="Мінімальний рівень схожості між питанням і документом у базі (0.0–1.0). Документи нижче порогу ігноруються ще на рівні Qdrant. Вище = суворіший фільтр, менше результатів але точніші. Нижче = більше результатів але можливий шум. Рекомендація: 0.4 для наповненої бази, 0.3 поки база мала."
             >
               <SliderInput value={settings.match_threshold_docs} onChange={v => set("match_threshold_docs", v)} min={0} max={1} step={0.01} />
+            </Field>
+            <Field
+              label="Пріоритет джерел Ради (rada_source_boost)"
+              hint="Множник score для документів Ради та ВСУ відносно Wiki/КСУ. 1.0 = без пріоритету, 1.15 = Рада іде вище Wiki при рівній релевантності. Рекомендовано: 1.1–1.3"
+              restart="cache"
+              tooltip="Підвищує ймовірність що в цитатах з'являться офіційні закони, а не Wiki-статті"
+            >
+              <SliderInput value={settings.rada_source_boost} onChange={v => set("rada_source_boost", v)} min={1.0} max={1.5} step={0.01} />
             </Field>
             <Field
               label="Мінімальна релевантність для відповіді (min_relevance_score)"
