@@ -1891,14 +1891,45 @@ async def ask(body: AskRequest):
     if not question:
         raise HTTPException(400, "question is required")
 
-    # 1. Embed query
+    # 1. Ініціалізація + embed query + HyDE гіпотетична відповідь (паралельно)
     try:
         from rada_to_supabase import embeddings
-        query_vector = await _asyncio.to_thread(embeddings.embed_query, question)
-    except Exception as e:
-        raise HTTPException(500, f"Embedding error: {e}")
+        from vertexai.generative_models import GenerativeModel, GenerationConfig
+        import json as _json
 
-    # 2. Визначаємо колекції — завжди ALL, фільтр тільки по плану (filter_sources)
+        if not _vertex_initialized:
+            _init_vertex_ai()
+
+        _model_name = settings_cache.get("ai_model")
+
+        async def _gen_hypothetical() -> str | None:
+            """HyDE: генеруємо гіпотетичний уривок закону по стилю бази."""
+            try:
+                _m = GenerativeModel(_model_name)
+                resp = await _asyncio.to_thread(
+                    _m.generate_content,
+                    (
+                        "Ти — юрист. Напиши 2-3 речення офіційного юридичного тексту "
+                        "з українського законодавства, який відповідає на питання нижче. "
+                        "Використовуй юридичну термінологію і стиль нормативних актів. "
+                        "Тільки текст, без пояснень і заголовків.\n\n"
+                        f"Питання: {question}"
+                    ),
+                    generation_config=GenerationConfig(temperature=0.1, max_output_tokens=200),
+                )
+                return resp.text.strip()
+            except Exception:
+                return None
+
+        # Embed питання + генеруємо гіпотетичну відповідь — одночасно
+        query_vector, hypothetical_text = await _asyncio.gather(
+            _asyncio.to_thread(embeddings.embed_query, question),
+            _gen_hypothetical(),
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Embedding/HyDE error: {e}")
+
+    # 2. Визначаємо колекції
     from qdrant_storage import search_qdrant, RADA_COLLECTIONS, ALL_COLLECTIONS
 
     if body.filter_sources:
@@ -1919,9 +1950,36 @@ async def ask(body: AskRequest):
 
     fetch_k = body.max_docs * 2
     match_threshold = settings_cache.get_float("match_threshold_docs", 0.4)
-    results = await _asyncio.to_thread(
-        search_qdrant, query_vector, fetch_k, target_collections, match_threshold
-    )
+
+    # 3. Пошук: оригінальний вектор + HyDE вектор паралельно → merge
+    try:
+        if hypothetical_text:
+            hyp_vector, orig_results = await _asyncio.gather(
+                _asyncio.to_thread(embeddings.embed_query, hypothetical_text),
+                _asyncio.to_thread(search_qdrant, query_vector, fetch_k, target_collections, match_threshold),
+            )
+            hyp_results = await _asyncio.to_thread(
+                search_qdrant, hyp_vector, fetch_k, target_collections, match_threshold
+            )
+            # Merge: дедуплікація по (law_id, chunk_index), беремо max score
+            seen: dict = {}
+            for r in orig_results + hyp_results:
+                key = (
+                    r["out_metadata"].get("law_id", ""),
+                    r["out_metadata"].get("chunk_index", 0),
+                )
+                if key not in seen or r["similarity"] > seen[key]["similarity"]:
+                    seen[key] = r
+            results = sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
+        else:
+            # HyDE не спрацював — fallback до звичайного пошуку
+            results = await _asyncio.to_thread(
+                search_qdrant, query_vector, fetch_k, target_collections, match_threshold
+            )
+    except Exception:
+        results = await _asyncio.to_thread(
+            search_qdrant, query_vector, fetch_k, target_collections, match_threshold
+        )
 
     # Source priority boost — піднімаємо Раду відносно Wiki/інших
     # Значення > 1.0 = Рада іде вище; 1.0 = без буста (можна змінити в адмінці)
@@ -2019,14 +2077,7 @@ async def ask(body: AskRequest):
 
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
-        import json as _json
-        from vertexai.generative_models import GenerativeModel, GenerationConfig
-
-        # Vertex AI вже ініціалізований при старті; якщо ні (credentials не були готові) — lazy init
-        if not _vertex_initialized:
-            _init_vertex_ai()
-
-        model_name    = settings_cache.get("ai_model")
+        model_name    = _model_name
         system_prompt = settings_cache.get(
             "system_prompt",
             "Ти — досвідчений український адвокат. Надавай точні відповіді виключно на основі наданого контексту.",
