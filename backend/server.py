@@ -1138,6 +1138,72 @@ async def supreme_logs():
     }
 
 
+@app.get("/admin/supreme/laws")
+async def supreme_laws(
+    page: int = 1,
+    per_page: int = 25,
+    search: str | None = None,
+):
+    """Список унікальних рішень Верховного Суду з Qdrant (chunk_index=0)."""
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_storage import get_client
+
+        client = get_client()
+        scroll_filter = Filter(must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))])
+
+        all_points: list = []
+        try:
+            next_page_offset = None
+            while True:
+                batch, next_page_offset = client.scroll(
+                    collection_name="laws_supreme",
+                    scroll_filter=scroll_filter,
+                    with_payload=True,
+                    limit=1000,
+                    offset=next_page_offset,
+                )
+                all_points.extend(batch)
+                if next_page_offset is None:
+                    break
+        except Exception:
+            pass  # колекція порожня або недоступна
+
+        if search:
+            q = search.strip().lower()
+            all_points = [
+                p for p in all_points
+                if q in (p.payload.get("source") or "").lower()
+                or q in (p.payload.get("law_id") or "").lower()
+            ]
+
+        total = len(all_points)
+        start = (page - 1) * per_page
+        page_points = all_points[start: start + per_page]
+
+        laws = [
+            {
+                "id": str(p.id),
+                "content": p.payload.get("content", ""),
+                "metadata": {
+                    "law_id":      p.payload.get("law_id", ""),
+                    "source":      p.payload.get("source", ""),
+                    "status":      p.payload.get("status", ""),
+                    "law_url":     p.payload.get("law_url", ""),
+                    "category":    p.payload.get("category", ""),
+                    "chunk_index": p.payload.get("chunk_index", 0),
+                    "scraped_at":  p.payload.get("scraped_at", ""),
+                },
+            }
+            for p in page_points
+        ]
+
+        return {"total": total, "page": page, "per_page": per_page, "laws": laws}
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # ── /admin/wiki/* ──────────────────────────────────────────────────────────────
 
 @app.post("/admin/wiki/trigger")
@@ -1489,6 +1555,79 @@ async def get_users(
     except Exception as e:
         print(f"⚠️ get_users: {e}")
         return {"users": [], "total": 0}
+
+
+# ── /admin/laws ────────────────────────────────────────────────────────────────
+
+@app.get("/admin/laws")
+async def get_laws(
+    page: int = 1,
+    per_page: int = 25,
+    search: str | None = None,
+    category: str | None = None,
+):
+    """Список унікальних законів Ради з Qdrant (chunk_index=0)."""
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from qdrant_storage import get_client, RADA_COLLECTIONS
+
+        client = get_client()
+        must = [FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+        if category:
+            must.append(FieldCondition(key="category", match=MatchValue(value=category)))
+        scroll_filter = Filter(must=must)
+
+        all_points: list = []
+        for col in RADA_COLLECTIONS:
+            try:
+                next_page_offset = None
+                while True:
+                    batch, next_page_offset = client.scroll(
+                        collection_name=col,
+                        scroll_filter=scroll_filter,
+                        with_payload=True,
+                        limit=1000,
+                        offset=next_page_offset,
+                    )
+                    all_points.extend(batch)
+                    if next_page_offset is None:
+                        break
+            except Exception:
+                continue
+
+        if search:
+            q = search.strip().lower()
+            all_points = [
+                p for p in all_points
+                if q in (p.payload.get("source") or "").lower()
+                or q in (p.payload.get("law_id") or "").lower()
+            ]
+
+        total = len(all_points)
+        start = (page - 1) * per_page
+        page_points = all_points[start: start + per_page]
+
+        laws = [
+            {
+                "id": str(p.id),
+                "content": p.payload.get("content", ""),
+                "metadata": {
+                    "law_id":      p.payload.get("law_id", ""),
+                    "source":      p.payload.get("source", ""),
+                    "status":      p.payload.get("status", ""),
+                    "law_url":     p.payload.get("law_url", ""),
+                    "category":    p.payload.get("category", ""),
+                    "chunk_index": p.payload.get("chunk_index", 0),
+                    "scraped_at":  p.payload.get("scraped_at", ""),
+                },
+            }
+            for p in page_points
+        ]
+
+        return {"total": total, "page": page, "per_page": per_page, "laws": laws}
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ── /admin/laws/text ──────────────────────────────────────────────────────────
