@@ -53,7 +53,7 @@ def _law_id_from_url(url: str) -> str:
 def _get_npa_sitemaps(log=None) -> list[str]:
     """Знаходить URL усіх NPA-sitemap через sitemap-index."""
     try:
-        r = httpx.get(KMU_SITEMAP_IDX, headers=HEADERS, timeout=30, follow_redirects=True)
+        r = httpx.get(KMU_SITEMAP_IDX, headers=HEADERS, timeout=30, follow_redirects=True, verify=False)
         r.raise_for_status()
         # Шукаємо сітемапи НПА за відомим шаблоном
         urls = re.findall(
@@ -77,7 +77,7 @@ def _parse_sitemap(sitemap_url: str, log=None) -> list[dict]:
     """Парсить один sitemap XML → [{url, lastmod, law_id}]."""
     docs = []
     try:
-        r = httpx.get(sitemap_url, headers=HEADERS, timeout=60, follow_redirects=True)
+        r = httpx.get(sitemap_url, headers=HEADERS, timeout=60, follow_redirects=True, verify=False)
         r.raise_for_status()
         locs     = re.findall(r'<loc>\s*([^<]+)\s*</loc>',         r.text)
         lastmods = re.findall(r'<lastmod>\s*([^<]+)\s*</lastmod>', r.text)
@@ -196,7 +196,7 @@ def process_kmu_doc(
 
     try:
         with _http_sem:
-            r = httpx.get(doc["url"], headers=HEADERS, timeout=30, follow_redirects=True)
+            r = httpx.get(doc["url"], headers=HEADERS, timeout=30, follow_redirects=True, verify=False)
         if r.status_code in (403, 429):
             print(f"⚠️ KMU {r.status_code} (bot protection): {doc['url']}")
             time.sleep(10)
