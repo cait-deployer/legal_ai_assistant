@@ -40,6 +40,28 @@ from dotenv import load_dotenv
 load_dotenv()
 import settings_cache  # noqa: E402 — треба після load_dotenv
 
+# ── Vertex AI — ініціалізуємо один раз при старті ─────────────────────────────
+_vertex_initialized = False
+
+def _init_vertex_ai() -> bool:
+    """Ініціалізує vertexai з поточними налаштуваннями. Повертає True якщо успішно."""
+    global _vertex_initialized
+    try:
+        import vertexai
+        creds    = settings_cache.get_credentials()
+        project  = settings_cache.get_vertex_project()
+        location = settings_cache.get_vertex_location()
+        if not project:
+            print("⚠️  [Vertex AI] project не знайдено — відкладаємо ініціалізацію")
+            return False
+        vertexai.init(project=project, location=location, credentials=creds)
+        _vertex_initialized = True
+        print(f"✅ [Vertex AI] ініціалізовано: project={project}, location={location}")
+        return True
+    except Exception as e:
+        print(f"⚠️  [Vertex AI] помилка ініціалізації: {e}")
+        return False
+
 # ── Шляхи до файлів збереженого стану (resume) ───────────────────────────────
 BASE_DIR = Path(__file__).parent
 SYNC_STATE_FILE     = BASE_DIR / "sync_state.json"       # РАДА
@@ -816,6 +838,7 @@ def _scheduled_sync() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings_cache.load()
+    _init_vertex_ai()
 
     # Перевіряємо наявність збереженого стану
     state = _load_state()
@@ -1840,6 +1863,7 @@ class AskRequest(BaseModel):
     filter_sources: list[str] | None = None    # e.g. ["rada", "wiki", "supreme", "ccu"]
     response_features: list[str] = []          # enabled response quality features from plan
     user_profile: dict | None = None           # {role, sub_role, segment} from onboarding
+    history: list[dict] | None = None          # [{role:"user"|"assistant", content:"..."}]
 
 
 _CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
@@ -1973,13 +1997,11 @@ async def ask(body: AskRequest):
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
         import json as _json
-        import vertexai
         from vertexai.generative_models import GenerativeModel, GenerationConfig
 
-        creds    = settings_cache.get_credentials()
-        project  = settings_cache.get_vertex_project()
-        location = settings_cache.get_vertex_location()
-        vertexai.init(project=project, location=location, credentials=creds)
+        # Vertex AI вже ініціалізований при старті; якщо ні (credentials не були готові) — lazy init
+        if not _vertex_initialized:
+            _init_vertex_ai()
 
         model_name    = settings_cache.get("ai_model")
         system_prompt = settings_cache.get(
@@ -2030,8 +2052,24 @@ async def ask(body: AskRequest):
             if _parts:
                 profile_block = "Профіль користувача:\n" + "\n".join(_parts) + "\n\n"
 
+        # Build conversation history block (last 6 turns max to stay within token budget)
+        history_block = ""
+        if body.history:
+            recent = body.history[-6:]
+            history_lines: list[str] = []
+            for turn in recent:
+                role = turn.get("role", "")
+                content = (turn.get("content") or "").strip()[:1000]  # cap per-turn length
+                if role == "user":
+                    history_lines.append(f"Користувач: {content}")
+                elif role == "assistant":
+                    history_lines.append(f"Асистент: {content}")
+            if history_lines:
+                history_block = "Попередній діалог:\n" + "\n".join(history_lines) + "\n\n"
+
         prompt = (
             f"{profile_block}"
+            f"{history_block}"
             f"Контекст з українського законодавства (кожен фрагмент пронумерований):\n\n{context}\n\n"
             f"---\nПитання: {question}\n\n"
             + " ".join(response_instructions)
@@ -2052,21 +2090,29 @@ async def ask(body: AskRequest):
         main_model = GenerativeModel(model_name, system_instruction=system_prompt)
         clf_model  = GenerativeModel(model_name)
 
-        response, clf_response = await _asyncio.gather(
-            _asyncio.to_thread(
-                main_model.generate_content,
-                prompt,
-                generation_config=GenerationConfig(temperature=temperature, top_p=top_p),
-            ),
-            _asyncio.to_thread(
-                clf_model.generate_content,
-                clf_prompt,
-                generation_config=GenerationConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
+        llm_timeout = settings_cache.get_float("llm_timeout_seconds", 90.0)
+        try:
+            response, clf_response = await _asyncio.wait_for(
+                _asyncio.gather(
+                    _asyncio.to_thread(
+                        main_model.generate_content,
+                        prompt,
+                        generation_config=GenerationConfig(temperature=temperature, top_p=top_p),
+                    ),
+                    _asyncio.to_thread(
+                        clf_model.generate_content,
+                        clf_prompt,
+                        generation_config=GenerationConfig(
+                            temperature=0.0,
+                            response_mime_type="application/json",
+                        ),
+                    ),
                 ),
-            ),
-        )
+                timeout=llm_timeout,
+            )
+        except _asyncio.TimeoutError:
+            raise HTTPException(504, f"AI не відповів за {llm_timeout:.0f}с — спробуйте пізніше")
+
         answer = response.text
 
         tokens_used = 0
@@ -2075,6 +2121,8 @@ async def ask(body: AskRequest):
         except Exception:
             pass
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"AI error: {e}")
 

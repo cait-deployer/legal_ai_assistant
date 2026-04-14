@@ -240,10 +240,16 @@ function ChatPage() {
         }).catch(() => { });
 
         try {
+            // Build conversation history for context (last 6 turns, excluding the pending user msg)
+            const historyForBackend = messages
+                .filter(m => m.role === 'user' || m.role === 'ai')
+                .slice(-12) // last 12 messages = 6 turns
+                .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }));
+
             const res = await fetch(`/api/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: questionText }),
+                body: JSON.stringify({ question: questionText, history: historyForBackend }),
                 signal: AbortSignal.timeout(120_000),
             });
             if (res.status === 429) {
