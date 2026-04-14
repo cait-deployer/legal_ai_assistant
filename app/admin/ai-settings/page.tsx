@@ -287,8 +287,7 @@ export default function AiSettingsPage() {
   const handleRefreshCache = async () => {
     setRefreshing(true)
     try {
-      const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const res = await fetch(`${BACKEND}/admin/settings/refresh`, { method: "POST" })
+      const res = await fetch("/api/admin/ai-settings/refresh", { method: "POST" })
       if (!res.ok) throw new Error()
       toast.success("Кеш бекенду перезавантажено")
     } catch {
