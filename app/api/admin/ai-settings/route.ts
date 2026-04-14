@@ -30,6 +30,7 @@ const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default
   min_relevance_score:   { type: "float", default: 0.28 },
   rada_source_boost:     { type: "float", default: 1.15 },
   llm_timeout_seconds:   { type: "float", default: 90 },
+  max_output_tokens:     { type: "float", default: 1500 },
 }
 
 export async function GET() {

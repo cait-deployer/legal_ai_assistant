@@ -16,6 +16,7 @@ type Settings = {
   match_threshold_docs: number
   min_relevance_score: number
   rada_source_boost: number
+  max_output_tokens: number
 }
 
 type SaInfo = { project_id: string; client_email: string } | null
@@ -39,6 +40,7 @@ const DEFAULTS: Settings = {
   match_threshold_docs: 0.4,
   min_relevance_score: 0.28,
   rada_source_boost: 1.15,
+  max_output_tokens: 1500,
 }
 
 function parseSaInfo(json: string): SaInfo {
@@ -471,6 +473,14 @@ export default function AiSettingsPage() {
               tooltip="Якщо найрелевантніший знайдений документ має схожість нижче цього порогу — система НЕ викликає Gemini і відповідає 'не знайдено в базі'. Це захист від галюцинацій. Занадто високе значення (0.5+) = багато 'не знайдено' навіть коли є дані. Занадто низьке (0.1) = AI галюцинує на нерелевантних даних. Для мультимовних запитів (рос./укр.) рекомендуй 0.25–0.28."
             >
               <SliderInput value={settings.min_relevance_score} onChange={v => set("min_relevance_score", v)} min={0} max={1} step={0.01} />
+            </Field>
+            <Field
+              label="Максимум токенів у відповіді (max_output_tokens)"
+              hint="Обмежує довжину відповіді Gemini. 1500 ≈ ~1000 слів. Рекомендовано: 800–2000"
+              restart="cache"
+              tooltip="Фізичне обмеження виводу моделі. Якщо відповіді занадто довгі — зменш до 800–1200. Якщо AI обрізає важливу інформацію — збільш до 2000+."
+            >
+              <SliderInput value={settings.max_output_tokens} onChange={v => set("max_output_tokens", v)} min={400} max={4000} step={100} />
             </Field>
           </div>
         </section>

@@ -2080,10 +2080,17 @@ async def ask(body: AskRequest):
         model_name    = _model_name
         system_prompt = settings_cache.get(
             "system_prompt",
-            "Ти — досвідчений український адвокат. Надавай точні відповіді виключно на основі наданого контексту.",
+            (
+                "Ти — досвідчений український адвокат. "
+                "Відповідай лаконічно і по суті — максимум 400 слів якщо не потрібно більше. "
+                "Не повторюй рекомендацію «зверніться до юриста» більше одного разу. "
+                "Не вигадуй інформацію якої немає в контексті — чесно скажи що не знайдено. "
+                "Надавай відповіді виключно на основі наданого контексту."
+            ),
         )
-        temperature = settings_cache.get_float("temperature", 0.1)
-        top_p       = settings_cache.get_float("top_p", 0.8)
+        temperature      = settings_cache.get_float("temperature", 0.1)
+        top_p            = settings_cache.get_float("top_p", 0.8)
+        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 1500))
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
@@ -2171,7 +2178,7 @@ async def ask(body: AskRequest):
                     _asyncio.to_thread(
                         main_model.generate_content,
                         prompt,
-                        generation_config=GenerationConfig(temperature=temperature, top_p=top_p),
+                        generation_config=GenerationConfig(temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens),
                     ),
                     _asyncio.to_thread(
                         clf_model.generate_content,
