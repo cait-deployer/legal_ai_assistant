@@ -36,8 +36,11 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                   : "hover:bg-[#C9A84C]/5"
                   }`}
               >
-                <td className="px-4 py-3">
-                  <p className="font-medium text-sm leading-snug line-clamp-2 text-[#E0E6ED]">
+                <td className="px-4 py-3 max-w-0">
+                  <p
+                    className="font-medium text-sm text-[#E0E6ED] truncate"
+                    title={meta.source || meta.law_id}
+                  >
                     {meta.source || `Закон ${meta.law_id}`}
                   </p>
                 </td>
