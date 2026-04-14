@@ -166,7 +166,7 @@ export default function KmuPage() {
           </div>
           <div>
             <h1 className="text-xl sm:text-3xl font-serif font-bold text-white">КМУ — Постанови</h1>
-            <p className="text-xs sm:text-sm text-[#E0E6ED]/70 hidden sm:block mt-1">kmu.gov.ua — ~47 000 НПА (sitemap)</p>
+            <p className="text-xs sm:text-sm text-[#E0E6ED]/70 hidden sm:block mt-1">zakon.rada.gov.ua — ~88 000 НПА КМУ</p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -203,7 +203,7 @@ export default function KmuPage() {
             <p className="text-[#C9A84C]/80 text-xs sm:text-sm">
               <strong>Постанови та розпорядження КМУ</strong> — вторинне законодавство,
               що конкретизує норми законів та кодексів.
-              Джерело: <strong>kmu.gov.ua</strong> (~47 000 документів через sitemap XML).
+              Джерело: <strong>zakon.rada.gov.ua/laws/main/o2</strong> (~88 000 НПА КМУ з повним текстом).
               Зберігаються у колекції <strong>laws_kmu</strong>.
               У чаті розміщуються між законами Ради та судовою практикою.
             </p>
@@ -244,7 +244,7 @@ export default function KmuPage() {
               </div>
               <div>
                 <p className="font-semibold text-sm text-[#E0E6ED]">Ручний запуск</p>
-                <p className="text-xs text-[#E0E6ED]/50 mt-0.5">Скрапінг усіх НПА КМУ з sitemap</p>
+                <p className="text-xs text-[#E0E6ED]/50 mt-0.5">Скрапінг усіх НПА КМУ через JSON API</p>
               </div>
             </div>
 
@@ -256,7 +256,7 @@ export default function KmuPage() {
               <p className="text-xs text-[#E0E6ED]/40 mb-4">
                 {scraping
                   ? "Новий запуск неможливий поки виконується поточний"
-                  : "Завантажить ~47 000 НПА → laws_kmu (великий обсяг, кілька годин)"}
+                  : "Завантажить ~67 000 НПА → laws_kmu (великий обсяг, кілька годин)"}
               </p>
             )}
 
@@ -300,9 +300,9 @@ export default function KmuPage() {
               {[
                 ["Тип документів",  "Постанови та Розпорядження КМУ"],
                 ["Джерело",         "kmu.gov.ua"],
-                ["Формат",          "HTML + sitemap XML"],
-                ["Обсяг",           "~47 000 НПА"],
-                ["Оновлення",       "Incremental (lastmod з sitemap)"],
+                ["Формат",          "zakon.rada.gov.ua (видавник: КМУ)"],
+                ["Обсяг",           "~88 000 НПА"],
+                ["Оновлення",       "Incremental (перевірка по law_id)"],
                 ["Ієрархія",        "Між законами та судовою практикою"],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between items-center">
