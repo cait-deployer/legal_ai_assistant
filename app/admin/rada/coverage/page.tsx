@@ -5,7 +5,7 @@ import {
   ShieldCheck, RefreshCw, Loader2, AlertCircle,
   CheckCircle2, AlertTriangle, XCircle, HelpCircle,
   Lock, FileText, Clock, TrendingUp,
-  Scale, Gavel, BookOpen, Building2, Database,
+  Scale, Gavel, BookOpen, Building2, Database, BookMarked, Landmark,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -42,7 +42,7 @@ type CoverageData = {
   cache_age_sec: number | null
 }
 
-type SourceTab = "rada" | "laws_ccu" | "laws_wiki" | "laws_supreme"
+type SourceTab = "rada" | "laws_ccu" | "laws_wiki" | "laws_supreme" | "laws_positions" | "laws_kmu"
 
 // ── Tab config ───────────────────────────────────────────────────────────────
 
@@ -85,6 +85,22 @@ const SOURCE_TABS: {
     icon: Building2,
     description: "Рішення та постанови Верховного суду України",
     color: "text-emerald-400",
+  },
+  {
+    id: "laws_positions",
+    label: "Правові позиції ВС",
+    shortLabel: "Позиції",
+    icon: BookMarked,
+    description: "Відформульовані правові позиції Верховного Суду",
+    color: "text-orange-400",
+  },
+  {
+    id: "laws_kmu",
+    label: "Кабінет Міністрів",
+    shortLabel: "КМУ",
+    icon: Landmark,
+    description: "Постанови та розпорядження Кабінету Міністрів України",
+    color: "text-blue-400",
   },
 ]
 
@@ -219,7 +235,7 @@ function AllSourcesSummary({ data, activeTab, onTabChange }: {
   const sourceMap = Object.fromEntries(data.other_sources.map(s => [s.id, s]))
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
       {SOURCE_TABS.map(tab => {
         const isRada   = tab.id === "rada"
         const count    = isRada ? totalRadaOurs : (sourceMap[tab.id]?.our_total ?? 0)
@@ -529,8 +545,8 @@ export default function CoveragePage() {
       {/* ── Loading skeleton ── */}
       {loading && (
         <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-            {[0,1,2,3].map(i => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+            {[0,1,2,3,4,5].map(i => (
               <div key={i} className="h-24 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i*60}ms` }} />
             ))}
           </div>

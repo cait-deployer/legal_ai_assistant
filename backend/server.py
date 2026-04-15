@@ -2226,6 +2226,7 @@ async def get_rada_coverage(refresh: bool = False):
         ("laws_ccu",       "Конституційний суд України",      "ccu"),
         ("laws_wiki",      "Вікіпедія — правові статті",      "wiki"),
         ("laws_supreme",   "Верховний суд України",            "supreme"),
+        ("laws_kmu",       "Кабінет Міністрів України",        "kmu"),
     ]
     other_sources = []
     for col_name, col_label, sync_src in NON_RADA_COLS:
