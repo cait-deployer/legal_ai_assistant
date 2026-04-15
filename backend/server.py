@@ -2997,7 +2997,7 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         response = await _asyncio.to_thread(
             model.generate_content,
             meta_prompt,
-            generation_config=GenerationConfig(temperature=0.5, max_output_tokens=1000),
+            generation_config=GenerationConfig(temperature=0.5, max_output_tokens=4096),
         )
         text = (response.text or "").strip()
         return {"prompt": text}
