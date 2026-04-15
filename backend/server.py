@@ -2999,7 +2999,7 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
             meta_prompt,
             generation_config=GenerationConfig(temperature=0.5, max_output_tokens=1000),
         )
-        text = (response.text or "").strip()[:800]
+        text = (response.text or "").strip()
         return {"prompt": text}
     except Exception as e:
         raise HTTPException(500, f"generate-user-prompt error: {e}")
