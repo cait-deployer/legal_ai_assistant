@@ -35,6 +35,10 @@ type User = {
   user_agent: string | null
   marketing_consent: boolean
   limit_reset_at: string | null
+  role: string | null
+  sub_role: string[] | null
+  segment: string[] | null
+  ai_personal_prompt: string | null
 }
 
 type Stats = {
@@ -393,6 +397,51 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
             <BoolRow label="Маркетинг погоджено"   value={user.marketing_consent} />
             <DrawerRow label="Зареєстрований" value={formatDate(user.created_at)} />
           </section>
+
+          {/* Onboarding + AI profile */}
+          {(user.role || user.sub_role?.length || user.segment?.length || user.ai_personal_prompt) && (
+            <section>
+              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Онбординг та AI профіль</p>
+
+              {user.role && (
+                <div className="flex items-center justify-between gap-4 py-2 border-b border-[#C9A84C]/5">
+                  <span className="text-xs text-[#E0E6ED]/40 shrink-0">Роль</span>
+                  <span className="text-xs font-medium text-[#C9A84C]">{user.role}</span>
+                </div>
+              )}
+
+              {user.sub_role && user.sub_role.length > 0 && (
+                <div className="flex items-start justify-between gap-4 py-2 border-b border-[#C9A84C]/5">
+                  <span className="text-xs text-[#E0E6ED]/40 shrink-0">Спеціалізація</span>
+                  <div className="flex flex-wrap gap-1 justify-end">
+                    {user.sub_role.map(s => (
+                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {user.segment && user.segment.length > 0 && (
+                <div className="flex items-start justify-between gap-4 py-2 border-b border-[#C9A84C]/5">
+                  <span className="text-xs text-[#E0E6ED]/40 shrink-0">Сфера</span>
+                  <div className="flex flex-wrap gap-1 justify-end">
+                    {user.segment.map(s => (
+                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {user.ai_personal_prompt && (
+                <div className="mt-3">
+                  <p className="text-[10px] text-[#E0E6ED]/30 uppercase tracking-wider mb-1.5">AI промпт</p>
+                  <div className="bg-[#0A0E1A]/80 border border-[#C9A84C]/10 rounded-xl p-3 text-xs text-[#E0E6ED]/60 leading-relaxed max-h-40 overflow-y-auto">
+                    {user.ai_personal_prompt}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Technical */}
           <section>

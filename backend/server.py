@@ -1646,7 +1646,8 @@ async def get_users(
         "last_active_at,last_city,last_country,last_country_code,"
         "auth_provider,requests_this_month,monthly_limit,"
         "total_requests,session_count,avg_session_duration,"
-        "created_at,last_ip,user_agent,marketing_consent,limit_reset_at"
+        "created_at,last_ip,user_agent,marketing_consent,limit_reset_at,"
+        "role,sub_role,segment,ai_personal_prompt"
     )
 
     params: dict = {
