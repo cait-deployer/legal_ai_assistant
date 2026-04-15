@@ -2986,7 +2986,7 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         f"- Спеціалізація: {sub_role_label}\n"
         f"- Сфери інтересів: {segment_label}\n\n"
         "Поверни ТІЛЬКИ текст профілю — суцільний параграф без заголовків, без JSON, без переліків. "
-        "Мова: українська. Обсяг: не менше 400 і не більше 750 символів."
+        "Завжди завершуй думку повним реченням. Мова: українська."
     )
 
     model_name = settings_cache.get("ai_model") or "gemini-2.0-flash-001"
@@ -2997,7 +2997,7 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         response = await _asyncio.to_thread(
             model.generate_content,
             meta_prompt,
-            generation_config=GenerationConfig(temperature=0.5, max_output_tokens=600),
+            generation_config=GenerationConfig(temperature=0.5, max_output_tokens=1000),
         )
         text = (response.text or "").strip()[:800]
         return {"prompt": text}
