@@ -2986,7 +2986,7 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         f"- Спеціалізація: {sub_role_label}\n"
         f"- Сфери інтересів: {segment_label}\n\n"
         "Поверни ТІЛЬКИ текст профілю — суцільний параграф без заголовків, без JSON, без переліків. "
-        "Завжди завершуй думку повним реченням. Мова: українська."
+        "Обсяг: рівно 80–100 слів українською. Завжди завершуй думку повним реченням."
     )
 
     model_name = settings_cache.get("ai_model") or "gemini-2.0-flash-001"
