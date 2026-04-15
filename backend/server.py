@@ -2986,8 +2986,10 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         "Мова: українська. Максимум 800 символів."
     )
 
-    model_name = _model_name
+    model_name = settings_cache.get("ai_model") or "gemini-2.0-flash-001"
     try:
+        if not _vertex_initialized:
+            _init_vertex_ai()
         model = GenerativeModel(model_name)
         response = await _asyncio.to_thread(
             model.generate_content,
