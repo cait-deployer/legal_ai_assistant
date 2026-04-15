@@ -209,7 +209,7 @@ export function ChatTour({ onComplete, onSidebarOpen, onSidebarClose }: ChatTour
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="absolute inset-0 bg-[#0A0E1A]/80 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-[#0A0E1A]/80"
       />
 
       {/* Spotlight cutout */}
