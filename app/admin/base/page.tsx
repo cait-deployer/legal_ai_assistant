@@ -339,13 +339,11 @@ export default function BasePage() {
   const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
   const [sourceFilter, setSourceFilter] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(25)
 
   const [displayMode, setDisplayMode] = useState<"cards" | "table">("table")
   const [activeDoc, setActiveDoc] = useState<Law | null>(null)
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchInput = (val: string) => {
@@ -357,8 +355,8 @@ export default function BasePage() {
     }, 400)
   }
 
-  useEffect(() => { setCurrentPage(1) }, [sourceFilter, categoryFilter, itemsPerPage])
-  useEffect(() => { setActiveDoc(null) }, [search, sourceFilter, categoryFilter])
+  useEffect(() => { setCurrentPage(1) }, [sourceFilter, itemsPerPage])
+  useEffect(() => { setActiveDoc(null) }, [search, sourceFilter])
 
   const fetchDocs = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
@@ -370,7 +368,6 @@ export default function BasePage() {
       })
       if (search) params.set("search", search)
       if (sourceFilter) params.set("source", sourceFilter)
-      if (categoryFilter) params.set("category", categoryFilter)
 
       const res = await fetch(`/api/admin/base/docs?${params}`, { cache: "no-store" })
       if (!res.ok) throw new Error("Не вдалося завантажити документи")
@@ -398,18 +395,11 @@ export default function BasePage() {
     } finally {
       setLoading(false)
     }
-  }, [search, sourceFilter, categoryFilter, currentPage, itemsPerPage])
+  }, [search, sourceFilter, currentPage, itemsPerPage])
 
   useEffect(() => { fetchDocs() }, [fetchDocs])
 
-  useEffect(() => {
-    fetch("/api/admin/base/categories")
-      .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setCategoryOptions(data) })
-      .catch(() => {})
-  }, [])
-
-  const hasFilters = searchInput || sourceFilter || categoryFilter
+  const hasFilters = searchInput || sourceFilter
   const from = total === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1
   const to = Math.min(currentPage * itemsPerPage, total)
 
@@ -417,7 +407,6 @@ export default function BasePage() {
     setSearchInput("")
     setSearch("")
     setSourceFilter("")
-    setCategoryFilter("")
     setCurrentPage(1)
   }
 
@@ -501,19 +490,6 @@ export default function BasePage() {
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#C9A84C]/50 pointer-events-none" />
               </div>
-
-              {/* Category filter */}
-              {categoryOptions.length > 0 && (
-                <div className="relative h-9 flex-1 min-w-[110px]">
-                  <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#C9A84C]/50 pointer-events-none" />
-                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-                    className="w-full h-9 pl-8 pr-6 text-xs rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40 appearance-none cursor-pointer">
-                    <option value="">Всі категорії</option>
-                    {categoryOptions.map((cat) => <option key={cat} value={cat}>{categoryLabel(cat)}</option>)}
-                  </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[#C9A84C]/50 pointer-events-none" />
-                </div>
-              )}
 
               {/* Clear */}
               {hasFilters && (
