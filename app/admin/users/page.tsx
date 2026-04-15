@@ -224,7 +224,7 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
 type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string }
 type MsgRow  = { id: string; role: string; content: string; created_at: string }
 
-function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
+function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void; labels: Record<string, string> }) {
   const rel = formatRelative(user.last_active_at)
   const pct = user.monthly_limit ? Math.min(100, Math.round((user.requests_this_month / user.monthly_limit) * 100)) : 0
   const [chats, setChats]               = useState<ChatRow[]>([])
@@ -406,7 +406,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
               {user.role && (
                 <div className="flex items-center justify-between gap-4 py-2 border-b border-[#C9A84C]/5">
                   <span className="text-xs text-[#E0E6ED]/40 shrink-0">Роль</span>
-                  <span className="text-xs font-medium text-[#C9A84C]">{user.role}</span>
+                  <span className="text-xs font-medium text-[#C9A84C]">{labels[user.role] ?? user.role}</span>
                 </div>
               )}
 
@@ -415,7 +415,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
                   <span className="text-xs text-[#E0E6ED]/40 shrink-0">Спеціалізація</span>
                   <div className="flex flex-wrap gap-1 justify-end">
                     {user.sub_role.map(s => (
-                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{s}</span>
+                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{labels[s] ?? s}</span>
                     ))}
                   </div>
                 </div>
@@ -426,7 +426,7 @@ function UserDrawer({ user, onClose }: { user: User; onClose: () => void }) {
                   <span className="text-xs text-[#E0E6ED]/40 shrink-0">Сфера</span>
                   <div className="flex flex-wrap gap-1 justify-end">
                     {user.segment.map(s => (
-                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{s}</span>
+                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{labels[s] ?? s}</span>
                     ))}
                   </div>
                 </div>
@@ -514,6 +514,7 @@ export default function UsersPage() {
   const [page, setPage]             = useState(1)
   const [selected, setSelected]     = useState<User | null>(null)
   const [statsOpen, setStatsOpen]   = useState(false)
+  const [onboardingLabels, setOnboardingLabels] = useState<Record<string, string>>({})
   const PER_PAGE = 25
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -523,6 +524,18 @@ export default function UsersPage() {
     searchTimer.current = setTimeout(() => { setDebounced(rawSearch); setPage(1) }, 400)
     return () => clearTimeout(searchTimer.current)
   }, [rawSearch])
+
+  // Fetch onboarding labels (once)
+  useEffect(() => {
+    fetch("/api/admin/onboarding")
+      .then(r => r.json())
+      .then(d => {
+        const map: Record<string, string> = {}
+        for (const opt of (d.options ?? [])) map[opt.value] = opt.label
+        setOnboardingLabels(map)
+      })
+      .catch(() => {})
+  }, [])
 
   // Fetch stats (once)
   useEffect(() => {
@@ -943,7 +956,7 @@ export default function UsersPage() {
       </div>{/* end flex-1 table section */}
 
       {/* Drawer */}
-      {selected && <UserDrawer user={selected} onClose={() => setSelected(null)} />}
+      {selected && <UserDrawer user={selected} onClose={() => setSelected(null)} labels={onboardingLabels} />}
     </div>
   )
 }
