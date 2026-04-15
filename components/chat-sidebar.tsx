@@ -146,6 +146,7 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
         {/* New Chat Button */}
         <div className="px-4 pt-4 pb-3 shrink-0">
           <button
+            data-tour="new-chat"
             onClick={handleNewChat}
             className="w-full flex items-center justify-center gap-2.5 px-4 py-3.5 rounded-xl border border-[#C9A84C]/30 bg-[#C9A84C]/5 text-[#C9A84C] hover:bg-[#C9A84C]/10 hover:border-[#C9A84C] active:scale-[0.98] transition-all duration-300 text-sm font-semibold shadow-inner shadow-black/10"
           >
@@ -212,6 +213,7 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
         <div className="border-t border-[#C9A84C]/10 bg-[#0A0E1A]/40 p-3 space-y-1 shrink-0">
           <Link
             href="/settings"
+            data-tour="settings-link"
             className="flex items-center gap-3 px-4 py-3 rounded-xl text-[#A0AEC0] hover:bg-[#C9A84C]/5 hover:text-[#E0E6ED] transition-all text-xs font-medium group"
           >
             <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-500" />

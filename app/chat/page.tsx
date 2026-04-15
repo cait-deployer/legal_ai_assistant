@@ -25,6 +25,7 @@ import {
     Menu,
 } from 'lucide-react';
 import { ChatSidebar } from '@/components/chat-sidebar';
+import { ChatTour } from '@/components/chat-tour';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const SAMPLE_QUESTIONS = [
@@ -130,6 +131,7 @@ function ChatPage() {
     const [isFirstMessage, setIsFirstMessage] = useState(true);
     const [limitExceeded, setLimitExceeded] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [showTour, setShowTour] = useState(false);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -155,9 +157,13 @@ function ChatPage() {
             .then(r => r.ok ? r.json() : null)
             .then(profile => {
                 if (!profile) return;
-                const { monthly_limit, requests_this_month } = profile;
+                const { monthly_limit, requests_this_month, tour_completed } = profile;
                 if (monthly_limit != null && requests_this_month >= monthly_limit) {
                     setLimitExceeded(true);
+                }
+                // Show tour only for new users where tour_completed is explicitly false
+                if (tour_completed === false) {
+                    setShowTour(true);
                 }
             })
             .catch(() => {});
@@ -299,6 +305,16 @@ function ChatPage() {
         }
     };
 
+    const handleTourComplete = () => {
+        setShowTour(false);
+        setSidebarOpen(false);
+        fetch('/api/settings/profile', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tour_completed: true }),
+        }).catch(() => {});
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -355,7 +371,7 @@ function ChatPage() {
                                 <p className="text-[#E0E6ED]/60 text-sm max-w-md mx-auto mb-6 md:mb-10 leading-relaxed px-2">
                                     Задайте будь-яке юридичне запитання. Я проаналізую законодавство України та надам відповідь з посиланнями.
                                 </p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 text-left">
+                                <div data-tour="sample-questions" className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3 text-left">
                                     {SAMPLE_QUESTIONS.map((q, i) => (
                                         <button key={i} onClick={() => handleSend(q.text)} className="flex items-center gap-3 p-3.5 md:p-4 rounded-2xl border border-[#C9A84C]/10 bg-[#0d1120]/50 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 active:scale-[0.98] transition-all group text-left">
                                             <div className="text-[#C9A84C] group-hover:scale-110 transition-transform shrink-0">{q.icon}</div>
@@ -435,7 +451,7 @@ function ChatPage() {
                             </div>
                         )}
 
-                        <div className={`relative flex items-end gap-3 bg-[#0d1120] border p-3 rounded-3xl transition-all shadow-2xl ${limitExceeded ? 'border-[#C9A84C]/10 opacity-50 pointer-events-none' : 'border-[#C9A84C]/20 focus-within:border-[#C9A84C]/50 focus-within:ring-1 focus-within:ring-[#C9A84C]/20'}`}>
+                        <div data-tour="chat-input" className={`relative flex items-end gap-3 bg-[#0d1120] border p-3 rounded-3xl transition-all shadow-2xl ${limitExceeded ? 'border-[#C9A84C]/10 opacity-50 pointer-events-none' : 'border-[#C9A84C]/20 focus-within:border-[#C9A84C]/50 focus-within:ring-1 focus-within:ring-[#C9A84C]/20'}`}>
                             <Textarea
                                 ref={inputRef}
                                 placeholder={limitExceeded ? "Ліміт запитів вичерпано..." : "Запитайте про закони, ФОП або договори..."}
@@ -461,6 +477,15 @@ function ChatPage() {
                     </div>
                 </footer>
             </main>
+
+            {/* First-time user tour */}
+            {showTour && (
+                <ChatTour
+                    onComplete={handleTourComplete}
+                    onSidebarOpen={() => setSidebarOpen(true)}
+                    onSidebarClose={() => setSidebarOpen(false)}
+                />
+            )}
 
             {/* Citation Dialog */}
             <Dialog open={!!activeCitation} onOpenChange={o => !o && setActiveCitation(null)}>

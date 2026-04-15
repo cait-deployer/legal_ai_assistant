@@ -12,7 +12,7 @@ import {
   User, Shield, CreditCard, BarChart2,
   Loader2, CheckCircle2, AlertCircle, LogOut,
   MapPin, Monitor, Clock, Trash2, Eye, EyeOff,
-  ChevronRight, Zap, Star, Infinity, Scale, History
+  ChevronRight, Zap, Star, Infinity, Scale, History, Bot, RefreshCw, Save, Compass
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -29,6 +29,8 @@ type Profile = {
   user_agent: string | null; created_at: string; updated_at: string;
   marketing_consent: boolean; trial_used: boolean;
   last_active_at: string | null; avg_session_duration: number; session_count: number;
+  ai_personal_prompt: string | null;
+  tour_completed: boolean | null;
 }
 
 const SEGMENT_LABELS: Record<Segment, string> = {
@@ -55,6 +57,8 @@ function AuthBg() {
 }
 
 // ── Tab: Profile
+const AI_PROMPT_MAX = 800
+
 function ProfileTab({ profile }: { profile: Profile }) {
   const [fullName, setFullName] = useState(profile.full_name ?? "")
   const [role, setRole] = useState(profile.role ?? "")
@@ -64,6 +68,13 @@ function ProfileTab({ profile }: { profile: Profile }) {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState("")
   const [, startTransition] = useTransition()
+
+  // AI Personal Prompt
+  const [aiPrompt, setAiPrompt] = useState(profile.ai_personal_prompt ?? "")
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [promptSaved, setPromptSaved] = useState(false)
+  const [promptGenerating, setPromptGenerating] = useState(false)
+  const [promptError, setPromptError] = useState("")
 
   const toggleSegment = (s: Segment) => setSegments(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
 
@@ -78,6 +89,44 @@ function ProfileTab({ profile }: { profile: Profile }) {
       setSaved(true); startTransition(() => { mutate("/api/settings/profile") })
       setTimeout(() => setSaved(false), 3000)
     } else { setError("Помилка збереження. Спробуйте ще раз.") }
+  }
+
+  const handleSavePrompt = async () => {
+    setPromptSaving(true); setPromptError(""); setPromptSaved(false)
+    const res = await fetch("/api/settings/profile", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ai_personal_prompt: aiPrompt }),
+    })
+    setPromptSaving(false)
+    if (res.ok) {
+      setPromptSaved(true); startTransition(() => { mutate("/api/settings/profile") })
+      setTimeout(() => setPromptSaved(false), 3000)
+    } else { setPromptError("Помилка збереження.") }
+  }
+
+  const handleGeneratePrompt = async () => {
+    setPromptGenerating(true); setPromptError("")
+    const res = await fetch("/api/user/generate-prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) })
+    setPromptGenerating(false)
+    if (res.ok) {
+      const data = await res.json()
+      setAiPrompt(data.prompt ?? "")
+      setPromptSaved(true)
+      startTransition(() => { mutate("/api/settings/profile") })
+      setTimeout(() => setPromptSaved(false), 3000)
+    } else { setPromptError("Помилка генерації. Спробуйте ще раз.") }
+  }
+
+  const [tourResetting, setTourResetting] = useState(false)
+  const router = useRouter()
+  const handleReplayTour = async () => {
+    setTourResetting(true)
+    await fetch("/api/settings/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tour_completed: false }),
+    }).catch(() => {})
+    router.push("/chat")
   }
 
   return (
@@ -147,6 +196,73 @@ function ProfileTab({ profile }: { profile: Profile }) {
 
       <button onClick={handleSave} disabled={saving} className="h-14 w-full rounded-2xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-widest shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center">
         {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle2 className="w-5 h-5" /> : "ЗБЕРЕГТИ ЗМІНИ"}
+      </button>
+
+      {/* ── AI Personal Prompt ── */}
+      <div className="mt-4 rounded-[1.5rem] border border-[#C9A84C]/15 bg-[#0d1120]/60 p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center">
+            <Bot className="w-4.5 h-4.5 text-[#C9A84C]" />
+          </div>
+          <div>
+            <p className="text-sm font-black text-[#E0E6ED] uppercase tracking-wider">Персональний AI-профіль</p>
+            <p className="text-[11px] text-[#C9A84C]/50 mt-0.5">Впливає на відповіді у чаті</p>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[12px] text-[#E0E6ED]/60 leading-relaxed">
+          <strong className="text-[#C9A84C]/80">Що це?</strong> AI використовує цей текст щоб адаптувати відповіді під вас — враховує вашу спеціалізацію, рівень знань та сфери інтересів. Можна згенерувати автоматично або написати вручну.
+        </div>
+
+        <div className="space-y-2">
+          <div className="relative">
+            <textarea
+              value={aiPrompt}
+              onChange={e => setAiPrompt(e.target.value.slice(0, AI_PROMPT_MAX))}
+              rows={5}
+              placeholder="Опишіть себе як юриста: спеціалізацію, досвід, на що звертати увагу у відповідях..."
+              className="w-full bg-[#0A0E1A]/80 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 focus:border-[#C9A84C]/50 rounded-2xl px-4 py-3 text-sm text-[#E0E6ED] placeholder:text-[#E0E6ED]/25 outline-none transition-colors resize-none pb-7"
+            />
+            <span className={`absolute bottom-2.5 right-3.5 text-[10px] font-mono transition-colors ${aiPrompt.length >= AI_PROMPT_MAX ? "text-red-400" : aiPrompt.length >= AI_PROMPT_MAX * 0.85 ? "text-amber-400" : "text-[#E0E6ED]/30"}`}>
+              {aiPrompt.length}/{AI_PROMPT_MAX}
+            </span>
+          </div>
+
+          {promptError && <p className="text-red-400 text-xs flex items-center gap-1.5"><AlertCircle size={12} /> {promptError}</p>}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleGeneratePrompt}
+              disabled={promptGenerating}
+              className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/70 hover:text-[#C9A84C] text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              {promptGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              Згенерувати з профілю
+            </button>
+            <button
+              onClick={handleSavePrompt}
+              disabled={promptSaving || aiPrompt === (profile.ai_personal_prompt ?? "")}
+              className="flex-1 h-10 rounded-xl bg-[#C9A84C]/10 hover:bg-[#C9A84C]/20 border border-[#C9A84C]/30 text-[#C9A84C] text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              {promptSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : promptSaved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+              {promptSaved ? "Збережено" : "Зберегти"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Replay Tour ── */}
+      <button
+        onClick={handleReplayTour}
+        disabled={tourResetting}
+        className="w-full flex items-center gap-3 px-5 py-3.5 rounded-2xl border border-[#C9A84C]/10 hover:border-[#C9A84C]/25 hover:bg-[#C9A84C]/5 text-[#C9A84C]/50 hover:text-[#C9A84C]/80 transition-all text-xs font-bold disabled:opacity-40"
+      >
+        {tourResetting
+          ? <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          : <Compass className="w-4 h-4 shrink-0" />
+        }
+        <span>Переглянути гайд по інтерфейсу</span>
+        <ChevronRight className="w-3.5 h-3.5 ml-auto" />
       </button>
     </motion.div>
   )

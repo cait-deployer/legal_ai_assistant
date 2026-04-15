@@ -120,6 +120,24 @@ function OnboardingContent() {
       })
       if (!res.ok) throw new Error("save_failed")
 
+      // Позначаємо тур як "новий" — щоб показати гайд при першому вході в чат
+      await fetch("/api/settings/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tour_completed: false }),
+      }).catch(() => {})
+
+      // Генеруємо персональний AI-промпт у фоні (не блокуємо редирект)
+      fetch("/api/user/generate-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: selections.roles ?? null,
+          sub_role: selections.sub_roles ?? [],
+          segment: selections.segments ?? [],
+        }),
+      }).catch(() => {})
+
       // Record IP / geo / UA / fingerprint after onboarding (works for Google + email)
       fetch("/api/auth/login-event", {
         method: "POST",
