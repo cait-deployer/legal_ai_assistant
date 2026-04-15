@@ -2508,6 +2508,13 @@ class AskRequest(BaseModel):
     response_features: list[str] = []          # enabled response quality features from plan
     user_profile: dict | None = None           # {role, sub_role, segment} from onboarding
     history: list[dict] | None = None          # [{role:"user"|"assistant", content:"..."}]
+    ai_personal_prompt: str | None = None      # персональний AI-профіль юзера (з налаштувань)
+
+
+class GenerateUserPromptRequest(BaseModel):
+    role: str | None = None
+    sub_role: list[str] = []
+    segment: list[str] = []
 
 
 _CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
@@ -2745,30 +2752,12 @@ async def ask(body: AskRequest):
     try:
         model_name    = _model_name
         system_prompt = settings_cache.get(
-            "system_prompt",
-            (
-                "Ти — досвідчений український адвокат-консультант. "
-                "Відповідаючи, дотримуйся правової ієрархії: "
-                "спочатку назви що каже закон або кодекс, "
-                "потім як це конкретизує постанова КМУ або наказ міністерства (якщо є в контексті), "
-                "і лише на кінці — чи підтверджує або уточнює це судова практика ВС чи КСУ (якщо є в контексті). "
-                "Не вигадуй рівні яких немає — якщо постанови КМУ або судової практики в контексті нема, просто не згадуй. "
-                "Спирайся лише на надані джерела і цитуй [1],[2]. Якщо контекст не містить відповіді — чесно повідом про це.\n\n"
-                "СПЕЦІАЛЬНІ ПОПЕРЕДЖЕННЯ (обов'язково додавай окремим рядком, якщо відповідна позначка є в контексті):\n"
-                "- Якщо джерело має позначку «⚠️ ДІЄ ЛИШЕ В УМОВАХ ВОЄННОГО СТАНУ» — обов'язково попередь: "
-                "«⚠️ Увага: ця норма діє лише в умовах воєнного стану і може змінитись після його скасування.»\n"
-                "- Якщо джерело має позначку «⚠️ ДІЮ ПРИЗУПИНЕНО / МОРАТОРІЙ» — попередь: "
-                "«⚠️ Увага: дію цієї норми призупинено або на неї поширюється мораторій. Перевірте актуальність перед застосуванням.»\n"
-                "- Якщо джерело має позначку «⚠️ МАЄ ЗВОРОТНЮ ДІЮ» — попередь: "
-                "«⚠️ Ця норма має зворотню дію і поширюється на відносини, що виникли до її прийняття.»\n\n"
-                "СТИЛЬ ВІДПОВІДІ:\n"
-                "- Офіційно-діловий, але зрозумілий для звичайної людини без юридичної освіти\n"
-                "- Структурований: використовуй нумеровані списки та підзаголовки\n"
-                "- Конкретний: давай практичні кроки, а не загальні слова\n"
-                "- Якщо питання стосується декількох галузей права — відповідай по кожній окремо\n"
-                "- Не повторюй рекомендацію «зверніться до юриста» більше одного разу\n\n"
-                "МОВА ВІДПОВІДІ: Завжди українська, незалежно від мови запитання."
-            ),
+            "system_prompt", # Ключ для завантаження з кешу
+            ( # Резервний (fallback) промпт, якщо в базі нічого немає
+                "Ти — AI-асистент. Відповідай виключно на основі наданого контексту. "
+                "Цитуй джерела у форматі [1], [2]. "
+                "Якщо відповіді немає в контексті, повідом про це."
+            ), # Цей резервний промпт максимально простий, щоб не конфліктувати з основним.
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
@@ -2815,6 +2804,11 @@ async def ask(body: AskRequest):
             if _parts:
                 profile_block = "Профіль користувача:\n" + "\n".join(_parts) + "\n\n"
 
+        # Build personal AI prompt block
+        personal_block = ""
+        if body.ai_personal_prompt and body.ai_personal_prompt.strip():
+            personal_block = f"Персональний контекст користувача:\n{body.ai_personal_prompt.strip()[:800]}\n\n"
+
         # Build conversation history block (last 6 turns max to stay within token budget)
         history_block = ""
         if body.history:
@@ -2832,6 +2826,7 @@ async def ask(body: AskRequest):
 
         prompt = (
             f"{profile_block}"
+            f"{personal_block}"
             f"{history_block}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
@@ -2903,8 +2898,8 @@ async def ask(body: AskRequest):
         classification = dict(_CLF_FALLBACK)
 
     # Filter citations — keep only those actually referenced in the answer
-    used_nums = {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
-    used_citations = [c for c in citations if c["num"] in used_nums] or citations[:3]
+    # used_nums = {int(n) for n in re.findall(r"\[(\d+)\]", answer)} # Removed: no longer filtering by explicit AI citations
+    used_citations = citations # Changed: return all relevant citations up to max_docs
 
     # Category — most common category from retrieved Qdrant chunks
     cats = [r["out_metadata"].get("category", "") for r in results if r["out_metadata"].get("category")]
@@ -2965,6 +2960,44 @@ async def generate_name(body: GenerateNameRequest):
         }
     except Exception as e:
         raise HTTPException(500, f"generate-name error: {e}")
+
+
+@app.post("/generate-user-prompt")
+async def generate_user_prompt(body: GenerateUserPromptRequest):
+    """Генерує персональний AI-промпт на основі профілю юзера з онбордингу."""
+    import asyncio as _asyncio
+    from vertexai.generative_models import GenerativeModel, GenerationConfig
+
+    role_label = body.role or "не вказано"
+    sub_role_label = ", ".join(body.sub_role) if body.sub_role else "не вказано"
+    segment_label = ", ".join(body.segment) if body.segment else "не вказано"
+
+    meta_prompt = (
+        "Ти — система налаштування AI-юриста. Згенеруй короткий персональний профіль для AI-асистента "
+        "на основі даних користувача. Профіль має складатись з 3–5 речень і описувати:\n"
+        "1. Хто цей користувач і чим займається\n"
+        "2. Який рівень юридичних знань слід припустити\n"
+        "3. На що робити акцент у відповідях (які галузі права, стиль пояснень)\n\n"
+        f"Дані користувача:\n"
+        f"- Роль: {role_label}\n"
+        f"- Спеціалізація: {sub_role_label}\n"
+        f"- Сфери інтересів: {segment_label}\n\n"
+        "Поверни ТІЛЬКИ текст профілю, без заголовків, без JSON, без пояснень. "
+        "Мова: українська. Максимум 800 символів."
+    )
+
+    model_name = _model_name
+    try:
+        model = GenerativeModel(model_name)
+        response = await _asyncio.to_thread(
+            model.generate_content,
+            meta_prompt,
+            generation_config=GenerationConfig(temperature=0.4, max_output_tokens=300),
+        )
+        text = (response.text or "").strip()[:800]
+        return {"prompt": text}
+    except Exception as e:
+        raise HTTPException(500, f"generate-user-prompt error: {e}")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

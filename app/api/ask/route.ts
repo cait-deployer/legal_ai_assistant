@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   // 2. Get user's subscription_tier + onboarding profile
   const { data: profile } = await admin()
     .from("profiles")
-    .select("subscription_tier, role, sub_role, segment")
+    .select("subscription_tier, role, sub_role, segment, ai_personal_prompt")
     .eq("id", user.id)
     .single()
 
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     const res = await fetch(`${BACKEND}/ask`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, max_docs, filter_sources, response_features, user_profile, history: history ?? null }),
+      body: JSON.stringify({ question, max_docs, filter_sources, response_features, user_profile, history: history ?? null, ai_personal_prompt: profile?.ai_personal_prompt ?? null }),
       signal: AbortSignal.timeout(120_000),
     })
 
