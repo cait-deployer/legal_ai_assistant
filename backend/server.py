@@ -2444,9 +2444,9 @@ def _load_centroids() -> dict[str, list[float]]:
             raw = _json.loads(_CENTROID_FILE.read_text())
             # Відфільтровуємо __meta__ — це не вектор
             _centroids = {k: v for k, v in raw.items() if k != "__meta__"}
-            log(f"✅ Centroid router: loaded {len(_centroids)} collections from file")
+            _log("centroid", f"✅ Centroid router: loaded {len(_centroids)} collections from file")
         else:
-            log("⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
+            _log("centroid", "⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
             from qdrant_storage import ALL_COLLECTIONS
             _centroids = _compute_centroids(ALL_COLLECTIONS)
 
@@ -2525,7 +2525,7 @@ def _route_collections(
             if len(selected) > MAX_COLS:
                 selected = set(sorted(selected, key=scores.__getitem__, reverse=True)[:MAX_COLS])
 
-            log(f"🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
+            _log("centroid", f"🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
         else:
             selected = set()
 
@@ -2533,7 +2533,7 @@ def _route_collections(
         return [c for c in all_collections if c in result]
 
     except Exception as e:
-        log(f"⚠️ Centroid routing failed ({e}), fallback → all collections", "warning")
+        _log("centroid", f"⚠️ Centroid routing failed ({e}), fallback → all collections", "warning")
         return list(all_collections)
 
 
