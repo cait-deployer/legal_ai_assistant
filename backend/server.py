@@ -2398,7 +2398,7 @@ async def get_rada_coverage(refresh: bool = False):
 
 _CENTROID_FILE = BASE_DIR / "collection_centroids.json"
 _CENTROID_SAMPLE = 300   # векторів на колекцію для апроксимації центроїду
-_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
+_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu", "rada_finance"}
 
 _centroids: dict[str, list[float]] = {}
 _centroids_lock = threading.Lock()
@@ -2675,7 +2675,7 @@ async def ask(body: AskRequest):
         target_collections = _route_collections(question, ALL_COLLECTIONS, query_vector)
 
     fetch_k = body.max_docs * 2
-    match_threshold = settings_cache.get_float("match_threshold_docs", 0.4)
+    match_threshold = settings_cache.get_float("match_threshold_docs", 0.35)
 
     # 3. Пошук: оригінальний вектор + HyDE вектор паралельно → merge
     try:
