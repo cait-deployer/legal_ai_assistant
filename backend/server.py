@@ -28,7 +28,7 @@ import threading
 import logging
 from concurrent.futures import ThreadPoolExecutor as _TPE
 
-logger = logging.getLogger("urai")
+logger = logging.getLogger("uvicorn.error")
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
