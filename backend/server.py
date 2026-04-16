@@ -2723,7 +2723,13 @@ async def ask(body: AskRequest):
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    results = results[:body.max_docs]
+    # Diversity cap: laws_positions не може займати більше половини слотів.
+    # Решту заповнюємо найкращими чанками з інших колекцій (реальний текст законів).
+    _max_pos = max(1, body.max_docs // 3)  # макс 1/3 слотів для positions
+    _positions = [r for r in results if r.get("_collection") == "laws_positions"]
+    _others    = [r for r in results if r.get("_collection") != "laws_positions"]
+    results = (_positions[:_max_pos] + _others[:(body.max_docs - min(len(_positions), _max_pos))])
+    results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
     logger.info(
