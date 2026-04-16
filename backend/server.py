@@ -25,7 +25,10 @@ import json
 import uuid
 import time
 import threading
+import logging
 from concurrent.futures import ThreadPoolExecutor as _TPE
+
+logger = logging.getLogger("urai")
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -1239,9 +1242,9 @@ async def rebuild_centroids(request: Request):
             new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
             with _centroids_lock:
                 _centroids = new_centroids
-            print(f"[CENTROID] ✅ Centroid rebuild complete ({len(new_centroids)} collections)")
+            logger.info(f"CENTROID ✅ Centroid rebuild complete ({len(new_centroids)} collections)")
         except Exception as e:
-            print(f"[CENTROID] ❌ Centroid rebuild failed: {e}")
+            logger.info(f"CENTROID ❌ Centroid rebuild failed: {e}")
         finally:
             _centroid_building = False
 
@@ -2398,7 +2401,7 @@ async def get_rada_coverage(refresh: bool = False):
 
 _CENTROID_FILE = BASE_DIR / "collection_centroids.json"
 _CENTROID_SAMPLE = 300   # векторів на колекцію для апроксимації центроїду
-_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu", "rada_finance"}
+_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
 
 _centroids: dict[str, list[float]] = {}
 _centroids_lock = threading.Lock()
@@ -2419,7 +2422,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
     centroids: dict[str, list[float]] = {}
     counts: dict[str, int] = {}
 
-    print(f"[CENTROID] ⏳ Building centroids for {len(collections)} collections...")
+    logger.info(f"CENTROID ⏳ Building centroids for {len(collections)} collections...")
 
     for coll in collections:
         try:
@@ -2430,7 +2433,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                 limit=_CENTROID_SAMPLE,
             )
             if not points:
-                print(f"[CENTROID] ⚠️ {coll}: empty collection, skipping")
+                logger.info(f"CENTROID ⚠️ {coll}: empty collection, skipping")
                 continue
 
             # p.vector може бути list або dict залежно від версії qdrant_client
@@ -2445,7 +2448,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                     raw_vecs.append(list(v))
 
             if not raw_vecs:
-                print(f"[CENTROID] ⚠️ {coll}: no valid vectors found")
+                logger.info(f"CENTROID ⚠️ {coll}: no valid vectors found")
                 continue
 
             n = len(raw_vecs)
@@ -2453,10 +2456,10 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
             centroid = [sum(v[i] for v in raw_vecs) / n for i in range(dim)]
             centroids[coll] = centroid
             counts[coll] = n
-            print(f"[CENTROID] ✅ {coll}: {n} vectors, dim={dim}")
+            logger.info(f"CENTROID ✅ {coll}: {n} vectors, dim={dim}")
 
         except Exception as e:
-            print(f"[CENTROID] ❌ {coll}: {type(e).__name__}: {e}")
+            logger.info(f"CENTROID ❌ {coll}: {type(e).__name__}: {e}")
 
     # Зберігаємо у файл: вектори + метадані під ключем __meta__
     payload: dict = dict(centroids)
@@ -2466,7 +2469,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
         "counts": counts,
     }
     _CENTROID_FILE.write_text(_json.dumps(payload))
-    print(f"[CENTROID] ✅ Saved {len(centroids)}/{len(collections)} collections to file")
+    logger.info(f"CENTROID ✅ Saved {len(centroids)}/{len(collections)} collections to file")
 
     return centroids
 
@@ -2485,9 +2488,9 @@ def _load_centroids() -> dict[str, list[float]]:
             raw = _json.loads(_CENTROID_FILE.read_text())
             # Відфільтровуємо __meta__ — це не вектор
             _centroids = {k: v for k, v in raw.items() if k != "__meta__"}
-            print(f"[CENTROID] ✅ Centroid router: loaded {len(_centroids)} collections from file")
+            logger.info(f"CENTROID ✅ Centroid router: loaded {len(_centroids)} collections from file")
         else:
-            print("[CENTROID] ⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
+            logger.info("CENTROID ⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
             from qdrant_storage import ALL_COLLECTIONS
             _centroids = _compute_centroids(ALL_COLLECTIONS)
 
@@ -2566,7 +2569,7 @@ def _route_collections(
             if len(selected) > MAX_COLS:
                 selected = set(sorted(selected, key=scores.__getitem__, reverse=True)[:MAX_COLS])
 
-            print(f"[CENTROID] 🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
+            logger.info(f"CENTROID 🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
         else:
             selected = set()
 
@@ -2574,7 +2577,7 @@ def _route_collections(
         return [c for c in all_collections if c in result]
 
     except Exception as e:
-        print(f"[CENTROID] ⚠️ Centroid routing failed ({e}), fallback → all collections")
+        logger.info(f"CENTROID ⚠️ Centroid routing failed ({e}), fallback → all collections")
         return list(all_collections)
 
 
@@ -2713,15 +2716,26 @@ async def ask(body: AskRequest):
     if abs(rada_boost - 1.0) > 0.001:
         for r in results:
             col = r.get("_collection", "")
-            # rada_ закони — найвищий пріоритет (первинне джерело права)
-            # laws_positions — трохи нижче, вони вторинні відносно тексту закону
-            if col.startswith("rada_"):
-                r["similarity"] = min(r["similarity"] * rada_boost * 1.05, 1.0)
-            elif col == "laws_supreme" or col == "laws_positions":
+            # laws_positions — найвищий пріоритет: відформульовані позиції ВС
+            if col == "laws_positions":
+                r["similarity"] = min(r["similarity"] * rada_boost * 1.1, 1.0)
+            elif col.startswith("rada_") or col == "laws_supreme":
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
     results = results[:body.max_docs]
+
+    # Діагностичний лог — видно в journalctl
+    logger.info(
+        "ASK cols=%s found=%d top=%.3f | %s",
+        target_collections,
+        len(results),
+        results[0]["similarity"] if results else 0,
+        " | ".join(
+            f"{r['_collection']}:{r['out_metadata'].get('law_id','?')}:{r['similarity']:.3f}"
+            for r in results[:5]
+        ),
+    )
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     min_score = settings_cache.get_float("min_relevance_score", 0.35)
