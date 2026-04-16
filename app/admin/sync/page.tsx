@@ -79,6 +79,7 @@ function StatusBadge({ status }: { status: SourceStatus["lastStatus"] | "idle" }
 
 type CentroidStatus = {
   ready: boolean
+  building?: boolean
   built_at?: string
   sample_size?: number
   total_collections?: number
@@ -100,11 +101,21 @@ export default function SyncOverviewPage() {
     } catch {}
   }, [])
 
+  // Poll while building
+  useEffect(() => {
+    if (!centroid?.building) return
+    const interval = setInterval(fetchCentroid, 3000)
+    return () => clearInterval(interval)
+  }, [centroid?.building, fetchCentroid])
+
   const handleRebuild = async () => {
     setRebuilding(true)
     try {
       await fetch("/api/admin/centroid/rebuild", { method: "POST" })
+      // backend responds immediately; poll status to track progress
       await fetchCentroid()
+    } catch {
+      // ignore
     } finally {
       setRebuilding(false)
     }
@@ -317,6 +328,10 @@ export default function SyncOverviewPage() {
                   <Badge variant="outline" className="gap-1 text-[#E0E6ED]/40 border-[#E0E6ED]/10 text-xs">
                     <Loader2 className="w-3 h-3 animate-spin" /> Завантаження
                   </Badge>
+                ) : centroid.building ? (
+                  <Badge variant="outline" className="gap-1 text-violet-400 border-violet-400/30 bg-violet-500/10 text-xs">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Будується…
+                  </Badge>
                 ) : centroid.ready ? (
                   <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/30 bg-emerald-500/10 text-xs">
                     <CheckCircle className="w-3 h-3" /> Активний
@@ -378,9 +393,9 @@ export default function SyncOverviewPage() {
                   variant="secondary"
                   className="gap-1.5 h-8 text-xs bg-white/5 hover:bg-white/10 text-[#E0E6ED] border border-white/10"
                   onClick={handleRebuild}
-                  disabled={rebuilding || anyRunning}
+                  disabled={rebuilding || centroid?.building}
                 >
-                  {rebuilding
+                  {rebuilding || centroid?.building
                     ? <><Loader2 className="w-3 h-3 animate-spin" /> Будується…</>
                     : <><RefreshCw className="w-3 h-3" /> {centroid?.ready ? "Перебудувати" : "Побудувати"}</>}
                 </Button>

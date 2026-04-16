@@ -1180,22 +1180,34 @@ async def get_centroid_status(request: Request):
 
 @app.post("/admin/rebuild-centroids")
 async def rebuild_centroids(request: Request):
-    """Перебудовує centroid-вектори для всіх колекцій Qdrant.
-    Запускати після великого синку нових законів. Localhost only."""
+    """Запускає перебудову centroid-векторів у фоні та повертає одразу.
+    Фронт поллить /admin/centroid-status щоб дізнатись коли готово. Localhost only."""
     client_host = request.client.host if request.client else ""
     if client_host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(403, "Forbidden: internal endpoint")
 
+    global _centroid_building
+    if _centroid_building:
+        return {"ok": False, "status": "already_building"}
+
+    async def _bg():
+        global _centroids, _centroid_building
+        _centroid_building = True
+        try:
+            import asyncio
+            from qdrant_storage import ALL_COLLECTIONS
+            new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
+            with _centroids_lock:
+                _centroids = new_centroids
+            log(f"✅ Centroid rebuild complete ({len(new_centroids)} collections)")
+        except Exception as e:
+            log(f"❌ Centroid rebuild failed: {e}", "error")
+        finally:
+            _centroid_building = False
+
     import asyncio
-    from qdrant_storage import ALL_COLLECTIONS
-    global _centroids
-
-    new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
-    # _compute_centroids already writes to file
-    with _centroids_lock:
-        _centroids = new_centroids
-
-    return {"ok": True, "collections": sorted(new_centroids.keys())}
+    asyncio.ensure_future(_bg())
+    return {"ok": True, "status": "building"}
 
 
 @app.post("/admin/rada/schedule")
@@ -2349,6 +2361,7 @@ _ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
 
 _centroids: dict[str, list[float]] = {}
 _centroids_lock = threading.Lock()
+_centroid_building = False  # прапор: rebuild виконується прямо зараз
 
 
 def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
@@ -2429,13 +2442,15 @@ def _load_centroids() -> dict[str, list[float]]:
 
 def _centroid_status() -> dict:
     """Повертає метадані з файлу центроїдів або повідомляє що файл відсутній."""
+    base = {"building": _centroid_building}
     if not _CENTROID_FILE.exists():
-        return {"ready": False}
+        return {**base, "ready": False}
     try:
         import json as _json
         raw = _json.loads(_CENTROID_FILE.read_text())
         meta = raw.get("__meta__", {})
         return {
+            **base,
             "ready": True,
             "built_at": meta.get("built_at"),
             "sample_size": meta.get("sample_size", _CENTROID_SAMPLE),
@@ -2443,7 +2458,7 @@ def _centroid_status() -> dict:
             "total_collections": len([k for k in raw if k != "__meta__"]),
         }
     except Exception as e:
-        return {"ready": False, "error": str(e)}
+        return {**base, "ready": False, "error": str(e)}
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:
