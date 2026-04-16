@@ -2516,8 +2516,8 @@ def _route_collections(
             max_score = max(scores.values())
             top = max(scores, key=scores.__getitem__)
 
-            # 85% відносний + 0.55 абсолютний поріг; max 4 доменні колекції
-            RELATIVE, ABSOLUTE, MAX_COLS = 0.85, 0.55, 4
+            # 75% відносний + 0.45 абсолютний поріг; max 5 доменних колекцій
+            RELATIVE, ABSOLUTE, MAX_COLS = 0.75, 0.45, 5
             selected = {
                 c for c, s in scores.items()
                 if s >= max_score * RELATIVE and s >= ABSOLUTE
