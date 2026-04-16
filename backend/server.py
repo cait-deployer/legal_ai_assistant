@@ -295,10 +295,18 @@ def _do_rada(
             all_laws = get_all_legal_ids(section_codes=section_codes, log=log)
             log(f"📦 Знайдено: {len(all_laws)} унікальних законів")
 
-        # 2. Метадані існуючих — по всіх колекціях паралельно
+        # 2. Метадані існуючих — окремо по кожній РАДА-колекції
+        # Дозволяємо одному закону бути в кількох колекціях одночасно:
+        # дедуплікація перевіряє лише цільову колекцію, а не всі.
         log("🔍 Завантаження метаданих Qdrant...")
-        existing_meta = get_all_existing_laws_meta()
-        log(f"📊 В базі вже: {len(existing_meta)} законів")
+        from qdrant_storage import RADA_COLLECTIONS, get_existing_laws_meta as _get_col_meta
+        existing_by_col: dict[str, dict] = {}
+        with _TPE(max_workers=6) as _ex_meta:
+            _meta_futures = {_ex_meta.submit(_get_col_meta, col): col for col in RADA_COLLECTIONS}
+            for _f in _meta_futures:
+                existing_by_col[_meta_futures[_f]] = _f.result()
+        total_existing = sum(len(v) for v in existing_by_col.values())
+        log(f"📊 В базі вже: {total_existing} записів по {len(existing_by_col)} колекціях")
 
         total = len(all_laws)
 
@@ -317,36 +325,39 @@ def _do_rada(
             law_url   = f"{BASE}/laws/show/{law_id}"
             coll      = get_collection_for_category(category)
 
-            # Захист від дублікатів: якщо інший потік вже обробляє цей закон — пропускаємо
+            # Захист від дублікатів: якщо інший потік вже обробляє цей (закон, колекція) — пропускаємо.
+            # Ключ — пара (law_id, coll), щоб той самий закон міг паралельно йти в різні колекції.
+            _ip_key = (law_id, coll)
             with _in_progress_lock:
-                if law_id in _in_progress:
-                    log(f"  ⏭ [{i + 1}] {law_id} — вже обробляється паралельним потоком")
+                if _ip_key in _in_progress:
+                    log(f"  ⏭ [{i + 1}] {law_id}/{coll} — вже обробляється паралельним потоком")
                     return 0
-                _in_progress.add(law_id)
+                _in_progress.add(_ip_key)
 
             try:
-                # Дедуплікація / оновлення
-                if law_id in existing_meta:
-                    meta           = existing_meta[law_id]
-                    stored_date    = meta.get("effective_date", "")
-                    list_date      = law.get("list_date", "")
-                    stored_coll    = meta.get("collection_name", coll)
+                # Дедуплікація — перевіряємо лише в цільовій колекції.
+                # Якщо закон є в іншій колекції — ок, додаємо ще раз у поточну.
+                col_meta = existing_by_col.get(coll, {})
+                if law_id in col_meta:
+                    meta        = col_meta[law_id]
+                    stored_date = meta.get("effective_date", "")
+                    list_date   = law.get("list_date", "")
                     if stored_date and list_date:
                         if stored_date == list_date:
-                            log(f"  ⏭ [{i + 1}] {law_id} — вже є (дата {stored_date})")
+                            log(f"  ⏭ [{i + 1}] {law_id} — вже є в {coll} (дата {stored_date})")
                             return 0
-                        log(f"🔄 Нова редакція {law_id}: {stored_date} → {list_date}")
-                        delete_law_chunks(law_id, stored_coll)
+                        log(f"🔄 Нова редакція {law_id} в {coll}: {stored_date} → {list_date}")
+                        delete_law_chunks(law_id, coll)
                     else:
                         try:
                             last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
                             last = datetime.fromisoformat(last_str)
                             now  = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
                             if (now - last).days < 7:
-                                log(f"  ⏭ [{i + 1}] {law_id} — скраповано {(now - last).days} дн. тому")
+                                log(f"  ⏭ [{i + 1}] {law_id} — в {coll} скраповано {(now - last).days} дн. тому")
                                 return 0
-                            log(f"🔄 Оновлення: {law_id} (вік: {(now - last).days} дн.)")
-                            delete_law_chunks(law_id, stored_coll)
+                            log(f"🔄 Оновлення: {law_id} в {coll} (вік: {(now - last).days} дн.)")
+                            delete_law_chunks(law_id, coll)
                         except Exception:
                             pass
 
@@ -432,7 +443,7 @@ def _do_rada(
                 return 1
             finally:
                 with _in_progress_lock:
-                    _in_progress.discard(law_id)
+                    _in_progress.discard(_ip_key)
 
         # ── Батч-паралельний цикл ─────────────────────────────────────────
         i = start_index
