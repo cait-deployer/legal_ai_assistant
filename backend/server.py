@@ -2582,7 +2582,7 @@ def _route_collections(
 
 class AskRequest(BaseModel):
     question: str
-    max_docs: int = 8                          # max chunks from Qdrant (from user's plan)
+    max_docs: int = 12                         # max chunks from Qdrant (from user's plan)
     filter_domains: list[str] | None = None    # kept for backward compat (unused)
     filter_sources: list[str] | None = None    # e.g. ["rada", "wiki", "supreme", "ccu"]
     response_features: list[str] = []          # enabled response quality features from plan
@@ -2713,10 +2713,11 @@ async def ask(body: AskRequest):
     if abs(rada_boost - 1.0) > 0.001:
         for r in results:
             col = r.get("_collection", "")
-            # laws_positions — найвищий пріоритет: відформульовані позиції ВС
-            if col == "laws_positions":
-                r["similarity"] = min(r["similarity"] * rada_boost * 1.1, 1.0)
-            elif col.startswith("rada_") or col == "laws_supreme":
+            # rada_ закони — найвищий пріоритет (первинне джерело права)
+            # laws_positions — трохи нижче, вони вторинні відносно тексту закону
+            if col.startswith("rada_"):
+                r["similarity"] = min(r["similarity"] * rada_boost * 1.05, 1.0)
+            elif col == "laws_supreme" or col == "laws_positions":
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
