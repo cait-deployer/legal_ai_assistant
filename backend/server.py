@@ -1169,21 +1169,29 @@ async def refresh_settings(request: Request):
     return {"ok": True}
 
 
+@app.get("/admin/centroid-status")
+async def get_centroid_status(request: Request):
+    """Повертає статус та метадані centroid router. Localhost only."""
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Forbidden: internal endpoint")
+    return _centroid_status()
+
+
 @app.post("/admin/rebuild-centroids")
 async def rebuild_centroids(request: Request):
     """Перебудовує centroid-вектори для всіх колекцій Qdrant.
-    Запускати після великого синку нових законів.
-    Доступно лише з localhost."""
+    Запускати після великого синку нових законів. Localhost only."""
     client_host = request.client.host if request.client else ""
     if client_host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(403, "Forbidden: internal endpoint")
 
-    import asyncio, json as _json
+    import asyncio
     from qdrant_storage import ALL_COLLECTIONS
     global _centroids
 
     new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
-    _CENTROID_FILE.write_text(_json.dumps(new_centroids))
+    # _compute_centroids already writes to file
     with _centroids_lock:
         _centroids = new_centroids
 
@@ -2346,15 +2354,18 @@ _centroids_lock = threading.Lock()
 def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
     """
     Для кожної колекції зчитує до _CENTROID_SAMPLE векторів і повертає mean vector.
-    Виконується в окремому потоці, результат кешується у файл.
+    Зберігає у файл разом з метаданими (час, кількість векторів).
     """
+    import json as _json
+    from datetime import timezone
     from qdrant_storage import get_client
     from concurrent.futures import ThreadPoolExecutor
 
     client = get_client()
-    result: dict[str, list[float]] = {}
+    centroids: dict[str, list[float]] = {}
+    counts: dict[str, int] = {}
 
-    def _sample_one(coll: str) -> tuple[str, list[float]] | None:
+    def _sample_one(coll: str) -> tuple[str, list[float], int] | None:
         try:
             points, _ = client.scroll(
                 collection_name=coll,
@@ -2369,7 +2380,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
             n = len(vecs)
             centroid = [sum(v[i] for v in vecs) / n for i in range(dim)]
             log(f"  📍 centroid {coll}: {n} vectors")
-            return coll, centroid
+            return coll, centroid, n
         except Exception as e:
             log(f"  ⚠️ centroid {coll}: {e}", "warning")
             return None
@@ -2377,9 +2388,20 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
     with ThreadPoolExecutor(max_workers=6) as pool:
         for res in pool.map(_sample_one, collections):
             if res:
-                result[res[0]] = res[1]
+                centroids[res[0]] = res[1]
+                counts[res[0]] = res[2]
 
-    return result
+    # Зберігаємо у файл: вектори + метадані під ключем __meta__
+    payload = dict(centroids)
+    payload["__meta__"] = {
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "sample_size": _CENTROID_SAMPLE,
+        "counts": counts,
+    }
+    _CENTROID_FILE.write_text(_json.dumps(payload))
+    log(f"✅ Centroid router: built and saved ({len(centroids)} collections)")
+
+    return centroids
 
 
 def _load_centroids() -> dict[str, list[float]]:
@@ -2393,17 +2415,35 @@ def _load_centroids() -> dict[str, list[float]]:
 
         if _CENTROID_FILE.exists():
             import json as _json
-            _centroids = _json.loads(_CENTROID_FILE.read_text())
+            raw = _json.loads(_CENTROID_FILE.read_text())
+            # Відфільтровуємо __meta__ — це не вектор
+            _centroids = {k: v for k, v in raw.items() if k != "__meta__"}
             log(f"✅ Centroid router: loaded {len(_centroids)} collections from file")
         else:
             log("⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
             from qdrant_storage import ALL_COLLECTIONS
             _centroids = _compute_centroids(ALL_COLLECTIONS)
-            import json as _json
-            _CENTROID_FILE.write_text(_json.dumps(_centroids))
-            log(f"✅ Centroid router: built and saved ({len(_centroids)} collections)")
 
         return _centroids
+
+
+def _centroid_status() -> dict:
+    """Повертає метадані з файлу центроїдів або повідомляє що файл відсутній."""
+    if not _CENTROID_FILE.exists():
+        return {"ready": False}
+    try:
+        import json as _json
+        raw = _json.loads(_CENTROID_FILE.read_text())
+        meta = raw.get("__meta__", {})
+        return {
+            "ready": True,
+            "built_at": meta.get("built_at"),
+            "sample_size": meta.get("sample_size", _CENTROID_SAMPLE),
+            "collections": {k: v for k, v in meta.get("counts", {}).items()},
+            "total_collections": len([k for k in raw if k != "__meta__"]),
+        }
+    except Exception as e:
+        return {"ready": False, "error": str(e)}
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:

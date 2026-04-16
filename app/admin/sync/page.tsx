@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import {
   RefreshCw, Database, Scale, Gavel, BookMarked,
   CheckCircle, XCircle, Loader2, Play, ExternalLink,
-  AlertCircle, Clock, Globe, Building2,
+  AlertCircle, Clock, Globe, Building2, Cpu,
 } from "lucide-react"
 
 type SourceStatus = {
@@ -77,10 +77,38 @@ function StatusBadge({ status }: { status: SourceStatus["lastStatus"] | "idle" }
   )
 }
 
+type CentroidStatus = {
+  ready: boolean
+  built_at?: string
+  sample_size?: number
+  total_collections?: number
+  collections?: Record<string, number>
+  error?: string
+}
+
 export default function SyncOverviewPage() {
   const [statuses, setStatuses]   = useState<Record<string, SourceStatus>>({})
   const [loading,  setLoading]    = useState(true)
   const [triggering, setTriggering] = useState<Record<string, boolean>>({})
+  const [centroid, setCentroid]   = useState<CentroidStatus | null>(null)
+  const [rebuilding, setRebuilding] = useState(false)
+
+  const fetchCentroid = useCallback(async () => {
+    try {
+      const r = await fetch("/api/admin/centroid/status")
+      if (r.ok) setCentroid(await r.json())
+    } catch {}
+  }, [])
+
+  const handleRebuild = async () => {
+    setRebuilding(true)
+    try {
+      await fetch("/api/admin/centroid/rebuild", { method: "POST" })
+      await fetchCentroid()
+    } finally {
+      setRebuilding(false)
+    }
+  }
 
   const fetchAll = useCallback(async () => {
     const results = await Promise.allSettled(
@@ -134,9 +162,10 @@ export default function SyncOverviewPage() {
 
   useEffect(() => {
     fetchAll()
+    fetchCentroid()
     const interval = setInterval(fetchAll, 10000)
     return () => clearInterval(interval)
-  }, [fetchAll])
+  }, [fetchAll, fetchCentroid])
 
   const handleTrigger = async (src: typeof SOURCES[number]) => {
     setTriggering(p => ({ ...p, [src.key]: true }))
@@ -268,8 +297,105 @@ export default function SyncOverviewPage() {
           </div>
         )}
 
+        {/* Centroid router card */}
+        <div className="mt-6">
+          <Card className="bg-gradient-to-br from-violet-500/10 to-violet-500/5 border border-violet-500/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-black/20">
+                    <Cpu className="w-5 h-5 text-violet-400" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base text-[#E0E6ED]">Centroid Router</CardTitle>
+                    <CardDescription className="text-xs mt-0.5">
+                      Семантичний routing на основі реальних векторів Qdrant
+                    </CardDescription>
+                  </div>
+                </div>
+                {centroid === null ? (
+                  <Badge variant="outline" className="gap-1 text-[#E0E6ED]/40 border-[#E0E6ED]/10 text-xs">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Завантаження
+                  </Badge>
+                ) : centroid.ready ? (
+                  <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/30 bg-emerald-500/10 text-xs">
+                    <CheckCircle className="w-3 h-3" /> Активний
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30 bg-amber-500/10 text-xs">
+                    <AlertCircle className="w-3 h-3" /> Не побудований
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+
+            <CardContent className="pt-0">
+              {centroid?.ready ? (
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center gap-6">
+                    <div>
+                      <p className="text-2xl font-bold text-[#E0E6ED]">{centroid.total_collections}</p>
+                      <p className="text-xs text-[#E0E6ED]/40">колекцій</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-[#E0E6ED]">{centroid.sample_size}</p>
+                      <p className="text-xs text-[#E0E6ED]/40">векторів/колекція</p>
+                    </div>
+                    {centroid.built_at && (
+                      <div>
+                        <p className="text-sm font-medium text-[#E0E6ED]">
+                          {new Date(centroid.built_at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" })}
+                        </p>
+                        <p className="text-xs text-[#E0E6ED]/40">останнє оновлення</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {centroid.collections && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {Object.entries(centroid.collections).sort(([a],[b]) => a.localeCompare(b)).map(([col, count]) => (
+                        <span
+                          key={col}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300"
+                        >
+                          {col} ({count})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mb-4 text-sm text-[#E0E6ED]/50">
+                  {centroid?.error
+                    ? `Помилка: ${centroid.error}`
+                    : "Центроїди не знайдено. Натисни «Побудувати» — займе ~10-15 сек, виконується один раз."}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-1.5 h-8 text-xs bg-white/5 hover:bg-white/10 text-[#E0E6ED] border border-white/10"
+                  onClick={handleRebuild}
+                  disabled={rebuilding || anyRunning}
+                >
+                  {rebuilding
+                    ? <><Loader2 className="w-3 h-3 animate-spin" /> Будується…</>
+                    : <><RefreshCw className="w-3 h-3" /> {centroid?.ready ? "Перебудувати" : "Побудувати"}</>}
+                </Button>
+                {anyRunning && !rebuilding && (
+                  <span className="text-xs text-amber-400/70">
+                    Дочекайся завершення синку перед перебудовою
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Info */}
-        <div className="mt-6 p-4 rounded-xl border border-[#C9A84C]/10 bg-[#C9A84C]/5">
+        <div className="mt-4 p-4 rounded-xl border border-[#C9A84C]/10 bg-[#C9A84C]/5">
           <p className="text-sm text-[#E0E6ED]/50">
             Сторінка автоматично оновлюється кожні 10 секунд. Для детального управління кожним джерелом — перейдіть на відповідну підсторінку.
           </p>
