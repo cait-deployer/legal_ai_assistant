@@ -1198,9 +1198,9 @@ async def rebuild_centroids(request: Request):
             new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
             with _centroids_lock:
                 _centroids = new_centroids
-            log(f"✅ Centroid rebuild complete ({len(new_centroids)} collections)")
+            _log("centroid", f"✅ Centroid rebuild complete ({len(new_centroids)} collections)")
         except Exception as e:
-            log(f"❌ Centroid rebuild failed: {e}", "error")
+            _log("centroid", f"❌ Centroid rebuild failed: {e}", "error")
         finally:
             _centroid_building = False
 
