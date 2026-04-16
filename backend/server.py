@@ -1192,7 +1192,6 @@ async def rebuild_centroids(request: Request):
 
     async def _bg():
         global _centroids, _centroid_building
-        _centroid_building = True
         try:
             import asyncio
             from qdrant_storage import ALL_COLLECTIONS
@@ -1206,6 +1205,7 @@ async def rebuild_centroids(request: Request):
             _centroid_building = False
 
     import asyncio
+    _centroid_building = True  # виставляємо ДО ensure_future, щоб status відразу бачив True
     asyncio.ensure_future(_bg())
     return {"ok": True, "status": "building"}
 
