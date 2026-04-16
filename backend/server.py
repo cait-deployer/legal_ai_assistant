@@ -1198,9 +1198,9 @@ async def rebuild_centroids(request: Request):
             new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
             with _centroids_lock:
                 _centroids = new_centroids
-            _log("centroid", f"✅ Centroid rebuild complete ({len(new_centroids)} collections)")
+            print(f"[CENTROID] ✅ Centroid rebuild complete ({len(new_centroids)} collections)")
         except Exception as e:
-            _log("centroid", f"❌ Centroid rebuild failed: {e}", "error")
+            print(f"[CENTROID] ❌ Centroid rebuild failed: {e}")
         finally:
             _centroid_building = False
 
@@ -2378,7 +2378,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
     centroids: dict[str, list[float]] = {}
     counts: dict[str, int] = {}
 
-    _log("centroid", f"⏳ Building centroids for {len(collections)} collections...")
+    print(f"[CENTROID] ⏳ Building centroids for {len(collections)} collections...")
 
     for coll in collections:
         try:
@@ -2389,7 +2389,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                 limit=_CENTROID_SAMPLE,
             )
             if not points:
-                _log("centroid", f"  ⚠️ {coll}: empty collection, skipping", "warning")
+                print(f"[CENTROID] ⚠️ {coll}: empty collection, skipping")
                 continue
 
             # p.vector може бути list або dict залежно від версії qdrant_client
@@ -2404,7 +2404,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                     raw_vecs.append(list(v))
 
             if not raw_vecs:
-                _log("centroid", f"  ⚠️ {coll}: no valid vectors found", "warning")
+                print(f"[CENTROID] ⚠️ {coll}: no valid vectors found")
                 continue
 
             n = len(raw_vecs)
@@ -2412,10 +2412,10 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
             centroid = [sum(v[i] for v in raw_vecs) / n for i in range(dim)]
             centroids[coll] = centroid
             counts[coll] = n
-            _log("centroid", f"  ✅ {coll}: {n} vectors, dim={dim}")
+            print(f"[CENTROID] ✅ {coll}: {n} vectors, dim={dim}")
 
         except Exception as e:
-            _log("centroid", f"  ❌ {coll}: {type(e).__name__}: {e}", "error")
+            print(f"[CENTROID] ❌ {coll}: {type(e).__name__}: {e}")
 
     # Зберігаємо у файл: вектори + метадані під ключем __meta__
     payload: dict = dict(centroids)
@@ -2425,7 +2425,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
         "counts": counts,
     }
     _CENTROID_FILE.write_text(_json.dumps(payload))
-    _log("centroid", f"✅ Saved {len(centroids)}/{len(collections)} collections to file")
+    print(f"[CENTROID] ✅ Saved {len(centroids)}/{len(collections)} collections to file")
 
     return centroids
 
@@ -2444,9 +2444,9 @@ def _load_centroids() -> dict[str, list[float]]:
             raw = _json.loads(_CENTROID_FILE.read_text())
             # Відфільтровуємо __meta__ — це не вектор
             _centroids = {k: v for k, v in raw.items() if k != "__meta__"}
-            _log("centroid", f"✅ Centroid router: loaded {len(_centroids)} collections from file")
+            print(f"[CENTROID] ✅ Centroid router: loaded {len(_centroids)} collections from file")
         else:
-            _log("centroid", "⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
+            print("[CENTROID] ⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
             from qdrant_storage import ALL_COLLECTIONS
             _centroids = _compute_centroids(ALL_COLLECTIONS)
 
@@ -2525,7 +2525,7 @@ def _route_collections(
             if len(selected) > MAX_COLS:
                 selected = set(sorted(selected, key=scores.__getitem__, reverse=True)[:MAX_COLS])
 
-            _log("centroid", f"🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
+            print(f"[CENTROID] 🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
         else:
             selected = set()
 
@@ -2533,7 +2533,7 @@ def _route_collections(
         return [c for c in all_collections if c in result]
 
     except Exception as e:
-        _log("centroid", f"⚠️ Centroid routing failed ({e}), fallback → all collections", "warning")
+        print(f"[CENTROID] ⚠️ Centroid routing failed ({e}), fallback → all collections")
         return list(all_collections)
 
 
