@@ -2368,17 +2368,19 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
     """
     Для кожної колекції зчитує до _CENTROID_SAMPLE векторів і повертає mean vector.
     Зберігає у файл разом з метаданими (час, кількість векторів).
+    Sequential — простіше дебажити, уникаємо проблем з вкладеними thread pool.
     """
     import json as _json
     from datetime import timezone
     from qdrant_storage import get_client
-    from concurrent.futures import ThreadPoolExecutor
 
     client = get_client()
     centroids: dict[str, list[float]] = {}
     counts: dict[str, int] = {}
 
-    def _sample_one(coll: str) -> tuple[str, list[float], int] | None:
+    log(f"⏳ Building centroids for {len(collections)} collections...")
+
+    for coll in collections:
         try:
             points, _ = client.scroll(
                 collection_name=coll,
@@ -2386,33 +2388,45 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                 with_payload=False,
                 limit=_CENTROID_SAMPLE,
             )
-            vecs = [p.vector for p in points if p.vector is not None]
-            if not vecs:
-                return None
-            dim = len(vecs[0])
-            n = len(vecs)
-            centroid = [sum(v[i] for v in vecs) / n for i in range(dim)]
-            log(f"  📍 centroid {coll}: {n} vectors")
-            return coll, centroid, n
-        except Exception as e:
-            log(f"  ⚠️ centroid {coll}: {e}", "warning")
-            return None
+            if not points:
+                log(f"  ⚠️ centroid {coll}: empty collection, skipping")
+                continue
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        for res in pool.map(_sample_one, collections):
-            if res:
-                centroids[res[0]] = res[1]
-                counts[res[0]] = res[2]
+            # p.vector може бути list або dict залежно від версії qdrant_client
+            raw_vecs = []
+            for p in points:
+                v = p.vector
+                if v is None:
+                    continue
+                if isinstance(v, dict):
+                    # named vectors — беремо перший
+                    v = next(iter(v.values()), None)
+                if v is not None:
+                    raw_vecs.append(list(v))
+
+            if not raw_vecs:
+                log(f"  ⚠️ centroid {coll}: no valid vectors found")
+                continue
+
+            n = len(raw_vecs)
+            dim = len(raw_vecs[0])
+            centroid = [sum(v[i] for v in raw_vecs) / n for i in range(dim)]
+            centroids[coll] = centroid
+            counts[coll] = n
+            log(f"  ✅ centroid {coll}: {n} vectors, dim={dim}")
+
+        except Exception as e:
+            log(f"  ❌ centroid {coll}: {type(e).__name__}: {e}", "error")
 
     # Зберігаємо у файл: вектори + метадані під ключем __meta__
-    payload = dict(centroids)
+    payload: dict = dict(centroids)
     payload["__meta__"] = {
         "built_at": datetime.now(timezone.utc).isoformat(),
         "sample_size": _CENTROID_SAMPLE,
         "counts": counts,
     }
     _CENTROID_FILE.write_text(_json.dumps(payload))
-    log(f"✅ Centroid router: built and saved ({len(centroids)} collections)")
+    log(f"✅ Centroid router: saved {len(centroids)}/{len(collections)} collections to file")
 
     return centroids
 
