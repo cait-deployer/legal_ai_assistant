@@ -1169,6 +1169,27 @@ async def refresh_settings(request: Request):
     return {"ok": True}
 
 
+@app.post("/admin/rebuild-centroids")
+async def rebuild_centroids(request: Request):
+    """Перебудовує centroid-вектори для всіх колекцій Qdrant.
+    Запускати після великого синку нових законів.
+    Доступно лише з localhost."""
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Forbidden: internal endpoint")
+
+    import asyncio, json as _json
+    from qdrant_storage import ALL_COLLECTIONS
+    global _centroids
+
+    new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
+    _CENTROID_FILE.write_text(_json.dumps(new_centroids))
+    with _centroids_lock:
+        _centroids = new_centroids
+
+    return {"ok": True, "collections": sorted(new_centroids.keys())}
+
+
 @app.post("/admin/rada/schedule")
 async def set_schedule(body: ScheduleBody):
     _sb_update_schedule(body.enabled)
@@ -2306,95 +2327,83 @@ async def get_rada_coverage(refresh: bool = False):
     }
 
 
-# ── Semantic collection router ─────────────────────────────────────────────────
+# ── Centroid-based collection router ──────────────────────────────────────────
 #
-# Замість хардкоду ключових слів — прототипні ембединги правових доменів.
-# Prototype-вектори будуються один раз при першому зверненні (lazy init).
-# При кожному /ask питання вже заембеджене → routing безкоштовний (dot product).
+# Routing без жодного хардкоду: для кожної колекції Qdrant обчислюємо
+# centroid — середній вектор по вибірці реальних документів.
+# Зберігаємо у collection_centroids.json; при /ask — dot product з query_vector.
+#
+# Перебудова: POST /admin/rebuild-centroids (після великого синку).
 
-_DOMAIN_DESCRIPTIONS: dict[str, str] = {
-    "rada_finance": (
-        "податки ПДВ акциз митниця фіскальна служба ФОП єдиний податок спрощена система "
-        "бухгалтерія податкова декларація ПДФО ЄСВ РРО донарахування податкова перевірка"
-    ),
-    "rada_labor": (
-        "трудові відносини трудовий договір звільнення заробітна плата відпустка "
-        "лікарняний листок мобілізація ЗСУ військова служба роботодавець працівник "
-        "колективний договір страйк ухилення від призову"
-    ),
-    "rada_criminal": (
-        "кримінальне право злочин обвинувачення вирок суду корупція хабар "
-        "прокурор підозрюваний НАБУ САП кримінальне провадження шахрайство крадіжка"
-    ),
-    "rada_civil": (
-        "цивільне право договір купівлі продажу оренди спадщина заповіт "
-        "шлюб розлучення аліменти відшкодування шкоди позика дарування "
-        "усиновлення опіка батьківські права розірвання договору"
-    ),
-    "rada_industry": (
-        "господарське корпоративне право товариство з обмеженою відповідальністю ТОВ "
-        "акціонери банкрутство санація засновники статутний капітал "
-        "реєстрація ліквідація підприємства кредиторські вимоги"
-    ),
-    "rada_admin": (
-        "адміністративне право ліцензія дозвіл держорган нотаріат "
-        "перевірка ДПС сертифікація оскарження рішень органу влади "
-        "адміністративна відповідальність штраф держслужбовець"
-    ),
-    "rada_housing": (
-        "нерухомість будівництво квартира приватний будинок дача введення в експлуатацію "
-        "прийняття об'єкта в експлуатацію ЖКГ комунальні послуги іпотека "
-        "реєстрація права власності забудовник дозвіл на будівництво "
-        "технічна інвентаризація управитель будинку ОСBB"
-    ),
-    "rada_land": (
-        "земельне право земельна ділянка кадастровий номер земельний пай "
-        "сільськогосподарські угіддя оренда землі цільове призначення "
-        "агропромисловий державний земельний кадастр"
-    ),
-    "rada_state": (
-        "державний устрій громадянство паспорт реєстрація місця проживання "
-        "місцеве самоврядування вибори референдум громадська організація "
-        "публічна служба орган місцевої влади"
-    ),
-    "rada_court": (
-        "судовий процес апеляційна скарга касаційна скарга виконавче провадження "
-        "виконавчий лист судові витрати процесуальні строки забезпечення позову "
-        "мирова угода підсудність підвідомственість"
-    ),
-    "rada_intl": (
-        "міжнародне право ЄСПЛ Європейський суд з прав людини Страсбург "
-        "міжнародний договір конвенція ратифікація міжнародні зобов'язання"
-    ),
-    "laws_ccu": (
-        "конституційне право права людини Конституційний суд України КСУ "
-        "дискримінація конституційність основні права та свободи"
-    ),
-    "laws_wiki": (
-        "юридичне визначення правового поняття термін юридичний словник "
-        "що таке як визначається правова норма"
-    ),
-}
+_CENTROID_FILE = BASE_DIR / "collection_centroids.json"
+_CENTROID_SAMPLE = 300   # векторів на колекцію для апроксимації центроїду
+_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
 
-# Prototype vectors built once on first use (thread-safe lazy init)
-_domain_proto_vecs: dict[str, list[float]] = {}
-_domain_proto_lock = threading.Lock()
+_centroids: dict[str, list[float]] = {}
+_centroids_lock = threading.Lock()
 
 
-def _get_domain_proto_vecs() -> dict[str, list[float]]:
-    global _domain_proto_vecs
-    if _domain_proto_vecs:
-        return _domain_proto_vecs
-    with _domain_proto_lock:
-        if _domain_proto_vecs:
-            return _domain_proto_vecs
-        from rada_to_supabase import embeddings as _emb
-        keys = list(_DOMAIN_DESCRIPTIONS.keys())
-        texts = list(_DOMAIN_DESCRIPTIONS.values())
-        vecs = _emb.embed_documents(texts)
-        _domain_proto_vecs = dict(zip(keys, vecs))
-        log(f"✅ Domain prototype embeddings initialized ({len(keys)} domains)")
-        return _domain_proto_vecs
+def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
+    """
+    Для кожної колекції зчитує до _CENTROID_SAMPLE векторів і повертає mean vector.
+    Виконується в окремому потоці, результат кешується у файл.
+    """
+    from qdrant_storage import get_client
+    from concurrent.futures import ThreadPoolExecutor
+
+    client = get_client()
+    result: dict[str, list[float]] = {}
+
+    def _sample_one(coll: str) -> tuple[str, list[float]] | None:
+        try:
+            points, _ = client.scroll(
+                collection_name=coll,
+                with_vectors=True,
+                with_payload=False,
+                limit=_CENTROID_SAMPLE,
+            )
+            vecs = [p.vector for p in points if p.vector is not None]
+            if not vecs:
+                return None
+            dim = len(vecs[0])
+            n = len(vecs)
+            centroid = [sum(v[i] for v in vecs) / n for i in range(dim)]
+            log(f"  📍 centroid {coll}: {n} vectors")
+            return coll, centroid
+        except Exception as e:
+            log(f"  ⚠️ centroid {coll}: {e}", "warning")
+            return None
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for res in pool.map(_sample_one, collections):
+            if res:
+                result[res[0]] = res[1]
+
+    return result
+
+
+def _load_centroids() -> dict[str, list[float]]:
+    """Завантажує центроїди з файлу або будує їх з Qdrant (перший запуск)."""
+    global _centroids
+    if _centroids:
+        return _centroids
+    with _centroids_lock:
+        if _centroids:
+            return _centroids
+
+        if _CENTROID_FILE.exists():
+            import json as _json
+            _centroids = _json.loads(_CENTROID_FILE.read_text())
+            log(f"✅ Centroid router: loaded {len(_centroids)} collections from file")
+        else:
+            log("⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
+            from qdrant_storage import ALL_COLLECTIONS
+            _centroids = _compute_centroids(ALL_COLLECTIONS)
+            import json as _json
+            _CENTROID_FILE.write_text(_json.dumps(_centroids))
+            log(f"✅ Centroid router: built and saved ({len(_centroids)} collections)")
+
+        return _centroids
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:
@@ -2411,54 +2420,52 @@ def _route_collections(
     query_vector: list[float] | None = None,
 ) -> list[str]:
     """
-    Семантичний routing: знаходить релевантні колекції Qdrant через cosine similarity
-    між вектором питання і прототипними векторами правових доменів.
+    Centroid routing: cosine similarity між query_vector і центроїдом кожної колекції.
 
-    Завжди включає: laws_positions, laws_supreme, laws_kmu.
-    Додатково — домени з найвищою схожістю з питанням.
-    Fallback → ALL_COLLECTIONS якщо embedding недоступний.
+    Завжди: laws_positions, laws_supreme, laws_kmu.
+    Додатково: колекції з score ≥ 85% від максимального І ≥ абсолютного порогу.
+    Fallback → ALL_COLLECTIONS якщо центроїди недоступні.
     """
-    always: set[str] = {"laws_positions", "laws_supreme", "laws_kmu"}
-
     try:
-        proto_vecs = _get_domain_proto_vecs()
+        centroids = _load_centroids()
+        if not centroids:
+            return list(all_collections)
 
-        # Reuse вже обчислений query_vector якщо є — інакше embed заново
         if query_vector is None:
             from rada_to_supabase import embeddings as _emb
             q_vec = _emb.embed_query(question)
         else:
             q_vec = query_vector
 
+        # Рахуємо тільки по колекціях, для яких є центроїд
+        # (виключаємо always-included щоб не впливали на відносний поріг)
+        optional = {c: v for c, v in centroids.items() if c not in _ALWAYS_INCLUDE}
         scores: dict[str, float] = {
-            domain: _cosine_sim(q_vec, vec)
-            for domain, vec in proto_vecs.items()
+            coll: _cosine_sim(q_vec, vec) for coll, vec in optional.items()
         }
 
-        max_score = max(scores.values())
-        top_domain = max(scores, key=scores.__getitem__)
+        if scores:
+            max_score = max(scores.values())
+            top = max(scores, key=scores.__getitem__)
 
-        # Відбираємо домени: score ≥ 85% від максимального І ≥ 0.60 абсолютно
-        # Порогові значення: 0.60 відсікає явно нерелевантні домени;
-        # 0.85 * max_score дозволяє взяти суміжні домени (напр. housing + admin)
-        RELATIVE = 0.85
-        ABSOLUTE = 0.60
-        selected = {
-            d for d, s in scores.items()
-            if s >= max_score * RELATIVE and s >= ABSOLUTE
-        }
+            # 85% відносний + 0.55 абсолютний поріг; max 4 доменні колекції
+            RELATIVE, ABSOLUTE, MAX_COLS = 0.85, 0.55, 4
+            selected = {
+                c for c, s in scores.items()
+                if s >= max_score * RELATIVE and s >= ABSOLUTE
+            }
+            if len(selected) > MAX_COLS:
+                selected = set(sorted(selected, key=scores.__getitem__, reverse=True)[:MAX_COLS])
 
-        # Максимум 4 доменні колекції — щоб не перевантажувати Qdrant
-        if len(selected) > 4:
-            selected = set(sorted(selected, key=scores.__getitem__, reverse=True)[:4])
+            log(f"🧭 Routing → {sorted(_ALWAYS_INCLUDE | selected)} [top: {top} = {max_score:.3f}]")
+        else:
+            selected = set()
 
-        result = always | selected
-        routed = sorted(result)
-        log(f"🧭 Routing → {routed} [top: {top_domain} = {max_score:.3f}]")
+        result = _ALWAYS_INCLUDE | selected
         return [c for c in all_collections if c in result]
 
     except Exception as e:
-        log(f"⚠️ Semantic routing failed ({e}), fallback → all collections", "warning")
+        log(f"⚠️ Centroid routing failed ({e}), fallback → all collections", "warning")
         return list(all_collections)
 
 
