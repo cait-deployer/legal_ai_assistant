@@ -2732,15 +2732,16 @@ async def ask(body: AskRequest):
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
+    _non_pos = [r for r in results if r.get("_collection") != "laws_positions"]
     logger.info(
-        "ASK cols=%s found=%d top=%.3f | %s",
-        target_collections,
+        "ASK found=%d pos=%d other=%d | top_other: %s",
         len(results),
-        results[0]["similarity"] if results else 0,
+        sum(1 for r in results if r.get("_collection") == "laws_positions"),
+        len(_non_pos),
         " | ".join(
             f"{r['_collection']}:{r['out_metadata'].get('law_id','?')}:{r['similarity']:.3f}"
-            for r in results[:5]
-        ),
+            for r in _non_pos[:5]
+        ) or "NONE",
     )
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
