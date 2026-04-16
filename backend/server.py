@@ -1180,6 +1180,36 @@ async def refresh_settings(request: Request):
     return {"ok": True}
 
 
+@app.get("/admin/debug-search")
+async def debug_search(q: str, request: Request):
+    """Показує які колекції обрано та топ-документи для запиту. Localhost only."""
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Forbidden: internal endpoint")
+    try:
+        from rada_to_supabase import embeddings
+        from qdrant_storage import search_qdrant, ALL_COLLECTIONS
+        import asyncio as _aio
+        q_vec = await _aio.to_thread(embeddings.embed_query, q)
+        collections = _route_collections(q, ALL_COLLECTIONS, q_vec)
+        results = await _aio.to_thread(search_qdrant, q_vec, 5, collections, 0.0)
+        return {
+            "collections_searched": collections,
+            "top_docs": [
+                {
+                    "score": round(r["similarity"], 4),
+                    "collection": r["_collection"],
+                    "law_id": r["out_metadata"].get("law_id", ""),
+                    "title": r["out_metadata"].get("source", "")[:80],
+                    "snippet": r["out_content"][:200],
+                }
+                for r in results
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/admin/centroid-status")
 async def get_centroid_status(request: Request):
     """Повертає статус та метадані centroid router. Localhost only."""
