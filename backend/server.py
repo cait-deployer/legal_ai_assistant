@@ -2378,7 +2378,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
     centroids: dict[str, list[float]] = {}
     counts: dict[str, int] = {}
 
-    log(f"⏳ Building centroids for {len(collections)} collections...")
+    _log("centroid", f"⏳ Building centroids for {len(collections)} collections...")
 
     for coll in collections:
         try:
@@ -2389,7 +2389,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                 limit=_CENTROID_SAMPLE,
             )
             if not points:
-                log(f"  ⚠️ centroid {coll}: empty collection, skipping")
+                _log("centroid", f"  ⚠️ {coll}: empty collection, skipping", "warning")
                 continue
 
             # p.vector може бути list або dict залежно від версії qdrant_client
@@ -2399,13 +2399,12 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
                 if v is None:
                     continue
                 if isinstance(v, dict):
-                    # named vectors — беремо перший
                     v = next(iter(v.values()), None)
                 if v is not None:
                     raw_vecs.append(list(v))
 
             if not raw_vecs:
-                log(f"  ⚠️ centroid {coll}: no valid vectors found")
+                _log("centroid", f"  ⚠️ {coll}: no valid vectors found", "warning")
                 continue
 
             n = len(raw_vecs)
@@ -2413,10 +2412,10 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
             centroid = [sum(v[i] for v in raw_vecs) / n for i in range(dim)]
             centroids[coll] = centroid
             counts[coll] = n
-            log(f"  ✅ centroid {coll}: {n} vectors, dim={dim}")
+            _log("centroid", f"  ✅ {coll}: {n} vectors, dim={dim}")
 
         except Exception as e:
-            log(f"  ❌ centroid {coll}: {type(e).__name__}: {e}", "error")
+            _log("centroid", f"  ❌ {coll}: {type(e).__name__}: {e}", "error")
 
     # Зберігаємо у файл: вектори + метадані під ключем __meta__
     payload: dict = dict(centroids)
@@ -2426,7 +2425,7 @@ def _compute_centroids(collections: list[str]) -> dict[str, list[float]]:
         "counts": counts,
     }
     _CENTROID_FILE.write_text(_json.dumps(payload))
-    log(f"✅ Centroid router: saved {len(centroids)}/{len(collections)} collections to file")
+    _log("centroid", f"✅ Saved {len(centroids)}/{len(collections)} collections to file")
 
     return centroids
 
