@@ -2723,20 +2723,32 @@ async def ask(body: AskRequest):
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    # Diversity cap: laws_positions не може займати більше половини слотів.
-    # Решту заповнюємо найкращими чанками з інших колекцій (реальний текст законів).
-    _max_pos = max(1, body.max_docs // 3)  # макс 1/3 слотів для positions
+    # Diversity caps:
+    #   laws_positions — макс 1/3 слотів (позиції ВС не витісняють реальний текст законів)
+    #   laws_kmu       — гарантований мінімум 1/8 слотів (постанови КМУ завжди в контексті)
+    _max_pos = max(1, body.max_docs // 3)
+    _min_kmu = max(1, body.max_docs // 8)
+
     _positions = [r for r in results if r.get("_collection") == "laws_positions"]
-    _others    = [r for r in results if r.get("_collection") != "laws_positions"]
-    results = (_positions[:_max_pos] + _others[:(body.max_docs - min(len(_positions), _max_pos))])
+    _kmu       = [r for r in results if r.get("_collection") == "laws_kmu"]
+    _rest      = [r for r in results if r.get("_collection") not in ("laws_positions", "laws_kmu")]
+
+    pos_taken = _positions[:_max_pos]
+    kmu_taken = _kmu[:_min_kmu]
+    remaining = body.max_docs - len(pos_taken) - len(kmu_taken)
+
+    # Решту слотів заповнюємо найкращими з kmu (понад гарантію) + інших колекцій
+    filler = sorted(_kmu[_min_kmu:] + _rest, key=lambda x: x["similarity"], reverse=True)
+    results = pos_taken + kmu_taken + filler[:max(0, remaining)]
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
     _non_pos = [r for r in results if r.get("_collection") != "laws_positions"]
     logger.info(
-        "ASK found=%d pos=%d other=%d | top_other: %s",
+        "ASK found=%d pos=%d kmu=%d other=%d | top_other: %s",
         len(results),
         sum(1 for r in results if r.get("_collection") == "laws_positions"),
+        sum(1 for r in results if r.get("_collection") == "laws_kmu"),
         len(_non_pos),
         " | ".join(
             f"{r['_collection']}:{r['out_metadata'].get('law_id','?')}:{r['similarity']:.3f}"
