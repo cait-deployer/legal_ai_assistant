@@ -2916,9 +2916,13 @@ async def ask(body: AskRequest):
     # Title-based metadata boost: знаходить документи по заголовку (source поле)
     try:
         from qdrant_storage import search_qdrant_by_title
-        _q_words = [w for w in search_question.split() if len(w) > 4]
-        _hyde_words = [w for w in (hypothetical_text or "").split() if len(w) > 5][:8]
-        _title_kws = list(dict.fromkeys(_q_words[:2] + _hyde_words))[:7]
+        import re as _re
+        _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
+        _q_words = [_strip_punct(w) for w in search_question.split() if len(w) > 4]
+        _q_words = [w for w in _q_words if len(w) > 4]
+        _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
+        _hyde_words = [w for w in _hyde_words if len(w) > 4]
+        _title_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
