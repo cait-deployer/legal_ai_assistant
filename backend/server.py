@@ -2851,14 +2851,16 @@ async def ask(body: AskRequest):
     _pos_col = _by_col.pop("laws_positions", [])
     pos_taken = _pos_col[:_max_pos]
 
-    _per_col_cap = max(2, body.max_docs // len(_by_col)) if _by_col else 4
+    _n_cols = len(_by_col) or 1
+    # Скільки слотів гарантовано кожній колекції (мін 2, лишаємо ~1/4 для overflow)
+    _guaranteed_each = max(2, (body.max_docs * 3 // 4) // _n_cols)
+    _per_col_cap = _guaranteed_each + 2  # ще 2 ідуть у overflow-конкуренцію
 
     guaranteed: list = []
     overflow: list = []
     for col, docs in _by_col.items():
-        guaranteed.append(docs[0])   # 1 кращий з колекції (вже відсортовано)
-        # Решта цієї колекції — але не більше ніж cap-1 додаткових
-        overflow.extend(docs[1:_per_col_cap])
+        guaranteed.extend(docs[:_guaranteed_each])  # N кращих з колекції гарантовано
+        overflow.extend(docs[_guaranteed_each:_per_col_cap])
 
     remaining = body.max_docs - len(pos_taken) - len(guaranteed)
     filler = sorted(overflow + _pos_col[_max_pos:], key=lambda x: x["similarity"], reverse=True)
