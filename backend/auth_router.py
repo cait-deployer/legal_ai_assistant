@@ -279,7 +279,7 @@ async def fingerprint_check(payload: FingerprintCheckPayload):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Limit helper — used by /ask
+# Limit helper
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_and_increment_limit(user_id: str) -> None:
