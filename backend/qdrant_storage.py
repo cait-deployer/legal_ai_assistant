@@ -399,21 +399,27 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
     Keyword-пошук по full-text індексу (fallback коли vector score низький).
     Повертає результати з фіксованим similarity=0.45 щоб потрапляли після vector-результатів.
     """
+    import re as _re
     client = get_client()
     results: list = []
     words = [w for w in query.split() if len(w) > 3]
-    if not words:
+    # Числа (номери постанов, суми) критично важливі — включаємо незалежно від довжини
+    numbers = [w for w in query.split() if _re.match(r'^\d+$', w)]
+    combined = list(dict.fromkeys(words[:8] + numbers[:4]))  # дедуп, числа в кінці
+    if not combined:
         return []
-    search_text = " ".join(words[:8])  # обмежуємо довжину
+    search_text = " ".join(combined)
 
     for col in collections:
         try:
+            # laws_kmu: збільшений ліміт бо scroll повертає в порядку вставки (не за релевантністю)
+            col_limit = limit * 2 if col == "laws_kmu" else limit
             points, _ = client.scroll(
                 collection_name=col,
                 scroll_filter=Filter(
                     must=[FieldCondition(key="content", match=MatchText(text=search_text))]
                 ),
-                limit=limit,
+                limit=col_limit,
                 with_payload=True,
                 with_vectors=False,
             )
