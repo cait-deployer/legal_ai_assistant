@@ -454,46 +454,44 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
 
 def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
     """
-    Title-based metadata boost: знаходить документи де source (заголовок) містить
-    ключові слова запиту → повертає їх чанки з підвищеним score 0.75.
-    Docs ranked by number of keyword matches (more matches = higher priority).
+    Multi-field keyword boost: знаходить документи де source АБО content містить
+    ключові слова запиту. Docs ranked by total keyword matches across both fields.
     """
     client = get_client()
     results: list = []
 
     for col in collections:
-        # Per-collection: accumulate match counts and points for all keywords
         law_match_counts: dict[str, int] = {}
-        law_points: dict[str, dict[str, object]] = {}  # law_id -> {pt.id -> pt}
+        law_points: dict[str, dict[str, object]] = {}
 
-        for kw in keywords:
-            if len(kw) < 5:
-                continue
-            try:
-                pts, _ = client.scroll(
-                    collection_name=col,
-                    scroll_filter=Filter(
-                        must=[FieldCondition(key="source", match=MatchText(text=kw))]
-                    ),
-                    limit=500,
-                    with_payload=True,
-                    with_vectors=False,
-                )
-                seen_in_kw: set[str] = set()
-                for p in pts:
-                    lid = p.payload.get("law_id", "")
-                    if not lid:
-                        continue
-                    if lid not in law_match_counts:
-                        law_match_counts[lid] = 0
-                        law_points[lid] = {}
-                    # Count each law_id once per keyword (not once per chunk)
-                    if lid not in seen_in_kw:
-                        law_match_counts[lid] += 1
-                        seen_in_kw.add(lid)
-                    law_points[lid][str(p.id)] = p
-            except Exception as e:
-                print(f"⚠️ search_qdrant_by_title [{col}]: {e}")
+        for field in ("source", "content"):
+            for kw in keywords:
+                if len(kw) < 5:
+                    continue
+                try:
+                    pts, _ = client.scroll(
+                        collection_name=col,
+                        scroll_filter=Filter(
+                            must=[FieldCondition(key=field, match=MatchText(text=kw))]
+                        ),
+                        limit=200,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    seen_in_kw: set[str] = set()
+                    for p in pts:
+                        lid = p.payload.get("law_id", "")
+                        if not lid:
+                            continue
+                        if lid not in law_match_counts:
+                            law_match_counts[lid] = 0
+                            law_points[lid] = {}
+                        if lid not in seen_in_kw:
+                            law_match_counts[lid] += 1
+                            seen_in_kw.add(lid)
+                        law_points[lid][str(p.id)] = p
+                except Exception as e:
+                    print(f"⚠️ search_qdrant_by_title [{col}/{field}]: {e}")
 
         # Sort docs by keyword match count desc → more relevant titles first
         for lid in sorted(law_match_counts, key=lambda l: -law_match_counts[l]):
