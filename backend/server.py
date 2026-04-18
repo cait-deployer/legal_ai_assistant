@@ -2750,27 +2750,29 @@ async def ask(body: AskRequest):
     # 2. Визначаємо колекції
     from qdrant_storage import search_qdrant, RADA_COLLECTIONS, ALL_COLLECTIONS
 
+    # Крок 1: визначаємо дозволені колекції за тарифом
     if body.filter_sources:
-        # Явний фільтр від юзера/плану — поважаємо його вибір
         allowed = set(body.filter_sources)
-        target_collections: list[str] = []
+        plan_collections: list[str] = []
         if "rada" in allowed:
-            target_collections += RADA_COLLECTIONS
+            plan_collections += RADA_COLLECTIONS
         if "supreme" in allowed:
-            target_collections.append("laws_supreme")
+            plan_collections.append("laws_supreme")
         if "wiki" in allowed:
-            target_collections.append("laws_wiki")
+            plan_collections.append("laws_wiki")
         if "ccu" in allowed:
-            target_collections.append("laws_ccu")
+            plan_collections.append("laws_ccu")
         if "lpd" in allowed:
-            target_collections.append("laws_positions")
+            plan_collections.append("laws_positions")
         if "kmu" in allowed:
-            target_collections.append("laws_kmu")
-        if not target_collections:
-            target_collections = ALL_COLLECTIONS
+            plan_collections.append("laws_kmu")
+        if not plan_collections:
+            plan_collections = ALL_COLLECTIONS
     else:
-        # Intent classifier: один Gemini запит визначає галузь → жорсткий вибір колекцій
-        target_collections = await _classify_and_route(search_question, ALL_COLLECTIONS)
+        plan_collections = ALL_COLLECTIONS
+
+    # Крок 2: intent classifier звужує до релевантних в межах дозволених тарифом
+    target_collections = await _classify_and_route(search_question, plan_collections)
 
     fetch_k = body.max_docs * 2
     match_threshold = settings_cache.get_float("match_threshold_docs", 0.35)
