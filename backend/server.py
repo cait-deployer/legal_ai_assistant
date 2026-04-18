@@ -2850,6 +2850,14 @@ async def ask(body: AskRequest):
     kmu_chunks:   list[str] = []
     court_chunks: list[str] = []
 
+    # Скасовані документи виключаємо повністю — не в контекст, не в citations
+    # (вони дезорієнтують LLM і вводять користувача в оману)
+    def _is_expired(r: dict) -> bool:
+        s = r["out_metadata"].get("status", "").lower()
+        return "втратив" in s or "втратила" in s
+
+    results = [r for r in results if not _is_expired(r)]
+
     for i, r in enumerate(results):
         num = i + 1
         meta = r["out_metadata"]
@@ -2877,7 +2885,6 @@ async def ask(body: AskRequest):
         if not content:
             continue
 
-        # Збагачений заголовок — LLM бачить всі деталі для точного цитування
         status = meta.get("status", "")
         doc_type = meta.get("doc_type", "")
         effective_date = meta.get("effective_date", "") or (meta.get("scraped_at", "") or "")[:10]
