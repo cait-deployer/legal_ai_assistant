@@ -456,13 +456,16 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
     """
     Title-based metadata boost: знаходить документи де source (заголовок) містить
     ключові слова запиту → повертає їх чанки з підвищеним score 0.75.
-    Не потребує переіндексації — використовує наявне поле source.
+    Docs ranked by number of keyword matches (more matches = higher priority).
     """
     client = get_client()
     results: list = []
-    seen_law_ids: set = set()
 
     for col in collections:
+        # Per-collection: accumulate match counts and points for all keywords
+        law_match_counts: dict[str, int] = {}
+        law_points: dict[str, dict[str, object]] = {}  # law_id -> {pt.id -> pt}
+
         for kw in keywords:
             if len(kw) < 5:
                 continue
@@ -476,26 +479,33 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                     with_payload=True,
                     with_vectors=False,
                 )
-                # Групуємо по law_id — беремо перші chunks_per_doc чанків з кожного документу
-                by_law: dict[str, list] = {}
+                seen_in_kw: set[str] = set()
                 for p in pts:
                     lid = p.payload.get("law_id", "")
-                    if lid:
-                        by_law.setdefault(lid, []).append(p)
-                for lid, doc_pts in by_law.items():
-                    if lid in seen_law_ids:
+                    if not lid:
                         continue
-                    seen_law_ids.add(lid)
-                    # Сортуємо по chunk_index — беремо перші N чанків (де є загальні норми)
-                    doc_pts.sort(key=lambda p: p.payload.get("chunk_index", 0))
-                    for p in doc_pts[:chunks_per_doc]:
-                        results.append({
-                            "out_content":  p.payload.get("content", ""),
-                            "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
-                            "similarity":   0.75,
-                            "_collection":  col,
-                            "_title_match": True,
-                        })
+                    if lid not in law_match_counts:
+                        law_match_counts[lid] = 0
+                        law_points[lid] = {}
+                    # Count each law_id once per keyword (not once per chunk)
+                    if lid not in seen_in_kw:
+                        law_match_counts[lid] += 1
+                        seen_in_kw.add(lid)
+                    law_points[lid][str(p.id)] = p
             except Exception as e:
                 print(f"⚠️ search_qdrant_by_title [{col}]: {e}")
+
+        # Sort docs by keyword match count desc → more relevant titles first
+        for lid in sorted(law_match_counts, key=lambda l: -law_match_counts[l]):
+            pts_list = list(law_points[lid].values())
+            pts_list.sort(key=lambda p: p.payload.get("chunk_index", 0))
+            for p in pts_list[:chunks_per_doc]:
+                results.append({
+                    "out_content":  p.payload.get("content", ""),
+                    "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
+                    "similarity":   0.75,
+                    "_collection":  col,
+                    "_title_match": True,
+                })
+
     return results
