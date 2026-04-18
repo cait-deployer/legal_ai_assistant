@@ -2717,9 +2717,10 @@ async def ask(body: AskRequest):
         if not target_collections:
             target_collections = ALL_COLLECTIONS
     else:
-        # Автоматичний routing за змістом питання
-        # Замість пошуку в усіх 16 колекціях → тільки релевантні 2-5
-        target_collections = _route_collections(question, ALL_COLLECTIONS, query_vector)
+        # Тимчасово: пошук по всіх дозволених колекціях без centroid routing
+        # (діагностика — перевіряємо чи routing є причиною пропуску rada_labor)
+        target_collections = ALL_COLLECTIONS
+        logger.info("ROUTING disabled (test mode): searching all %d collections", len(target_collections))
 
     fetch_k = body.max_docs * 2
     match_threshold = settings_cache.get_float("match_threshold_docs", 0.35)
