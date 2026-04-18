@@ -2915,8 +2915,8 @@ async def ask(body: AskRequest):
     try:
         from qdrant_storage import search_qdrant_by_title
         _q_words = [w for w in search_question.split() if len(w) > 4]
-        _hyde_words = [w for w in (hypothetical_text or "").split() if len(w) > 5][:4]
-        _title_kws = list(dict.fromkeys(_q_words[:2] + _hyde_words))[:4]
+        _hyde_words = [w for w in (hypothetical_text or "").split() if len(w) > 5][:8]
+        _title_kws = list(dict.fromkeys(_q_words[:2] + _hyde_words))[:7]
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=1)
             _title_results = _title_results[:6]  # hard cap: не більше 6 чанків від title boost
