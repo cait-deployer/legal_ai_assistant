@@ -2720,9 +2720,12 @@ async def ask(body: AskRequest):
         async def _gen_hypothetical() -> str | None:
             """HyDE: генеруємо гіпотетичний уривок закону по стилю бази."""
             try:
-                # Використовуємо flash-001 (без thinking mode) щоб HyDE генерував повний текст
-                _hyde_model = "gemini-2.0-flash-001"
-                _m = GenerativeModel(_hyde_model)
+                _m = GenerativeModel(_model_name)
+                try:
+                    from vertexai.generative_models import ThinkingConfig as _TC
+                    _hyde_cfg = GenerationConfig(temperature=0.1, max_output_tokens=600, thinking_config=_TC(thinking_budget=0))
+                except Exception:
+                    _hyde_cfg = GenerationConfig(temperature=0.1, max_output_tokens=600)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
@@ -2733,7 +2736,7 @@ async def ask(body: AskRequest):
                         "Тільки текст, без пояснень і заголовків.\n\n"
                         f"Питання: {question}"
                     ),
-                    generation_config=GenerationConfig(temperature=0.1, max_output_tokens=600),
+                    generation_config=_hyde_cfg,
                 )
                 text = resp.text.strip()
                 logger.info("HYDE generated: %s", text[:300])
