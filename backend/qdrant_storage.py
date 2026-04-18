@@ -402,35 +402,42 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
     import re as _re
     client = get_client()
     results: list = []
-    words = [w for w in query.split() if len(w) > 3]
-    # Числа (номери постанов, суми) критично важливі — включаємо незалежно від довжини
+    # Беремо лише змістовні слова (> 4 символів, без знаків пунктуації)
+    words = [_re.sub(r'[^\w]', '', w) for w in query.split()]
+    words = [w for w in words if len(w) > 4]
     numbers = [w for w in query.split() if _re.match(r'^\d+$', w)]
-    combined = list(dict.fromkeys(words[:8] + numbers[:4]))  # дедуп, числа в кінці
-    if not combined:
+    key_terms = list(dict.fromkeys(words[:6] + numbers[:3]))
+    if not key_terms:
         return []
-    search_text = " ".join(combined)
 
     for col in collections:
         try:
-            # laws_kmu: збільшений ліміт бо scroll повертає в порядку вставки (не за релевантністю)
             col_limit = limit * 2 if col == "laws_kmu" else limit
-            points, _ = client.scroll(
-                collection_name=col,
-                scroll_filter=Filter(
-                    must=[FieldCondition(key="content", match=MatchText(text=search_text))]
-                ),
-                limit=col_limit,
-                with_payload=True,
-                with_vectors=False,
-            )
-            for p in points:
-                results.append({
-                    "out_content":  p.payload.get("content", ""),
-                    "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
-                    "similarity":   0.45,
-                    "_collection":  col,
-                    "_keyword_match": True,
-                })
+            # Шукаємо кожне ключове слово окремо (OR логіка) — MatchText шукає точний збіг
+            _seen_ids: set = set()
+            for term in key_terms[:4]:  # топ-4 терміни
+                try:
+                    pts, _ = client.scroll(
+                        collection_name=col,
+                        scroll_filter=Filter(
+                            must=[FieldCondition(key="content", match=MatchText(text=term))]
+                        ),
+                        limit=col_limit,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    for p in pts:
+                        if p.id not in _seen_ids:
+                            _seen_ids.add(p.id)
+                            results.append({
+                                "out_content":  p.payload.get("content", ""),
+                                "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
+                                "similarity":   0.45,
+                                "_collection":  col,
+                                "_keyword_match": True,
+                            })
+                except Exception:
+                    pass
         except Exception as e:
             print(f"⚠️ search_qdrant_text [{col}]: {e}")
     return results

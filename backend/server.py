@@ -1,5 +1,5 @@
 """
-server.py — FastAPI бекенд для URAI (Lawyer AI Assistant).
+server.py — FastAPI бекенд для URAI (уп Assistant).
 
 Запуск:  cd /home/devops/app/backend && uvicorn server:app --host 0.0.0.0 --port 8000
 
@@ -2885,8 +2885,9 @@ async def ask(body: AskRequest):
     min_score = settings_cache.get_float("min_relevance_score", 0.35)
     try:
         from qdrant_storage import search_qdrant_text
-        _kw_query = hypothetical_text or search_question  # HyDE текст — юридична мова, правильні терміни
-        _kw_results = search_qdrant_text(_kw_query, target_collections, limit=3)
+        # Для keyword search — оригінальне питання краще ніж HyDE (MatchText шукає точний збіг слів)
+        _kw_query = search_question
+        _kw_results = search_qdrant_text(_kw_query, target_collections, limit=6)
         _existing_ids = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
