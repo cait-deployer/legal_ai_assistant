@@ -2636,9 +2636,9 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
         )
         resp = await _asyncio.to_thread(
             _m.generate_content, prompt,
-            generation_config=GenerationConfig(temperature=0.0, max_output_tokens=10),
+            generation_config=GenerationConfig(temperature=0.0, max_output_tokens=50),
         )
-        intent = resp.text.strip().lower().rstrip(".")
+        intent = resp.text.strip().lower().rstrip(".").split()[0] if resp.text.strip() else ""
         cols = _INTENT_MAP.get(intent)
         if cols:
             # Фільтруємо тільки ті що існують в all_cols
@@ -3009,7 +3009,7 @@ async def ask(body: AskRequest):
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 4000))
+        max_output_tokens = max(4000, int(settings_cache.get_float("max_output_tokens", 4000)))
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
