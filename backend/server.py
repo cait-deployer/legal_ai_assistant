@@ -2619,12 +2619,13 @@ _INTENT_MAP: dict[str, list[str]] = {
     "інше":              None,  # fallback → всі колекції
 }
 
-async def _classify_and_route(question: str, all_cols: list[str]) -> list[str]:
+async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "") -> list[str]:
     """Класифікує галузь права через Gemini → повертає список колекцій для пошуку."""
     import asyncio as _asyncio
     try:
         from vertexai.generative_models import GenerativeModel, GenerationConfig
-        _m = GenerativeModel(_model_name)
+        _mn = model_name or settings_cache.get("ai_model", "gemini-2.0-flash-001")
+        _m = GenerativeModel(_mn)
         prompt = (
             "Визнач галузь права для цього юридичного питання.\n"
             "Відповідь — ОДНЕ слово зі списку:\n"
@@ -2772,7 +2773,7 @@ async def ask(body: AskRequest):
         plan_collections = ALL_COLLECTIONS
 
     # Крок 2: intent classifier звужує до релевантних в межах дозволених тарифом
-    target_collections = await _classify_and_route(search_question, plan_collections)
+    target_collections = await _classify_and_route(search_question, plan_collections, _model_name)
 
     fetch_k = body.max_docs * 2
     match_threshold = settings_cache.get_float("match_threshold_docs", 0.35)
