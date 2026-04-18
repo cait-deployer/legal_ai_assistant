@@ -11,7 +11,8 @@ from qdrant_storage import upload_to_qdrant, delete_law_chunks
 from rada_scanner import get_law_text, get_law_metadata, BASE
 
 COLLECTION = "laws_kmu"
-text_splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
+# Великий chunk щоб заголовок таблиці і самі норми потрапили в один чанк
+text_splitter = MarkdownTextSplitter(chunk_size=4000, chunk_overlap=400)
 
 DOCS_TO_REINDEX = [
     {"law_id": "663-99-%D0%BF",  "title": "Постанова КМУ від 23.04.1999 №663 «Про норми відшкодування витрат на відрядження в межах України та за кордон»"},
