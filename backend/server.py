@@ -2600,6 +2600,58 @@ def _route_collections(
         return list(all_collections)
 
 
+# ── Intent classifier → вибір колекцій ───────────────────────────────────────
+
+# Маппінг галузі → колекції Qdrant
+_INTENT_MAP: dict[str, list[str]] = {
+    "трудове":           ["rada_labor", "laws_kmu", "laws_positions", "laws_supreme"],
+    "податкове":         ["rada_finance", "laws_kmu", "laws_positions", "laws_supreme"],
+    "фінансове":         ["rada_finance", "laws_kmu", "laws_positions", "laws_supreme"],
+    "цивільне":          ["rada_civil", "laws_positions", "laws_supreme"],
+    "кримінальне":       ["rada_criminal", "laws_positions", "laws_supreme", "laws_ccu"],
+    "адміністративне":   ["rada_admin", "rada_state", "laws_positions", "laws_supreme"],
+    "земельне":          ["rada_land", "laws_kmu", "laws_positions"],
+    "житлове":           ["rada_housing", "laws_kmu", "laws_positions"],
+    "корпоративне":      ["rada_civil", "rada_finance", "laws_positions", "laws_supreme"],
+    "міжнародне":        ["rada_intl", "laws_positions", "laws_supreme"],
+    "кадрове":           ["rada_personnel", "rada_labor", "laws_kmu", "laws_positions"],
+    "судове":            ["laws_positions", "laws_supreme", "laws_ccu", "rada_court"],
+    "інше":              None,  # fallback → всі колекції
+}
+
+async def _classify_and_route(question: str, all_cols: list[str]) -> list[str]:
+    """Класифікує галузь права через Gemini → повертає список колекцій для пошуку."""
+    import asyncio as _asyncio
+    try:
+        from vertexai.generative_models import GenerativeModel, GenerationConfig
+        _m = GenerativeModel(_model_name)
+        prompt = (
+            "Визнач галузь права для цього юридичного питання.\n"
+            "Відповідь — ОДНЕ слово зі списку:\n"
+            "трудове / податкове / фінансове / цивільне / кримінальне / "
+            "адміністративне / земельне / житлове / корпоративне / "
+            "міжнародне / кадрове / судове / інше\n\n"
+            f"Питання: {question}\n\nГалузь:"
+        )
+        resp = await _asyncio.to_thread(
+            _m.generate_content, prompt,
+            generation_config=GenerationConfig(temperature=0.0, max_output_tokens=10),
+        )
+        intent = resp.text.strip().lower().rstrip(".")
+        cols = _INTENT_MAP.get(intent)
+        if cols:
+            # Фільтруємо тільки ті що існують в all_cols
+            result = [c for c in cols if c in all_cols]
+            logger.info("INTENT '%s' → collections: %s", intent, result)
+            return result if result else all_cols
+        else:
+            logger.info("INTENT '%s' → fallback all collections", intent)
+            return all_cols
+    except Exception as e:
+        logger.info("INTENT classifier failed (%s) → fallback all collections", e)
+        return all_cols
+
+
 # ── /ask — основний чат-ендпоінт ──────────────────────────────────────────────
 
 class AskRequest(BaseModel):
@@ -2717,10 +2769,8 @@ async def ask(body: AskRequest):
         if not target_collections:
             target_collections = ALL_COLLECTIONS
     else:
-        # Тимчасово: пошук по всіх дозволених колекціях без centroid routing
-        # (діагностика — перевіряємо чи routing є причиною пропуску rada_labor)
-        target_collections = ALL_COLLECTIONS
-        logger.info("ROUTING disabled (test mode): searching all %d collections", len(target_collections))
+        # Intent classifier: один Gemini запит визначає галузь → жорсткий вибір колекцій
+        target_collections = await _classify_and_route(search_question, ALL_COLLECTIONS)
 
     fetch_k = body.max_docs * 2
     match_threshold = settings_cache.get_float("match_threshold_docs", 0.35)
