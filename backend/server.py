@@ -2720,17 +2720,20 @@ async def ask(body: AskRequest):
         async def _gen_hypothetical() -> str | None:
             """HyDE: генеруємо гіпотетичний уривок закону по стилю бази."""
             try:
-                _m = GenerativeModel(_model_name)
+                # Використовуємо flash-001 (без thinking mode) щоб HyDE генерував повний текст
+                _hyde_model = "gemini-2.0-flash-001"
+                _m = GenerativeModel(_hyde_model)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
-                        "Ти — юрист. Напиши 2-3 речення офіційного юридичного тексту "
+                        "Ти — юрист. Напиши 3-5 речень офіційного юридичного тексту "
                         "з українського законодавства, який відповідає на питання нижче. "
                         "Використовуй юридичну термінологію і стиль нормативних актів. "
+                        "Згадай конкретні статті, постанови або норми. "
                         "Тільки текст, без пояснень і заголовків.\n\n"
                         f"Питання: {question}"
                     ),
-                    generation_config=GenerationConfig(temperature=0.1, max_output_tokens=200),
+                    generation_config=GenerationConfig(temperature=0.1, max_output_tokens=600),
                 )
                 text = resp.text.strip()
                 logger.info("HYDE generated: %s", text[:300])
@@ -2776,7 +2779,7 @@ async def ask(body: AskRequest):
     target_collections = await _classify_and_route(search_question, plan_collections, _model_name)
 
     fetch_k = body.max_docs * 2
-    match_threshold = settings_cache.get_float("match_threshold_docs", 0.35)
+    match_threshold = max(0.38, settings_cache.get_float("match_threshold_docs", 0.38))
 
     # 3. Пошук: оригінальний вектор + HyDE вектор паралельно → merge
     try:
