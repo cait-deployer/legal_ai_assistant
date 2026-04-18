@@ -134,7 +134,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                       <Scale className="w-4 h-4 text-[#0A0E1A]" />
                     </div>
                     <span className="font-serif font-bold text-base whitespace-nowrap text-white">
-                      Lawyer AI
+                      URAI Admin
                     </span>
                   </div>
                   <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8 text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5" onClick={() => setMobileOpen(false)}>
@@ -148,7 +148,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                       <Scale className="w-4 h-4 text-[#0A0E1A]" />
                     </div>
                     <span className="font-serif font-bold text-base whitespace-nowrap text-white">
-                      Lawyer AI
+                        URAI Admin
                     </span>
                   </div>
                   <div className="flex items-center gap-1">

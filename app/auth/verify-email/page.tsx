@@ -110,7 +110,7 @@ function VerifyEmailContent() {
 
       <div className="space-y-4 mb-8">
         {[
-          "Відкрийте лист від Lawyer AI",
+          "Відкрийте лист від URAI",
           "Натисніть кнопку «Підтвердити email»",
           "Вас автоматично перенаправить до сервісу",
         ].map((step, i) => (
