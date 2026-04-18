@@ -2920,7 +2920,10 @@ async def ask(body: AskRequest):
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
-            _title_results = _title_results[:9]  # hard cap
+            # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
+            _COL_PRI = {"laws_kmu": 0, "laws_supreme": 1, "laws_ccu": 2, "laws_wiki": 3}
+            _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
+            _title_results = _title_results[:12]  # hard cap
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             _title_added = 0
             for r in _title_results:

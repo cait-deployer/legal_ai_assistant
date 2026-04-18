@@ -472,7 +472,7 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                     scroll_filter=Filter(
                         must=[FieldCondition(key="source", match=MatchText(text=kw))]
                     ),
-                    limit=20,
+                    limit=500,
                     with_payload=True,
                     with_vectors=False,
                 )
