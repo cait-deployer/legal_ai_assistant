@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
-    Filter, FieldCondition, MatchValue,
+    Filter, FieldCondition, MatchValue, MatchText,
+    PayloadSchemaType,
 )
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
@@ -347,3 +348,83 @@ def get_unique_law_count() -> dict | None:
     except Exception as e:
         print(f"⚠️ get_unique_law_count failed: {e}")
         return None
+
+
+# ── FULL-TEXT INDEX (keyword fallback) ────────────────────────────────────────
+
+def ensure_text_indexes() -> dict[str, str]:
+    """
+    Створює full-text індекс по полю 'content' для всіх колекцій (якщо ще немає).
+    Qdrant будує індекс у фоні — не блокує роботу системи.
+    Повертає {collection: "ready"|"building"|"error"}.
+    """
+    client = get_client()
+    status: dict[str, str] = {}
+    for name in ALL_COLLECTIONS:
+        try:
+            info = client.get_collection(name)
+            schema = info.payload_schema or {}
+            if "content" in schema:
+                status[name] = "ready"
+                continue
+            client.create_payload_index(
+                collection_name=name,
+                field_name="content",
+                field_schema=PayloadSchemaType.TEXT,
+            )
+            status[name] = "building"
+            print(f"🔍 Text index створюється для '{name}'...")
+        except Exception as e:
+            status[name] = "error"
+            print(f"⚠️ ensure_text_indexes [{name}]: {e}")
+    return status
+
+
+def get_text_index_status() -> dict[str, str]:
+    """Повертає статус full-text індексу для кожної колекції."""
+    client = get_client()
+    result: dict[str, str] = {}
+    for name in ALL_COLLECTIONS:
+        try:
+            info = client.get_collection(name)
+            schema = info.payload_schema or {}
+            result[name] = "ready" if "content" in schema else "building"
+        except Exception:
+            result[name] = "error"
+    return result
+
+
+def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
+    """
+    Keyword-пошук по full-text індексу (fallback коли vector score низький).
+    Повертає результати з фіксованим similarity=0.45 щоб потрапляли після vector-результатів.
+    """
+    client = get_client()
+    results: list = []
+    words = [w for w in query.split() if len(w) > 3]
+    if not words:
+        return []
+    search_text = " ".join(words[:8])  # обмежуємо довжину
+
+    for col in collections:
+        try:
+            points, _ = client.scroll(
+                collection_name=col,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="content", match=MatchText(text=search_text))]
+                ),
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for p in points:
+                results.append({
+                    "out_content":  p.payload.get("content", ""),
+                    "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
+                    "similarity":   0.45,
+                    "_collection":  col,
+                    "_keyword_match": True,
+                })
+        except Exception as e:
+            print(f"⚠️ search_qdrant_text [{col}]: {e}")
+    return results

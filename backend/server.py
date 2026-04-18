@@ -1006,9 +1006,13 @@ async def lifespan(app: FastAPI):
 
     # Створюємо всі Qdrant колекції якщо їх немає (безпечно — існуючі пропускає)
     try:
-        from qdrant_storage import init_all_collections
+        from qdrant_storage import init_all_collections, ensure_text_indexes
+        import threading as _threading
         init_all_collections()
         print("✅ Qdrant collections ready.")
+        # Full-text індекси — запускаємо у фоні щоб не блокувати старт
+        _threading.Thread(target=ensure_text_indexes, daemon=True).start()
+        print("🔍 Full-text index init started in background.")
     except Exception as e:
         print(f"⚠️  Qdrant init warning: {e}")
 
@@ -1075,6 +1079,21 @@ async def get_stats():
             "next_index": state["next_index"],
             "total": len(state["all_laws"]),
         } if can_resume else None,
+    }
+
+
+@app.get("/admin/text-index/status")
+async def get_text_index_status():
+    """Статус full-text індексів по всіх колекціях."""
+    from qdrant_storage import get_text_index_status
+    status = get_text_index_status()
+    total = len(status)
+    ready = sum(1 for s in status.values() if s == "ready")
+    return {
+        "status": status,
+        "ready_count": ready,
+        "total_count": total,
+        "all_ready": ready == total,
     }
 
 
@@ -2624,6 +2643,27 @@ async def ask(body: AskRequest):
 
         _model_name = settings_cache.get("ai_model")
 
+        # Визначаємо мову запиту та перекладаємо якщо потрібно
+        def _is_russian(text: str) -> bool:
+            russian_only = set("ыъэ")
+            ukrainian_only = set("іїєґ")
+            t = text.lower()
+            return any(c in russian_only for c in t) and not any(c in ukrainian_only for c in t)
+
+        search_question = question  # текст для embedding/пошуку
+        if _is_russian(question):
+            try:
+                _tr_model = GenerativeModel(_model_name)
+                _tr_resp = await __import__("asyncio").to_thread(
+                    _tr_model.generate_content,
+                    f"Переклади на українську мову. Відповідь — тільки переклад без пояснень:\n\n{question}",
+                    generation_config=GenerationConfig(temperature=0.0, max_output_tokens=300),
+                )
+                search_question = _tr_resp.text.strip() or question
+                logger.info("RU→UA: %s → %s", question[:60], search_question[:60])
+            except Exception:
+                pass  # fallback — шукаємо оригінальним текстом
+
         async def _gen_hypothetical() -> str | None:
             """HyDE: генеруємо гіпотетичний уривок закону по стилю бази."""
             try:
@@ -2643,9 +2683,9 @@ async def ask(body: AskRequest):
             except Exception:
                 return None
 
-        # Embed питання + генеруємо гіпотетичну відповідь — одночасно
+        # Embed питання (перекладеного якщо треба) + генеруємо гіпотетичну відповідь — одночасно
         query_vector, hypothetical_text = await _asyncio.gather(
-            _asyncio.to_thread(embeddings.embed_query, question),
+            _asyncio.to_thread(embeddings.embed_query, search_question),
             _gen_hypothetical(),
         )
     except Exception as e:
@@ -2756,8 +2796,29 @@ async def ask(body: AskRequest):
         ) or "NONE",
     )
 
-    # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
+    # Keyword fallback: якщо vector-пошук дав мало результатів — додаємо keyword-матчі
     min_score = settings_cache.get_float("min_relevance_score", 0.35)
+    _good_vector = [r for r in results if r.get("similarity", 0) >= min_score]
+    if len(_good_vector) < 3:
+        try:
+            from qdrant_storage import search_qdrant_text
+            _kw_results = search_qdrant_text(search_question, target_collections, limit=5)
+            # Дедуплікуємо по law_id — не додаємо те що вже є
+            _existing_ids = {
+                (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+                for r in results
+            }
+            for r in _kw_results:
+                _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+                if _key not in _existing_ids:
+                    results.append(r)
+                    _existing_ids.add(_key)
+            results.sort(key=lambda x: x["similarity"], reverse=True)
+            logger.info("Keyword fallback: додано %d результатів", len(_kw_results))
+        except Exception as _kw_err:
+            logger.warning("Keyword fallback error: %s", _kw_err)
+
+    # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     if not results or results[0]["similarity"] < min_score:
         return {
             "answer": (

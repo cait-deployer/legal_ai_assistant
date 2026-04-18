@@ -111,16 +111,22 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [scheduleToggling, setScheduleToggling] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [textIndexReady, setTextIndexReady] = useState<boolean | null>(null)
 
   const fetchStats = async () => {
     setLoading(true)
     try {
-      const [res, syncRes] = await Promise.all([
+      const [res, syncRes, idxRes] = await Promise.all([
         fetch("/api/admin/stats"),
         fetch("/api/admin/sync/stats"),
+        fetch("/api/admin/text-index/status"),
       ])
       setStats(await res.json())
       if (syncRes.ok) setSyncStats(await syncRes.json())
+      if (idxRes.ok) {
+        const idxData = await idxRes.json()
+        setTextIndexReady(idxData.all_ready ?? null)
+      }
       setLastUpdated(new Date())
     } catch { }
     finally { setLoading(false) }
@@ -171,6 +177,17 @@ export default function AdminDashboard() {
           </Button>
         </div>
       </div>
+
+      {/* Full-text index badge */}
+      {textIndexReady === false && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/5 text-amber-400 text-sm">
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          <span>
+            <strong>Keyword-індекс будується</strong> — Qdrant індексує базу знань у фоні для покращення пошуку.
+            Це автоматично. Після завершення бейджик зникне.
+          </span>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
