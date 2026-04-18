@@ -2420,7 +2420,7 @@ async def get_rada_coverage(refresh: bool = False):
 
 _CENTROID_FILE = BASE_DIR / "collection_centroids.json"
 _CENTROID_SAMPLE = 300   # векторів на колекцію для апроксимації центроїду
-_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
+_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu", "rada_labor", "rada_finance"}
 
 _centroids: dict[str, list[float]] = {}
 _centroids_lock = threading.Lock()
