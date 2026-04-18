@@ -2940,6 +2940,11 @@ async def ask(body: AskRequest):
     except Exception as _tb_err:
         logger.warning("Title boost error: %s", _tb_err)
 
+    # Final cap: trim to max_docs so Gemini gets a focused context
+    # (keyword + title boost can add up to 18 extra chunks beyond diversity cap)
+    results = results[:body.max_docs]
+    logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
+
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     if not results or results[0]["similarity"] < min_score:
         return {
