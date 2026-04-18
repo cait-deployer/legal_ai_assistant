@@ -3009,7 +3009,7 @@ async def ask(body: AskRequest):
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 3000))
+        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 4000))
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
@@ -3125,6 +3125,15 @@ async def ask(body: AskRequest):
         tokens_used = 0
         try:
             tokens_used = response.usage_metadata.total_token_count or 0
+        except Exception:
+            pass
+
+        # Log finish reason to diagnose truncation
+        try:
+            finish_reason = response.candidates[0].finish_reason
+            logger.info("FINISH_REASON: %s | tokens_used: %s | max_tokens: %s", finish_reason, tokens_used, max_output_tokens)
+            if str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2"):
+                logger.warning("RESPONSE TRUNCATED by max_output_tokens=%s", max_output_tokens)
         except Exception:
             pass
 
