@@ -2800,7 +2800,8 @@ async def ask(body: AskRequest):
     min_score = settings_cache.get_float("min_relevance_score", 0.35)
     try:
         from qdrant_storage import search_qdrant_text
-        _kw_results = search_qdrant_text(search_question, target_collections, limit=3)
+        _kw_query = hypothetical_text or search_question  # HyDE текст — юридична мова, правильні терміни
+        _kw_results = search_qdrant_text(_kw_query, target_collections, limit=3)
         _existing_ids = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
