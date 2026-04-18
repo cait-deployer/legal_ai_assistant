@@ -2842,11 +2842,14 @@ async def ask(body: AskRequest):
     _pos_col = _by_col.pop("laws_positions", [])
     pos_taken = _pos_col[:_max_pos]
 
+    _per_col_cap = max(2, body.max_docs // len(_by_col)) if _by_col else 4
+
     guaranteed: list = []
     overflow: list = []
     for col, docs in _by_col.items():
         guaranteed.append(docs[0])   # 1 кращий з колекції (вже відсортовано)
-        overflow.extend(docs[1:])
+        # Решта цієї колекції — але не більше ніж cap-1 додаткових
+        overflow.extend(docs[1:_per_col_cap])
 
     remaining = body.max_docs - len(pos_taken) - len(guaranteed)
     filler = sorted(overflow + _pos_col[_max_pos:], key=lambda x: x["similarity"], reverse=True)
