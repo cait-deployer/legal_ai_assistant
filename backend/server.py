@@ -2917,9 +2917,11 @@ async def ask(body: AskRequest):
         _q_words = [w for w in search_question.split() if len(w) > 4]
         _hyde_words = [w for w in (hypothetical_text or "").split() if len(w) > 5][:8]
         _title_kws = list(dict.fromkeys(_q_words[:2] + _hyde_words))[:7]
+        logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=1)
-            _title_results = _title_results[:6]  # hard cap: не більше 6 чанків від title boost
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
+            _title_results = _title_results[:9]  # hard cap
+            logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             _title_added = 0
             for r in _title_results:
                 _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
@@ -2929,7 +2931,7 @@ async def ask(body: AskRequest):
                     _title_added += 1
             if _title_added:
                 results.sort(key=lambda x: x["similarity"], reverse=True)
-                logger.info("TITLE BOOST: додано %d чанків з документів по заголовку", _title_added)
+                logger.info("TITLE BOOST: додано %d чанків", _title_added)
     except Exception as _tb_err:
         logger.warning("Title boost error: %s", _tb_err)
 
