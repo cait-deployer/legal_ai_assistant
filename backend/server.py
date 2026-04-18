@@ -2679,8 +2679,11 @@ async def ask(body: AskRequest):
                     ),
                     generation_config=GenerationConfig(temperature=0.1, max_output_tokens=200),
                 )
-                return resp.text.strip()
-            except Exception:
+                text = resp.text.strip()
+                logger.info("HYDE generated: %s", text[:300])
+                return text
+            except Exception as e:
+                logger.info("HYDE failed: %s", e)
                 return None
 
         # Embed питання (перекладеного якщо треба) + генеруємо гіпотетичну відповідь — одночасно
@@ -2688,6 +2691,7 @@ async def ask(body: AskRequest):
             _asyncio.to_thread(embeddings.embed_query, search_question),
             _gen_hypothetical(),
         )
+        logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
         raise HTTPException(500, f"Embedding/HyDE error: {e}")
 
