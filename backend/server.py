@@ -2796,27 +2796,27 @@ async def ask(body: AskRequest):
         ) or "NONE",
     )
 
-    # Keyword fallback: якщо vector-пошук дав мало результатів — додаємо keyword-матчі
+    # Keyword search: завжди паралельно з vector — знаходить документи з поганим embedding
     min_score = settings_cache.get_float("min_relevance_score", 0.35)
-    _good_vector = [r for r in results if r.get("similarity", 0) >= min_score]
-    if len(_good_vector) < 3:
-        try:
-            from qdrant_storage import search_qdrant_text
-            _kw_results = search_qdrant_text(search_question, target_collections, limit=5)
-            # Дедуплікуємо по law_id — не додаємо те що вже є
-            _existing_ids = {
-                (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-                for r in results
-            }
-            for r in _kw_results:
-                _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-                if _key not in _existing_ids:
-                    results.append(r)
-                    _existing_ids.add(_key)
+    try:
+        from qdrant_storage import search_qdrant_text
+        _kw_results = search_qdrant_text(search_question, target_collections, limit=3)
+        _existing_ids = {
+            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            for r in results
+        }
+        _kw_added = 0
+        for r in _kw_results:
+            _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            if _key not in _existing_ids:
+                results.append(r)
+                _existing_ids.add(_key)
+                _kw_added += 1
+        if _kw_added:
             results.sort(key=lambda x: x["similarity"], reverse=True)
-            logger.info("Keyword fallback: додано %d результатів", len(_kw_results))
-        except Exception as _kw_err:
-            logger.warning("Keyword fallback error: %s", _kw_err)
+            logger.info("Keyword: додано %d нових результатів", _kw_added)
+    except Exception as _kw_err:
+        logger.warning("Keyword search error: %s", _kw_err)
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     if not results or results[0]["similarity"] < min_score:
