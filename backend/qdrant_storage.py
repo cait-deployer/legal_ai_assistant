@@ -354,7 +354,7 @@ def get_unique_law_count() -> dict | None:
 
 def ensure_text_indexes() -> dict[str, str]:
     """
-    Створює full-text індекс по полю 'content' для всіх колекцій (якщо ще немає).
+    Створює full-text індекс по полях 'content' і 'source' для всіх колекцій.
     Qdrant будує індекс у фоні — не блокує роботу системи.
     Повертає {collection: "ready"|"building"|"error"}.
     """
@@ -372,6 +372,15 @@ def ensure_text_indexes() -> dict[str, str]:
                 field_name="content",
                 field_schema=PayloadSchemaType.TEXT,
             )
+            # Також індексуємо source (заголовок документу) для title-based boost
+            try:
+                client.create_payload_index(
+                    collection_name=name,
+                    field_name="source",
+                    field_schema=PayloadSchemaType.TEXT,
+                )
+            except Exception:
+                pass
             status[name] = "building"
             print(f"🔍 Text index створюється для '{name}'...")
         except Exception as e:
@@ -440,4 +449,53 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
                     pass
         except Exception as e:
             print(f"⚠️ search_qdrant_text [{col}]: {e}")
+    return results
+
+
+def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
+    """
+    Title-based metadata boost: знаходить документи де source (заголовок) містить
+    ключові слова запиту → повертає їх чанки з підвищеним score 0.75.
+    Не потребує переіндексації — використовує наявне поле source.
+    """
+    client = get_client()
+    results: list = []
+    seen_law_ids: set = set()
+
+    for col in collections:
+        for kw in keywords:
+            if len(kw) < 5:
+                continue
+            try:
+                pts, _ = client.scroll(
+                    collection_name=col,
+                    scroll_filter=Filter(
+                        must=[FieldCondition(key="source", match=MatchText(text=kw))]
+                    ),
+                    limit=20,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                # Групуємо по law_id — беремо перші chunks_per_doc чанків з кожного документу
+                by_law: dict[str, list] = {}
+                for p in pts:
+                    lid = p.payload.get("law_id", "")
+                    if lid:
+                        by_law.setdefault(lid, []).append(p)
+                for lid, doc_pts in by_law.items():
+                    if lid in seen_law_ids:
+                        continue
+                    seen_law_ids.add(lid)
+                    # Сортуємо по chunk_index — беремо перші N чанків (де є загальні норми)
+                    doc_pts.sort(key=lambda p: p.payload.get("chunk_index", 0))
+                    for p in doc_pts[:chunks_per_doc]:
+                        results.append({
+                            "out_content":  p.payload.get("content", ""),
+                            "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
+                            "similarity":   0.75,
+                            "_collection":  col,
+                            "_title_match": True,
+                        })
+            except Exception as e:
+                print(f"⚠️ search_qdrant_by_title [{col}]: {e}")
     return results

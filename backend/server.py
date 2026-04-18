@@ -2905,6 +2905,25 @@ async def ask(body: AskRequest):
     except Exception as _kw_err:
         logger.warning("Keyword search error: %s", _kw_err)
 
+    # Title-based metadata boost: знаходить документи по заголовку (source поле)
+    try:
+        from qdrant_storage import search_qdrant_by_title
+        _title_kws = [w for w in search_question.split() if len(w) > 4][:4]
+        if _title_kws:
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
+            _title_added = 0
+            for r in _title_results:
+                _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+                if _key not in _existing_ids:
+                    results.append(r)
+                    _existing_ids.add(_key)
+                    _title_added += 1
+            if _title_added:
+                results.sort(key=lambda x: x["similarity"], reverse=True)
+                logger.info("TITLE BOOST: додано %d чанків з документів по заголовку", _title_added)
+    except Exception as _tb_err:
+        logger.warning("Title boost error: %s", _tb_err)
+
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     if not results or results[0]["similarity"] < min_score:
         return {
