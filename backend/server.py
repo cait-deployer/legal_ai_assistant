@@ -2828,7 +2828,7 @@ async def ask(body: AskRequest):
     if abs(rada_boost - 1.0) > 0.001:
         for r in results:
             col = r.get("_collection", "")
-            if col.startswith("rada_") or col == "laws_supreme" or col == "laws_positions":
+            if col.startswith("rada_") or col == "laws_positions":
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
