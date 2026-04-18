@@ -2909,10 +2909,11 @@ async def ask(body: AskRequest):
     try:
         from qdrant_storage import search_qdrant_by_title
         _q_words = [w for w in search_question.split() if len(w) > 4]
-        _hyde_words = [w for w in (hypothetical_text or "").split() if len(w) > 5][:8]
-        _title_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:7]
+        _hyde_words = [w for w in (hypothetical_text or "").split() if len(w) > 5][:4]
+        _title_kws = list(dict.fromkeys(_q_words[:2] + _hyde_words))[:4]
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=1)
+            _title_results = _title_results[:6]  # hard cap: не більше 6 чанків від title boost
             _title_added = 0
             for r in _title_results:
                 _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
@@ -3051,7 +3052,7 @@ async def ask(body: AskRequest):
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        max_output_tokens = max(4000, int(settings_cache.get_float("max_output_tokens", 4000)))
+        max_output_tokens = max(8000, int(settings_cache.get_float("max_output_tokens", 8000)))
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
@@ -3076,6 +3077,15 @@ async def ask(body: AskRequest):
         response_instructions.append(
             "Посилайся на джерела у форматі [1], [2] одразу після твердження. "
             "Якщо контекст не містить потрібної інформації — чесно повідом про це."
+        )
+        # Plan-aware length limit — відповідь завжди завершена, не обривається
+        if "response_detailed" in rf or "response_scenarios" in rf:
+            _word_limit = 800
+        else:
+            _word_limit = 350
+        response_instructions.append(
+            f"Пиши завершену відповідь до {_word_limit} слів. "
+            "Ніколи не обривай речення — якщо не вистачає місця, скорочуй менш важливі деталі, але завжди завершуй думку."
         )
 
         # Build user profile block if available
