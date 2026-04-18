@@ -2892,13 +2892,19 @@ async def ask(body: AskRequest):
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
         }
+        _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4}
         _kw_added = 0
         for r in _kw_results:
             _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-            if _key not in _existing_ids:
-                results.append(r)
-                _existing_ids.add(_key)
-                _kw_added += 1
+            if _key in _existing_ids:
+                continue
+            # Відхиляємо keyword результат якщо заголовок документа нічого спільного з запитом не має
+            _src = (r["out_metadata"].get("source", "") + " " + r["out_metadata"].get("doc_type", "")).lower()
+            if not any(w in _src for w in _kw_query_words):
+                continue
+            results.append(r)
+            _existing_ids.add(_key)
+            _kw_added += 1
         if _kw_added:
             results.sort(key=lambda x: x["similarity"], reverse=True)
             logger.info("Keyword: додано %d нових результатів", _kw_added)
