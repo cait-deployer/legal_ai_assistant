@@ -2781,8 +2781,8 @@ async def ask(body: AskRequest):
     # Крок 2: intent classifier звужує до релевантних в межах дозволених тарифом
     target_collections = await _classify_and_route(search_question, plan_collections, _model_name)
 
-    fetch_k = body.max_docs * 2
-    match_threshold = max(0.38, settings_cache.get_float("match_threshold_docs", 0.38))
+    fetch_k = body.max_docs * 3
+    match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.35))
 
     # 3. Пошук: оригінальний вектор + HyDE вектор паралельно → merge
     try:
@@ -2813,6 +2813,15 @@ async def ask(body: AskRequest):
         results = await _asyncio.to_thread(
             search_qdrant, query_vector, fetch_k, target_collections, match_threshold
         )
+
+    # Diagnostic: log all found docs per collection
+    _diag: dict[str, list] = {}
+    for r in results:
+        _diag.setdefault(r.get("_collection",""), []).append(
+            f"{r['out_metadata'].get('law_id','?')}:{r['similarity']:.3f}"
+        )
+    for _c, _ids in _diag.items():
+        logger.info("DOCS [%s]: %s", _c, " | ".join(_ids[:5]))
 
     # Source priority boost — піднімаємо Раду відносно Wiki/інших
     # Значення > 1.0 = Рада іде вище; 1.0 = без буста (можна змінити в адмінці)
