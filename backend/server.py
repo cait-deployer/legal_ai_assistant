@@ -2420,7 +2420,7 @@ async def get_rada_coverage(refresh: bool = False):
 
 _CENTROID_FILE = BASE_DIR / "collection_centroids.json"
 _CENTROID_SAMPLE = 300   # векторів на колекцію для апроксимації центроїду
-_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu", "rada_labor", "rada_finance"}
+_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
 
 _centroids: dict[str, list[float]] = {}
 _centroids_lock = threading.Lock()
@@ -2763,36 +2763,43 @@ async def ask(body: AskRequest):
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    # Diversity caps:
-    #   laws_positions — макс 1/3 слотів (позиції ВС не витісняють реальний текст законів)
-    #   laws_kmu       — гарантований мінімум 1/8 слотів (постанови КМУ завжди в контексті)
+    # Diversity: кожна пошукана колекція отримує гарантований 1 слот (крім laws_positions — макс 1/3).
+    # Решта слотів заповнюється конкурентно по similarity.
+    # Це узагальнений підхід — не залежить від конкретних колекцій.
     _max_pos = max(1, body.max_docs // 3)
-    _min_kmu = max(1, body.max_docs // 8)
 
-    _positions = [r for r in results if r.get("_collection") == "laws_positions"]
-    _kmu       = [r for r in results if r.get("_collection") == "laws_kmu"]
-    _rest      = [r for r in results if r.get("_collection") not in ("laws_positions", "laws_kmu")]
+    # Групуємо результати по колекціях
+    _by_col: dict[str, list] = {}
+    for r in results:
+        col = r.get("_collection", "")
+        _by_col.setdefault(col, []).append(r)
 
-    pos_taken = _positions[:_max_pos]
-    kmu_taken = _kmu[:_min_kmu]
-    remaining = body.max_docs - len(pos_taken) - len(kmu_taken)
+    # laws_positions — обмежено; решта — гарантовано 1 слот кожна
+    _pos_col = _by_col.pop("laws_positions", [])
+    pos_taken = _pos_col[:_max_pos]
 
-    # Решту слотів заповнюємо найкращими з kmu (понад гарантію) + інших колекцій
-    filler = sorted(_kmu[_min_kmu:] + _rest, key=lambda x: x["similarity"], reverse=True)
-    results = pos_taken + kmu_taken + filler[:max(0, remaining)]
+    guaranteed: list = []
+    overflow: list = []
+    for col, docs in _by_col.items():
+        guaranteed.append(docs[0])   # 1 кращий з колекції (вже відсортовано)
+        overflow.extend(docs[1:])
+
+    remaining = body.max_docs - len(pos_taken) - len(guaranteed)
+    filler = sorted(overflow + _pos_col[_max_pos:], key=lambda x: x["similarity"], reverse=True)
+    results = pos_taken + guaranteed + filler[:max(0, remaining)]
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
-    _non_pos = [r for r in results if r.get("_collection") != "laws_positions"]
+    _col_counts = {}
+    for r in results:
+        _col_counts[r.get("_collection", "?")] = _col_counts.get(r.get("_collection", "?"), 0) + 1
     logger.info(
-        "ASK found=%d pos=%d kmu=%d other=%d | top_other: %s",
+        "ASK found=%d cols=%s | top: %s",
         len(results),
-        sum(1 for r in results if r.get("_collection") == "laws_positions"),
-        sum(1 for r in results if r.get("_collection") == "laws_kmu"),
-        len(_non_pos),
+        dict(sorted(_col_counts.items())),
         " | ".join(
             f"{r['_collection']}:{r['out_metadata'].get('law_id','?')}:{r['similarity']:.3f}"
-            for r in _non_pos[:5]
+            for r in results[:6]
         ) or "NONE",
     )
 
