@@ -2893,6 +2893,8 @@ async def ask(body: AskRequest):
             for r in results
         }
         _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4}
+        # Stems (drop last 2 chars) allow "відрядні" to match "відрядження" etc.
+        _kw_stems = {w[:-2] for w in _kw_query_words if len(w) > 6} | _kw_query_words
         _kw_added = 0
         for r in _kw_results:
             _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
@@ -2900,7 +2902,7 @@ async def ask(body: AskRequest):
                 continue
             # Відхиляємо keyword результат якщо заголовок документа нічого спільного з запитом не має
             _src = (r["out_metadata"].get("source", "") + " " + r["out_metadata"].get("doc_type", "")).lower()
-            if not any(w in _src for w in _kw_query_words):
+            if not any(s in _src for s in _kw_stems):
                 continue
             results.append(r)
             _existing_ids.add(_key)
