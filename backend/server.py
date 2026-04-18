@@ -2832,10 +2832,19 @@ async def ask(body: AskRequest):
                 r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    # Diversity: кожна пошукана колекція отримує гарантований 1 слот (крім laws_positions — макс 1/3).
-    # Решта слотів заповнюється конкурентно по similarity.
-    # Це узагальнений підхід — не залежить від конкретних колекцій.
-    _max_pos = max(1, body.max_docs // 3)
+    # Dedup: max 2 chunks per law_id globally so one doc can't eat all slots
+    _seen_lid: dict[str, int] = {}
+    _deduped: list = []
+    for r in results:
+        lid = r["out_metadata"].get("law_id", "")
+        if _seen_lid.get(lid, 0) < 2:
+            _deduped.append(r)
+            _seen_lid[lid] = _seen_lid.get(lid, 0) + 1
+    results = _deduped
+
+    # Diversity: кожна колекція отримує гарантовані слоти; court collections обмежені
+    _MAX_COURT = max(2, body.max_docs // 4)  # cap for laws_supreme і laws_positions
+    _max_pos = max(1, body.max_docs // 4)    # strict cap for laws_positions
 
     # Групуємо результати по колекціях
     _by_col: dict[str, list] = {}
@@ -2843,24 +2852,28 @@ async def ask(body: AskRequest):
         col = r.get("_collection", "")
         _by_col.setdefault(col, []).append(r)
 
-    # laws_positions — обмежено; решта — гарантовано 1 слот кожна
     _pos_col = _by_col.pop("laws_positions", [])
+    _sup_col = _by_col.pop("laws_supreme", [])
     pos_taken = _pos_col[:_max_pos]
+    sup_taken = _sup_col[:_MAX_COURT]
 
     _n_cols = len(_by_col) or 1
     # Скільки слотів гарантовано кожній колекції (мін 2, лишаємо ~1/4 для overflow)
     _guaranteed_each = max(2, (body.max_docs * 3 // 4) // _n_cols)
-    _per_col_cap = _guaranteed_each + 2  # ще 2 ідуть у overflow-конкуренцію
+    _per_col_cap = _guaranteed_each + 2
 
     guaranteed: list = []
     overflow: list = []
     for col, docs in _by_col.items():
-        guaranteed.extend(docs[:_guaranteed_each])  # N кращих з колекції гарантовано
+        guaranteed.extend(docs[:_guaranteed_each])
         overflow.extend(docs[_guaranteed_each:_per_col_cap])
 
-    remaining = body.max_docs - len(pos_taken) - len(guaranteed)
-    filler = sorted(overflow + _pos_col[_max_pos:], key=lambda x: x["similarity"], reverse=True)
-    results = pos_taken + guaranteed + filler[:max(0, remaining)]
+    remaining = body.max_docs - len(pos_taken) - len(sup_taken) - len(guaranteed)
+    filler = sorted(
+        overflow + _pos_col[_max_pos:] + _sup_col[_MAX_COURT:],
+        key=lambda x: x["similarity"], reverse=True,
+    )
+    results = pos_taken + sup_taken + guaranteed + filler[:max(0, remaining)]
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
