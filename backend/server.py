@@ -2717,39 +2717,40 @@ async def ask(body: AskRequest):
             except Exception:
                 pass  # fallback — шукаємо оригінальним текстом
 
-        async def _gen_hypothetical() -> str | None:
-            """HyDE: генеруємо гіпотетичний уривок закону по стилю бази."""
+        async def _rewrite_query(q: str) -> str | None:
+            """Переформулює запит у формальний юридичний стиль без вигадування законів."""
             try:
                 _m = GenerativeModel(_model_name)
                 try:
                     from vertexai.generative_models import ThinkingConfig as _TC
-                    _hyde_cfg = GenerationConfig(temperature=0.1, max_output_tokens=600, thinking_config=_TC(thinking_budget=0))
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150, thinking_config=_TC(thinking_budget=0))
                 except Exception:
-                    _hyde_cfg = GenerationConfig(temperature=0.1, max_output_tokens=600)
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
-                        "Ти — юрист. Напиши 3-5 речень офіційного юридичного тексту "
-                        "з українського законодавства, який відповідає на питання нижче. "
-                        "Використовуй юридичну термінологію і стиль нормативних актів. "
-                        "Згадай конкретні статті, постанови або норми. "
-                        "Тільки текст, без пояснень і заголовків.\n\n"
-                        f"Питання: {question}"
+                        "Перефразуй запит у формальний юридичний стиль українською мовою. "
+                        "Тільки змінюй формулювання — не вигадуй законів, цифр чи статей. "
+                        "Відповідь — лише перефразований запит, без пояснень.\n\n"
+                        f"Запит: {q}\n\nПерефразування:"
                     ),
-                    generation_config=_hyde_cfg,
+                    generation_config=_rw_cfg,
                 )
                 text = resp.text.strip()
-                logger.info("HYDE generated: %s", text[:300])
-                return text
+                if text and text.lower() != q.lower():
+                    logger.info("REWRITE: %s → %s", q[:80], text[:150])
+                    return text
+                return None
             except Exception as e:
-                logger.info("HYDE failed: %s", e)
+                logger.info("REWRITE failed: %s", e)
                 return None
 
-        # Embed питання (перекладеного якщо треба) + генеруємо гіпотетичну відповідь — одночасно
-        query_vector, hypothetical_text = await _asyncio.gather(
+        # Embed оригінального запиту + rewrite паралельно
+        query_vector, rewritten_query = await _asyncio.gather(
             _asyncio.to_thread(embeddings.embed_query, search_question),
-            _gen_hypothetical(),
+            _rewrite_query(search_question),
         )
+        hypothetical_text = rewritten_query  # alias для title boost keywords
         logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
         raise HTTPException(500, f"Embedding/HyDE error: {e}")
@@ -2784,28 +2785,26 @@ async def ask(body: AskRequest):
     fetch_k = body.max_docs * 3
     match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.35))
 
-    # 3. Пошук: оригінальний вектор + HyDE вектор паралельно → merge
+    # 3. Multi-query пошук: оригінал + rewrite → merge по max score
+    def _merge_results(lists: list[list]) -> list:
+        seen: dict = {}
+        for r in (item for lst in lists for item in lst):
+            key = (r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index", 0))
+            if key not in seen or r["similarity"] > seen[key]["similarity"]:
+                seen[key] = r
+        return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
+
     try:
-        if hypothetical_text:
-            hyp_vector, orig_results = await _asyncio.gather(
-                _asyncio.to_thread(embeddings.embed_query, hypothetical_text),
+        if rewritten_query:
+            rw_vector, orig_results = await _asyncio.gather(
+                _asyncio.to_thread(embeddings.embed_query, rewritten_query),
                 _asyncio.to_thread(search_qdrant, query_vector, fetch_k, target_collections, match_threshold),
             )
-            hyp_results = await _asyncio.to_thread(
-                search_qdrant, hyp_vector, fetch_k, target_collections, match_threshold
+            rw_results = await _asyncio.to_thread(
+                search_qdrant, rw_vector, fetch_k, target_collections, match_threshold
             )
-            # Merge: дедуплікація по (law_id, chunk_index), беремо max score
-            seen: dict = {}
-            for r in orig_results + hyp_results:
-                key = (
-                    r["out_metadata"].get("law_id", ""),
-                    r["out_metadata"].get("chunk_index", 0),
-                )
-                if key not in seen or r["similarity"] > seen[key]["similarity"]:
-                    seen[key] = r
-            results = sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
+            results = _merge_results([orig_results, rw_results])
         else:
-            # HyDE не спрацював — fallback до звичайного пошуку
             results = await _asyncio.to_thread(
                 search_qdrant, query_vector, fetch_k, target_collections, match_threshold
             )
