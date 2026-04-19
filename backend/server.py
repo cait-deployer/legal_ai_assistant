@@ -2744,7 +2744,15 @@ async def ask(body: AskRequest):
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
             try:
                 _m = GenerativeModel(_model_name)
-                _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60)
+                # Вимикаємо думання — потрібна швидка детермінована відповідь
+                try:
+                    from vertexai.generative_models import ThinkingConfig
+                    _rw_cfg = GenerationConfig(
+                        temperature=0.0, max_output_tokens=60,
+                        thinking_config=ThinkingConfig(thinking_budget=0),
+                    )
+                except Exception:
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
@@ -2767,8 +2775,6 @@ async def ask(body: AskRequest):
                     ),
                     generation_config=_rw_cfg,
                 )
-                # Thinking models split response into thought parts + answer part.
-                # Skip parts where thought=True, take first non-thought text.
                 raw = ""
                 try:
                     for part in resp.candidates[0].content.parts:
@@ -2776,10 +2782,7 @@ async def ask(body: AskRequest):
                             raw = part.text
                             break
                 except Exception:
-                    try:
-                        raw = resp.text or ""
-                    except Exception:
-                        pass
+                    raw = getattr(resp, "text", "") or ""
                 text = raw.strip().split("\n")[0].strip()
                 logger.info("REWRITE raw=%r", text[:80])
                 if text and text.lower() != q.lower() and 5 < len(text) < 300:
@@ -2827,7 +2830,7 @@ async def ask(body: AskRequest):
     # Крок 2: intent classifier звужує до релевантних в межах дозволених тарифом
     target_collections = await _classify_and_route(search_question, plan_collections, _model_name)
 
-    fetch_k = body.max_docs * 3
+    fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.35))
 
     # 3. Multi-query пошук: оригінал + rewrite → merge по max score
@@ -3007,7 +3010,15 @@ async def ask(body: AskRequest):
         try:
             import asyncio as _aio
             _rerank_model = GenerativeModel(_model_name)
-            _candidates = results[:min(len(results), 40)]  # беремо топ-40 для ранжування
+            try:
+                from vertexai.generative_models import ThinkingConfig
+                _rr_cfg = GenerationConfig(
+                    temperature=0.0, max_output_tokens=150,
+                    thinking_config=ThinkingConfig(thinking_budget=0),
+                )
+            except Exception:
+                _rr_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
+            _candidates = results[:min(len(results), 40)]
             _chunks_text = "\n\n".join(
                 f"[{i+1}] {c['out_content'][:350]}"
                 for i, c in enumerate(_candidates)
@@ -3021,7 +3032,7 @@ async def ask(body: AskRequest):
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
-                generation_config=GenerationConfig(temperature=0.0, max_output_tokens=100),
+                generation_config=_rr_cfg,
             )
             _rr_raw = ""
             try:
@@ -3034,17 +3045,17 @@ async def ask(body: AskRequest):
             _indices = []
             for tok in _rr_raw.split():
                 try:
-                    idx = int(tok.strip(".,;")) - 1
+                    idx = int(tok.strip(".,;[]")) - 1
                     if 0 <= idx < len(_candidates) and idx not in _indices:
                         _indices.append(idx)
                 except ValueError:
                     pass
-            if len(_indices) >= 3:
+            if len(_indices) >= 2:
                 results = [_candidates[i] for i in _indices[:body.max_docs]]
                 logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
             else:
                 results = results[:body.max_docs]
-                logger.info("RERANKER: fallback (parsed %d indices)", len(_indices))
+                logger.info("RERANKER: fallback (parsed %d indices, raw=%r)", len(_indices), _rr_raw[:80])
         except Exception as _rr_err:
             logger.warning("Reranker error: %s", _rr_err)
             results = results[:body.max_docs]

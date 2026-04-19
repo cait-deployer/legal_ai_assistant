@@ -468,27 +468,34 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
             if len(kw) < 5:
                 continue
             try:
-                pts, _ = client.scroll(
-                    collection_name=col,
-                    scroll_filter=Filter(
-                        must=[FieldCondition(key="source", match=MatchText(text=kw))]
-                    ),
-                    limit=500,
-                    with_payload=True,
-                    with_vectors=False,
-                )
+                # Пагінація — збираємо всі унікальні law_ids, не обмежуємось 500 чанками
+                offset = None
                 seen_in_kw: set[str] = set()
-                for p in pts:
-                    lid = p.payload.get("law_id", "")
-                    if not lid:
-                        continue
-                    if lid not in law_match_counts:
-                        law_match_counts[lid] = 0
-                        law_points[lid] = {}
-                    if lid not in seen_in_kw:
-                        law_match_counts[lid] += 1
-                        seen_in_kw.add(lid)
-                    law_points[lid][str(p.id)] = p
+                while True:
+                    pts, next_offset = client.scroll(
+                        collection_name=col,
+                        scroll_filter=Filter(
+                            must=[FieldCondition(key="source", match=MatchText(text=kw))]
+                        ),
+                        limit=500,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    for p in pts:
+                        lid = p.payload.get("law_id", "")
+                        if not lid:
+                            continue
+                        if lid not in law_match_counts:
+                            law_match_counts[lid] = 0
+                            law_points[lid] = {}
+                        if lid not in seen_in_kw:
+                            law_match_counts[lid] += 1
+                            seen_in_kw.add(lid)
+                        law_points[lid][str(p.id)] = p
+                    if not next_offset or len(law_match_counts) > 500:
+                        break
+                    offset = next_offset
             except Exception as e:
                 print(f"⚠️ search_qdrant_by_title [{col}]: {e}")
 
@@ -500,7 +507,7 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                 results.append({
                     "out_content":  p.payload.get("content", ""),
                     "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
-                    "similarity":   0.75,
+                    "similarity":   0.62,
                     "_collection":  col,
                     "_title_match": True,
                 })
