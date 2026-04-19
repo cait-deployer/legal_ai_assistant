@@ -2752,18 +2752,17 @@ async def ask(body: AskRequest):
                     ),
                     generation_config=_rw_cfg,
                 )
-                # Thinking models return empty resp.text — get answer from last non-empty part
+                # Thinking models split response into thought parts + answer part.
+                # Skip parts where thought=True, take first non-thought text.
                 raw = ""
                 try:
-                    raw = resp.text or ""
+                    for part in resp.candidates[0].content.parts:
+                        if not getattr(part, "thought", False) and getattr(part, "text", ""):
+                            raw = part.text
+                            break
                 except Exception:
-                    pass
-                if not raw:
                     try:
-                        for part in reversed(resp.candidates[0].content.parts):
-                            if getattr(part, "text", ""):
-                                raw = part.text
-                                break
+                        raw = resp.text or ""
                     except Exception:
                         pass
                 text = raw.strip().split("\n")[0].strip()
