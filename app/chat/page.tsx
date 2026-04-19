@@ -126,6 +126,7 @@ function ChatPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingPhase, setLoadingPhase] = useState(0);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
     const [isFirstMessage, setIsFirstMessage] = useState(true);
@@ -137,6 +138,13 @@ function ChatPage() {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const sessionStartRef = useRef<number>(Date.now());
     const newChatInProgressRef = useRef(false);
+
+    const LOADING_MESSAGES = [
+        'Шукаю відповідний закон...',
+        'Перевіряю судову практику...',
+        'Аналізую постанови КМУ...',
+        'Формую юридичний висновок...',
+    ];
 
     useEffect(() => {
         sessionStartRef.current = Date.now();
@@ -172,6 +180,13 @@ function ChatPage() {
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages, isLoading]);
+
+    useEffect(() => {
+        if (!isLoading) { setLoadingPhase(0); return; }
+        const t = setInterval(() => setLoadingPhase(p => (p + 1) % LOADING_MESSAGES.length), 2500);
+        return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isLoading]);
 
     useEffect(() => {
         const id = searchParams.get('chat');
@@ -212,6 +227,26 @@ function ChatPage() {
             .catch(() => toast.error('Не вдалося завантажити чат'))
             .finally(() => setHistoryLoading(false));
     }, [currentChatId, router]);
+
+    const handleNewChat = () => {
+        setMessages([]);
+        setIsFirstMessage(true);
+        setInput('');
+        setCurrentChatId(null);
+        router.push('/chat');
+    };
+
+    const refreshLimit = () => {
+        fetch('/api/settings/profile')
+            .then(r => r.ok ? r.json() : null)
+            .then(profile => {
+                if (!profile) return;
+                if (profile.monthly_limit != null && profile.requests_this_month >= profile.monthly_limit) {
+                    setLimitExceeded(true);
+                }
+            })
+            .catch(() => {});
+    };
 
     const handleSend = async (text: string) => {
         if (!text.trim() || isLoading || limitExceeded) return;
@@ -290,6 +325,8 @@ function ChatPage() {
                     }),
                 }).catch(() => { });
 
+                refreshLimit();
+
                 if (isFirstMessage) {
                     setIsFirstMessage(false);
                     fetch(`/api/chats/${chatId}/name`, {
@@ -328,7 +365,7 @@ function ChatPage() {
 
             <ChatSidebar
                 currentChatId={currentChatId}
-                onNewChat={() => router.push('/chat')}
+                onNewChat={handleNewChat}
                 onSelectChat={(id) => router.push(`/chat?chat=${id}`)}
                 isOpen={sidebarOpen}
                 onClose={() => setSidebarOpen(false)}
@@ -423,7 +460,9 @@ function ChatPage() {
                                 <div className="h-10 w-10 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/20 flex items-center justify-center">
                                     <Loader2 className="h-5 w-5 animate-spin text-[#C9A84C]" />
                                 </div>
-                                <p className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">Аналіз законодавства...</p>
+                                <p key={loadingPhase} className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
+                                    {LOADING_MESSAGES[loadingPhase]}
+                                </p>
                             </div>
                         )}
                     </div>

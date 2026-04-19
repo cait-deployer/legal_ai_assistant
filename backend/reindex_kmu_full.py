@@ -23,11 +23,13 @@ from langchain_text_splitters import MarkdownTextSplitter
 from rada_to_supabase import embeddings
 from qdrant_storage import upload_to_qdrant, delete_law_chunks
 
-COLLECTION   = "laws_kmu"
-WORKERS      = 8
-EMBED_BATCH  = 10
-SLEEP_SEC    = 0.2
-STATE_FILE   = "reindex_kmu_full_state.json"
+COLLECTION     = "laws_kmu"
+WORKERS        = 8
+EMBED_BATCH    = 10
+SLEEP_SEC      = 0.2
+STATE_FILE     = "reindex_kmu_full_state.json"
+IDS_CACHE_FILE = "reindex_kmu_ids_cache.json"
+IDS_CACHE_TTL  = 48 * 3600  # секунд: 48 год
 
 text_splitter = MarkdownTextSplitter(chunk_size=4000, chunk_overlap=400)
 _http_sem = threading.Semaphore(WORKERS)
@@ -52,6 +54,24 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
+
+
+def _load_ids_cache() -> list[dict] | None:
+    if not os.path.exists(IDS_CACHE_FILE):
+        return None
+    try:
+        age = time.time() - os.path.getmtime(IDS_CACHE_FILE)
+        if age > IDS_CACHE_TTL:
+            return None
+        with open(IDS_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_ids_cache(docs: list[dict]) -> None:
+    with open(IDS_CACHE_FILE, "w") as f:
+        json.dump(docs, f)
 
 
 def _process_one(doc: dict) -> tuple[str, bool]:
@@ -141,8 +161,14 @@ def run_full_reindex(log_callback=None, stop_event=None) -> None:
     if start_index > 0:
         log(f"▶️  Відновлення з індексу {start_index} (вже оброблено: {ok} ✅  {errors} ❌)")
 
-    log("📡 Завантаження списку КМУ документів (може зайняти 5–15 хв)...")
-    docs = get_all_kmu_docs(log=log)
+    docs = _load_ids_cache()
+    if docs:
+        log(f"📦 Використовую кеш ID: {len(docs)} документів КМУ (збірка пропущена)")
+    else:
+        log("📡 Завантаження списку КМУ документів (може зайняти 5–15 хв)...")
+        docs = get_all_kmu_docs(log=log)
+        _save_ids_cache(docs)
+        log(f"💾 ID кеш збережено: {len(docs)} документів")
     total = len(docs)
     log(f"📋 Всього: {total} НПА КМУ | Воркерів: {WORKERS} | Chunk: 4000 | Batch: {EMBED_BATCH}")
     log(f"⏱️  Орієнтовний час: ~{total // WORKERS * 3 // 3600 + 1} год")
@@ -188,9 +214,11 @@ def run_full_reindex(log_callback=None, stop_event=None) -> None:
         _save_state({"start_index": i, "ok": ok, "errors": errors})
         return
 
-    # Очищаємо state після успішного завершення
+    # Очищаємо state і кеш після успішного завершення
     if os.path.exists(STATE_FILE):
         os.remove(STATE_FILE)
+    if os.path.exists(IDS_CACHE_FILE):
+        os.remove(IDS_CACHE_FILE)
 
     log(f"{'='*60}")
     log(f"✅ Переіндекс КМУ завершено! Оброблено: {ok}/{total}. Помилки: {errors}", "success")

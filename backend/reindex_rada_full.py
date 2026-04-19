@@ -23,10 +23,12 @@ from langchain_text_splitters import MarkdownTextSplitter
 from rada_to_supabase import embeddings
 from qdrant_storage import upload_to_qdrant, delete_law_chunks, get_collection_for_category
 
-WORKERS     = 8
-EMBED_BATCH = 10
-SLEEP_SEC   = 0.2
-STATE_FILE  = "reindex_rada_full_state.json"
+WORKERS        = 8
+EMBED_BATCH    = 10
+SLEEP_SEC      = 0.2
+STATE_FILE     = "reindex_rada_full_state.json"
+IDS_CACHE_FILE = "reindex_rada_ids_cache.json"
+IDS_CACHE_TTL  = 48 * 3600  # секунд: 48 год
 
 text_splitter = MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300)
 _http_sem   = threading.Semaphore(WORKERS)
@@ -51,6 +53,24 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
+
+
+def _load_ids_cache() -> list[dict] | None:
+    if not os.path.exists(IDS_CACHE_FILE):
+        return None
+    try:
+        age = time.time() - os.path.getmtime(IDS_CACHE_FILE)
+        if age > IDS_CACHE_TTL:
+            return None
+        with open(IDS_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_ids_cache(laws: list[dict]) -> None:
+    with open(IDS_CACHE_FILE, "w") as f:
+        json.dump(laws, f)
 
 
 def _process_one(law: dict) -> tuple[str, str, bool]:
@@ -144,8 +164,14 @@ def run_full_reindex(log_callback=None, stop_event=None) -> None:
     if start_index > 0:
         log(f"▶️  Відновлення з індексу {start_index} (вже: {ok} ✅  {errors} ❌)")
 
-    log("📡 Завантаження списку законів Ради (може зайняти 15–30 хв)...")
-    all_laws = get_all_legal_ids(log=log)
+    all_laws = _load_ids_cache()
+    if all_laws:
+        log(f"📦 Використовую кеш ID: {len(all_laws)} законів Ради (збірка пропущена)")
+    else:
+        log("📡 Завантаження списку законів Ради (може зайняти 15–30 хв)...")
+        all_laws = get_all_legal_ids(log=log)
+        _save_ids_cache(all_laws)
+        log(f"💾 ID кеш збережено: {len(all_laws)} законів")
     total    = len(all_laws)
 
     log(f"📋 Всього: {total} законів | Воркерів: {WORKERS} | Chunk: 3000 | Batch: {EMBED_BATCH}")
@@ -195,6 +221,8 @@ def run_full_reindex(log_callback=None, stop_event=None) -> None:
 
     if os.path.exists(STATE_FILE):
         os.remove(STATE_FILE)
+    if os.path.exists(IDS_CACHE_FILE):
+        os.remove(IDS_CACHE_FILE)
 
     log(f"{'='*60}")
     log(f"✅ Переіндекс Ради завершено! Оброблено: {ok}/{total}. Помилки: {errors}", "success")
