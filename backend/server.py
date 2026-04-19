@@ -2788,45 +2788,58 @@ _INTENT_MAP: dict[str, list[str]] = {
 }
 
 async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "") -> list[str]:
-    """Класифікує галузь права через Gemini → повертає список колекцій для пошуку."""
+    """Класифікує галузь права через Gemini → повертає список колекцій для пошуку.
+    Запитує до 2 галузей, щоб покрити міждисциплінарні питання."""
     import asyncio as _asyncio
     try:
         from vertexai.generative_models import GenerativeModel, GenerationConfig
-        # Для класифікації завжди використовуємо flash — thinking модель блокується safety filters
         _mn = settings_cache.get("intent_model", "gemini-2.5-flash")
         _m = GenerativeModel(_mn)
         prompt = (
-            "Визнач галузь права для цього юридичного питання.\n"
-            "Відповідь — ОДНЕ слово зі списку:\n"
-            "трудове / податкове / фінансове / цивільне / кримінальне / "
-            "адміністративне / земельне / житлове / корпоративне / "
-            "міжнародне / кадрове / судове / інше\n\n"
+            "Визнач галузь(і) права для цього юридичного питання.\n"
+            "Відповідь — одне або два слова зі списку нижче, через кому, найрелевантніші першими.\n"
+            "Якщо питання стосується лише однієї галузі — одне слово.\n"
+            "Слова зі списку: трудове, податкове, фінансове, цивільне, кримінальне, "
+            "адміністративне, земельне, житлове, корпоративне, міжнародне, кадрове, судове, інше\n\n"
             f"Питання: {question}\n\nГалузь:"
         )
         resp = await _asyncio.to_thread(
             _m.generate_content, prompt,
             generation_config=GenerationConfig(temperature=0.0, max_output_tokens=50),
         )
-        intent_raw = resp.text.strip().lower().rstrip(".").split()[0] if resp.text.strip() else ""
-        # Exact match first, then prefix match (handles Gemini truncating e.g. "фінансо" → "фінансове")
-        cols = _INTENT_MAP.get(intent_raw)
-        intent = intent_raw
-        if cols is None:
-            for k, v in _INTENT_MAP.items():
-                if k.startswith(intent_raw) or intent_raw.startswith(k):
-                    cols = v
-                    intent = k
-                    break
-        if cols:
-            # Фільтруємо тільки ті що існують в all_cols
-            result = [c for c in cols if c in all_cols]
-            logger.info("INTENT '%s' (raw='%s') → collections: %s", intent, intent_raw, result)
-            return result if result else all_cols
-        else:
-            logger.info("INTENT '%s' → fallback all collections", intent_raw)
+        raw_text = resp.text.strip().lower().rstrip(".") if resp.text.strip() else ""
+        # Парсимо до 2 галузей, розділених комою/пробілом
+        raw_labels = [t.strip() for t in re.split(r"[,\s]+", raw_text) if t.strip()][:2]
+
+        def _resolve(label: str) -> str | None:
+            if label in _INTENT_MAP:
+                return label
+            for k in _INTENT_MAP:
+                if k.startswith(label) or label.startswith(k):
+                    return k
+            return None
+
+        intents = [r for label in raw_labels if (r := _resolve(label))]
+        if not intents:
+            logger.info("INTENT raw=%r → fallback all collections", raw_text)
             return all_cols
+
+        # Об'єднуємо колекції обох галузей (порядок: першої галузі → унікальні другої)
+        merged: list[str] = []
+        seen: set[str] = set()
+        for intent in intents:
+            cols = _INTENT_MAP.get(intent)
+            if cols is None:  # "інше" → all_cols
+                return all_cols
+            for c in cols:
+                if c not in seen:
+                    merged.append(c)
+                    seen.add(c)
+
+        result = [c for c in merged if c in all_cols]
+        logger.info("INTENT %s (raw=%r) → collections: %s", intents, raw_text, result)
+        return result if result else all_cols
     except Exception as e:
-        # Safety filter або інша помилка — НЕ all collections, а найбільш поширені
         _safe_default = ["rada_labor", "rada_civil", "laws_kmu", "rada_finance", "laws_positions"]
         result = [c for c in _safe_default if c in all_cols] or all_cols
         logger.info("INTENT classifier failed (%s) → safe default: %s", e, result)
@@ -3034,11 +3047,17 @@ async def ask(body: AskRequest):
             search_qdrant, query_vector, fetch_k, target_collections, match_threshold
         )
 
-    # RAW GATE: якщо навіть найкращий результат до бустів слабкий — зупиняємось
-    if results and results[0]["similarity"] < 0.42:
-        logger.info("RAW GATE: top raw score %.3f < 0.42 → early stop", results[0]["similarity"])
+    # LOW CONFIDENCE: якщо найкращий сирий score слабкий — не зупиняємось, але обмежуємо до top-3
+    # Gemini отримає guardrail в промпті і поверне "ось що є + рекомендую уточнити"
+    _RAW_GATE = 0.42
+    low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
+    if low_confidence:
+        logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → proceeding with top-3 only",
+                    results[0]["similarity"], _RAW_GATE)
+        results = results[:3]
+    elif not results:
         return {
-            "answer": "На жаль, у базі знань не знайдено документів, достатньо близьких до вашого запиту. Спробуйте переформулювати або уточнити питання.",
+            "answer": "На жаль, у базі знань не знайдено документів за вашим запитом. Спробуйте переформулювати або уточнити питання.",
             "references": [],
             "templates": [],
             "_meta": {
@@ -3300,7 +3319,8 @@ async def ask(body: AskRequest):
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
-    if not results or results[0]["similarity"] < min_score:
+    # В low_confidence режимі пропускаємо (Gemini вже отримає guardrail в промпті)
+    if not low_confidence and (not results or results[0]["similarity"] < min_score):
         return {
             "answer": (
                 "На жаль, у базі знань не знайдено достатньо інформації для відповіді на це питання. "
@@ -3463,7 +3483,15 @@ async def ask(body: AskRequest):
 
         # Retrieval quality guardrail — якщо пошук слабкий, чіткий вердикт замість домислів
         _retrieval_top = results[0]["similarity"] if results else 0.0
-        if _retrieval_top < 0.68:
+        if low_confidence:
+            response_instructions.append(
+                "УВАГА: знайдено лише слабко пов'язані документи (низька впевненість). "
+                "Структура відповіді: 1) Що може бути частково релевантним у знайдених документах (з цитуванням [N]). "
+                "2) Окремим абзацом: «⚠️ Точної норми щодо [аспект запиту] не знайдено. "
+                "Спробуйте переформулювати або звернутись до юриста.» "
+                "НЕ вигадуй норм, яких немає в документах."
+            )
+        elif _retrieval_top < 0.68:
             response_instructions.append(
                 "УВАГА: знайдені документи лише частково відповідають запиту. "
                 "Структура відповіді: 1) Що ПРЯМО знайдено в документах (з цитуванням [N]). "
@@ -3627,6 +3655,7 @@ async def ask(body: AskRequest):
             "processing_time_ms": elapsed_ms,
             "tokens_used": tokens_used,
             "category": category,
+            "low_confidence": low_confidence,
             **classification,
         },
     }
