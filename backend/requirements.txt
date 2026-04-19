@@ -43,4 +43,4 @@ psycopg2-binary
 
 # Українська морфологія (лематизація для пошуку)
 pymorphy3
-pymorphy3-dicts-ua
+pymorphy3-dicts-uk
