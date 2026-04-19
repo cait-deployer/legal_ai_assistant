@@ -2752,7 +2752,22 @@ async def ask(body: AskRequest):
                     ),
                     generation_config=_rw_cfg,
                 )
-                text = resp.text.strip().split("\n")[0].strip()
+                # Thinking models return empty resp.text — get answer from last non-empty part
+                raw = ""
+                try:
+                    raw = resp.text or ""
+                except Exception:
+                    pass
+                if not raw:
+                    try:
+                        for part in reversed(resp.candidates[0].content.parts):
+                            if getattr(part, "text", ""):
+                                raw = part.text
+                                break
+                    except Exception:
+                        pass
+                text = raw.strip().split("\n")[0].strip()
+                logger.info("REWRITE raw=%r", text[:80])
                 if text and text.lower() != q.lower() and 5 < len(text) < 300:
                     logger.info("REWRITE: %s → %s", q[:80], text[:150])
                     return text
