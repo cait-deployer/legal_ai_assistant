@@ -2957,8 +2957,8 @@ async def ask(body: AskRequest):
             for r in results
         }
         _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4}
-        # Stems (drop last 2 chars) allow "відрядні" to match "відрядження" etc.
-        _kw_stems = {w[:-2] for w in _kw_query_words if len(w) > 6} | _kw_query_words
+        # Лематизація через pymorphy замість агресивного [:-2] обрізання
+        _kw_stems = _kw_query_words | {_ua_lemma(w) for w in _kw_query_words if _ua_lemma(w)}
         _kw_added = 0
         for r in _kw_results:
             _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
@@ -3214,20 +3214,27 @@ async def ask(body: AskRequest):
             law_chunks.append(chunk_text)
 
     # Контекст: 1) закони Ради, 2) постанови КМУ, 3) судова практика
+    # Per-bucket cap — не даємо одному типу з'їсти весь context window
+    _MAX_LAW = 4
+    _MAX_KMU = 3
+    _MAX_COURT = 2
     parts: list[str] = []
     if law_chunks:
-        parts.append("\n\n".join(law_chunks))
+        parts.append("\n\n".join(law_chunks[:_MAX_LAW]))
     if kmu_chunks:
         parts.append(
             "--- Постанови та розпорядження КМУ ---\n\n"
-            + "\n\n".join(kmu_chunks)
+            + "\n\n".join(kmu_chunks[:_MAX_KMU])
         )
     if court_chunks:
         parts.append(
             "--- Судова практика та правові позиції ---\n\n"
-            + "\n\n".join(court_chunks)
+            + "\n\n".join(court_chunks[:_MAX_COURT])
         )
     context = "\n\n".join(parts) if parts else "Контекст відсутній."
+    # Hard cap на весь context — захист від MAX_TOKENS на відповіді
+    if len(context) > 14000:
+        context = context[:14000] + "\n\n[...контекст обрізано для економії токенів]"
 
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
