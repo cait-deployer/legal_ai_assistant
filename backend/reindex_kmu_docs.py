@@ -57,9 +57,9 @@ def reindex_doc(law_id: str, title: str) -> None:
     print(f"🗑️  Видаляємо старі чанки {stored_id}...")
     delete_law_chunks(stored_id, COLLECTION)
 
-    # Завантажуємо нові (зберігаємо оригінальний chunk без prefix щоб відповідь була читабельна)
+    # Завантажуємо нові — зберігаємо prefixed_chunk щоб content відповідав embedding (Variant 1)
     uploaded = 0
-    for i, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
+    for i, (chunk_text, vector) in enumerate(zip(prefixed_chunks, vectors)):
         if vector is None:
             continue
         upload_to_qdrant(
