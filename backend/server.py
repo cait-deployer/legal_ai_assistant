@@ -2766,7 +2766,7 @@ async def ask(body: AskRequest):
                         thinking_config=ThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=256)
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=2500)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
