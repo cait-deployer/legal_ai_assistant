@@ -2791,7 +2791,7 @@ async def ask(body: AskRequest):
                         pass
                 text = raw.strip().split("\n")[0].strip()
                 logger.info("REWRITE raw=%r", text[:80])
-                if text and text.lower() != q.lower() and 5 < len(text) < 300:
+                if text and text.lower() != q.lower() and 5 < len(text) < 300 and len(text.split()) >= 4:
                     logger.info("REWRITE: %s → %s", q[:80], text[:150])
                     return text
                 return None
@@ -3032,7 +3032,7 @@ async def ask(body: AskRequest):
                 )
             except Exception:
                 _rr_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
-            _candidates = results[:min(len(results), 40)]
+            _candidates = results[:min(len(results), 60)]
             _chunks_text = "\n\n".join(
                 f"[{i+1}] {c['out_content'][:350]}"
                 for i, c in enumerate(_candidates)
@@ -3070,7 +3070,7 @@ async def ask(body: AskRequest):
                         _indices.append(idx)
                 except ValueError:
                     pass
-            _min_results = min(5, body.max_docs)
+            _min_results = min(8, body.max_docs)
             if len(_indices) >= 2:
                 reranked = [_candidates[i] for i in _indices[:body.max_docs]]
                 # якщо реранкер вибрав менше мінімуму — доповнюємо семантичними топ-результатами

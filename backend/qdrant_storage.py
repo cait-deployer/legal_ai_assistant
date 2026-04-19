@@ -507,7 +507,7 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                 results.append({
                     "out_content":  p.payload.get("content", ""),
                     "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
-                    "similarity":   0.62,
+                    "similarity":   0.71,
                     "_collection":  col,
                     "_title_match": True,
                 })
