@@ -40,3 +40,7 @@ user-agents
 # Робота з базою (Supabase/Postgres)
 supabase
 psycopg2-binary
+
+# Українська морфологія (лематизація для пошуку)
+pymorphy3
+pymorphy3-dicts-ua

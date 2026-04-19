@@ -29,6 +29,21 @@ import logging
 from concurrent.futures import ThreadPoolExecutor as _TPE
 
 logger = logging.getLogger("uvicorn.error")
+
+# Ukrainian morphology: lemmatize words for MatchText (відрядженні → відрядження)
+try:
+    import pymorphy3 as _pymorphy3
+    _ua_morph = _pymorphy3.MorphAnalyzer(lang='uk')
+    def _ua_lemma(w: str) -> str:
+        try:
+            return _ua_morph.parse(w.lower())[0].normal_form
+        except Exception:
+            return w.lower()
+    logger.info("pymorphy3 UA morph analyzer ready")
+except ImportError:
+    def _ua_lemma(w: str) -> str:
+        return w.lower()
+    logger.warning("pymorphy3 not installed — morphology disabled")
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -2959,10 +2974,13 @@ async def ask(body: AskRequest):
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
         _q_words = [_strip_punct(w) for w in search_question.split() if len(w) > 4]
         _q_words = [w for w in _q_words if len(w) > 4]
-        # rewrite (hypothetical_text) дає нормалізовані форми слів — "відрядженні" → "відрядження"
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4]
-        _title_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
+        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
+        # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично для будь-якого слова
+        _title_kws = list(dict.fromkeys(
+            _raw_kws + [_ua_lemma(w) for w in _raw_kws]
+        ))[:14]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
@@ -2984,9 +3002,55 @@ async def ask(body: AskRequest):
     except Exception as _tb_err:
         logger.warning("Title boost error: %s", _tb_err)
 
-    # Final cap: trim to max_docs so Gemini gets a focused context
-    # (keyword + title boost can add up to 18 extra chunks beyond diversity cap)
-    results = results[:body.max_docs]
+    # LLM Reranker: якщо кандидатів більше ніж max_docs — просимо Gemini вибрати найрелевантніші
+    if len(results) > body.max_docs:
+        try:
+            import asyncio as _aio
+            _rerank_model = GenerativeModel(_model_name)
+            _candidates = results[:min(len(results), 40)]  # беремо топ-40 для ранжування
+            _chunks_text = "\n\n".join(
+                f"[{i+1}] {c['out_content'][:350]}"
+                for i, c in enumerate(_candidates)
+            )
+            _rerank_prompt = (
+                f"Питання: {search_question}\n\n"
+                f"Нижче {len(_candidates)} фрагментів юридичних документів.\n"
+                f"Вибери до {body.max_docs} найбільш корисних для відповіді на питання.\n"
+                "Відповідь — ТІЛЬКИ номери через пробіл, від найрелевантнішого: наприклад: 3 7 1 12\n\n"
+                f"{_chunks_text}\n\nНайрелевантніші номери:"
+            )
+            _rr_resp = await _aio.to_thread(
+                _rerank_model.generate_content, _rerank_prompt,
+                generation_config=GenerationConfig(temperature=0.0, max_output_tokens=100),
+            )
+            _rr_raw = ""
+            try:
+                for _p in _rr_resp.candidates[0].content.parts:
+                    if not getattr(_p, "thought", False) and getattr(_p, "text", ""):
+                        _rr_raw = _p.text
+                        break
+            except Exception:
+                _rr_raw = getattr(_rr_resp, "text", "") or ""
+            _indices = []
+            for tok in _rr_raw.split():
+                try:
+                    idx = int(tok.strip(".,;")) - 1
+                    if 0 <= idx < len(_candidates) and idx not in _indices:
+                        _indices.append(idx)
+                except ValueError:
+                    pass
+            if len(_indices) >= 3:
+                results = [_candidates[i] for i in _indices[:body.max_docs]]
+                logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
+            else:
+                results = results[:body.max_docs]
+                logger.info("RERANKER: fallback (parsed %d indices)", len(_indices))
+        except Exception as _rr_err:
+            logger.warning("Reranker error: %s", _rr_err)
+            results = results[:body.max_docs]
+    else:
+        results = results[:body.max_docs]
+
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
