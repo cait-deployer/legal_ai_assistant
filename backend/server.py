@@ -2639,7 +2639,8 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
     import asyncio as _asyncio
     try:
         from vertexai.generative_models import GenerativeModel, GenerationConfig
-        _mn = model_name or settings_cache.get("ai_model", "gemini-2.0-flash-001")
+        # Для класифікації завжди використовуємо flash — thinking модель блокується safety filters
+        _mn = settings_cache.get("intent_model", "gemini-2.0-flash-001")
         _m = GenerativeModel(_mn)
         prompt = (
             "Визнач галузь права для цього юридичного питання.\n"
@@ -2980,18 +2981,32 @@ async def ask(body: AskRequest):
         logger.warning("Keyword search error: %s", _kw_err)
 
     # Title-based metadata boost: знаходить документи по заголовку (source поле)
+    # Стоп-слова: розмовні та функціональні слова які НЕ є юридичними термінами
+    _TITLE_STOPWORDS = {
+        "цікавить", "цікавити", "хочу", "хочете", "знайти", "скажи", "скажіть",
+        "розкажи", "розкажіть", "питання", "допоможи", "допоможіть", "можна",
+        "можете", "будь", "ласка", "треба", "потрібно", "потрібен", "потрібна",
+        "щодо", "стосовно", "якого", "якій", "яким", "яких", "тобто", "також",
+        "взагалі", "зокрема", "наприклад", "взагалі", "наразі", "зараз",
+        "правда", "справді", "взнати", "дізнатись", "дізнатися", "пояснити",
+        "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
+    }
     try:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
         _q_words = [_strip_punct(w) for w in search_question.split() if len(w) > 4]
-        _q_words = [w for w in _q_words if len(w) > 4]
+        _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
-        _hyde_words = [w for w in _hyde_words if len(w) > 4]
+        _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
-        # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично для будь-якого слова
+        # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
+        # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
-            _raw_kws + [_ua_lemma(w) for w in _raw_kws]
+            _raw_kws + [
+                lm for w in _raw_kws
+                if (lm := _ua_lemma(w)) and lm.lower() not in _TITLE_STOPWORDS
+            ]
         ))[:14]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
