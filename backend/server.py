@@ -3260,6 +3260,287 @@ async def ask(body: AskRequest):
     }
 
 
+@app.post("/ask_simple")
+async def ask_simple(body: AskRequest):
+    """
+    Спрощений pipeline для A/B тесту.
+    БЕЗ: routing, diversity cap, keyword search, title boost.
+    З: rewrite, multi-query, granular source weights, top-N.
+    """
+    import asyncio as _asyncio
+
+    start_time = time.time()
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+
+    try:
+        from rada_to_supabase import embeddings
+        from vertexai.generative_models import GenerativeModel, GenerationConfig
+        import json as _json
+
+        if not _vertex_initialized:
+            _init_vertex_ai()
+
+        _model_name = settings_cache.get("ai_model")
+
+        def _is_russian(text: str) -> bool:
+            return any(c in set("ыъэ") for c in text.lower()) and not any(c in set("іїєґ") for c in text.lower())
+
+        search_question = question
+        if _is_russian(question):
+            try:
+                _tr_resp = await _asyncio.to_thread(
+                    GenerativeModel(_model_name).generate_content,
+                    f"Переклади на українську мову. Відповідь — тільки переклад без пояснень:\n\n{question}",
+                    generation_config=GenerationConfig(temperature=0.0, max_output_tokens=300),
+                )
+                search_question = _tr_resp.text.strip() or question
+            except Exception:
+                pass
+
+        async def _rewrite(q: str) -> str | None:
+            try:
+                _m = GenerativeModel(_model_name)
+                try:
+                    from vertexai.generative_models import ThinkingConfig as _TC
+                    _cfg = GenerationConfig(temperature=0.0, max_output_tokens=150, thinking_config=_TC(thinking_budget=0))
+                except Exception:
+                    _cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
+                resp = await _asyncio.to_thread(
+                    _m.generate_content,
+                    (
+                        "Перефразуй запит у формальний юридичний стиль українською мовою. "
+                        "Тільки змінюй формулювання — не вигадуй законів, цифр чи статей. "
+                        "Відповідь — лише перефразований запит, без пояснень.\n\n"
+                        f"Запит: {q}\n\nПерефразування:"
+                    ),
+                    generation_config=_cfg,
+                )
+                text = resp.text.strip()
+                return text if text and text.lower() != q.lower() else None
+            except Exception:
+                return None
+
+        query_vector, rewritten_query = await _asyncio.gather(
+            _asyncio.to_thread(embeddings.embed_query, search_question),
+            _rewrite(search_question),
+        )
+        if rewritten_query:
+            logger.info("SIMPLE REWRITE: %s → %s", search_question[:80], rewritten_query[:120])
+
+    except Exception as e:
+        raise HTTPException(500, f"Embedding error: {e}")
+
+    from qdrant_storage import search_qdrant, RADA_COLLECTIONS, ALL_COLLECTIONS
+
+    # Колекції за тарифом (без routing)
+    if body.filter_sources:
+        allowed = set(body.filter_sources)
+        plan_collections: list[str] = []
+        if "rada" in allowed:   plan_collections += RADA_COLLECTIONS
+        if "supreme" in allowed: plan_collections.append("laws_supreme")
+        if "wiki" in allowed:   plan_collections.append("laws_wiki")
+        if "ccu" in allowed:    plan_collections.append("laws_ccu")
+        if "lpd" in allowed:    plan_collections.append("laws_positions")
+        if "kmu" in allowed:    plan_collections.append("laws_kmu")
+        if not plan_collections: plan_collections = ALL_COLLECTIONS
+    else:
+        plan_collections = ALL_COLLECTIONS
+
+    fetch_k = body.max_docs * 3
+    match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.35))
+
+    # Multi-query: оригінал + rewrite
+    def _merge(lists: list[list]) -> list:
+        seen: dict = {}
+        for r in (item for lst in lists for item in lst):
+            key = (r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index", 0))
+            if key not in seen or r["similarity"] > seen[key]["similarity"]:
+                seen[key] = r
+        return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
+
+    try:
+        if rewritten_query:
+            rw_vector, orig_results = await _asyncio.gather(
+                _asyncio.to_thread(embeddings.embed_query, rewritten_query),
+                _asyncio.to_thread(search_qdrant, query_vector, fetch_k, plan_collections, match_threshold),
+            )
+            rw_results = await _asyncio.to_thread(search_qdrant, rw_vector, fetch_k, plan_collections, match_threshold)
+            results = _merge([orig_results, rw_results])
+        else:
+            results = await _asyncio.to_thread(search_qdrant, query_vector, fetch_k, plan_collections, match_threshold)
+    except Exception:
+        results = await _asyncio.to_thread(search_qdrant, query_vector, fetch_k, plan_collections, match_threshold)
+
+    # Granular source weights (замість binary boost + caps)
+    _WEIGHTS = {
+        "rada_":         1.00,
+        "laws_kmu":      0.95,
+        "laws_positions": 0.70,
+        "laws_ccu":      0.70,
+        "laws_supreme":  0.30,
+        "laws_wiki":     0.20,
+    }
+    for r in results:
+        col = r.get("_collection", "")
+        for prefix, w in _WEIGHTS.items():
+            if col.startswith(prefix):
+                r["similarity"] = min(r["similarity"] * w, 1.0)
+                break
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+
+    # Dedup: max 2 чанки з одного документа
+    _seen_lid: dict[str, int] = {}
+    _deduped: list = []
+    for r in results:
+        lid = r["out_metadata"].get("law_id", "")
+        if _seen_lid.get(lid, 0) < 2:
+            _deduped.append(r)
+            _seen_lid[lid] = _seen_lid.get(lid, 0) + 1
+    results = _deduped[:body.max_docs]
+
+    # Діагностика
+    _col_counts: dict = {}
+    for r in results:
+        _col_counts[r.get("_collection", "?")] = _col_counts.get(r.get("_collection", "?"), 0) + 1
+    logger.info(
+        "SIMPLE found=%d cols=%s | top: %s",
+        len(results), dict(sorted(_col_counts.items())),
+        " | ".join(f"{r['_collection']}:{r['out_metadata'].get('law_id','?')}:{r['similarity']:.3f}" for r in results[:6]) or "NONE",
+    )
+
+    min_score = settings_cache.get_float("min_relevance_score", 0.35)
+    if not results or results[0]["similarity"] < min_score:
+        return {
+            "answer": "На жаль, у базі знань не знайдено достатньо інформації для відповіді. Спробуйте переформулювати запит.",
+            "references": [], "templates": [],
+            "_meta": {"processing_time_ms": int((time.time() - start_time) * 1000), "tokens_used": 0, "category": "Загальне", "_simple": True, **_CLF_FALLBACK},
+        }
+
+    # Контекст для Gemini (той самий формат що і в /ask)
+    citations: list[dict] = []
+    law_chunks: list[str] = []
+    kmu_chunks: list[str] = []
+    court_chunks: list[str] = []
+
+    def _is_expired(r: dict) -> bool:
+        s = r["out_metadata"].get("status", "").lower()
+        return "втратив" in s or "втратила" in s
+
+    results = [r for r in results if not _is_expired(r)]
+
+    for i, r in enumerate(results):
+        num = i + 1
+        meta = r["out_metadata"]
+        content = r["out_content"]
+        title = meta.get("source", meta.get("title", ""))
+        law_id = meta.get("law_id", "")
+        law_url = meta.get("law_url", "")
+        if not law_url and "rada.gov.ua" in meta.get("source_domain", "") and law_id:
+            law_url = f"https://zakon.rada.gov.ua/laws/show/{law_id}"
+
+        citations.append({
+            "num": num, "source_title": title,
+            "passage": re.sub(r"\n{3,}", "\n\n", re.sub(r"```[a-z]*", "", content)).strip()[:600],
+            "status": meta.get("status", ""), "law_url": law_url, "chunk_index": meta.get("chunk_index", 0),
+        })
+
+        if not content:
+            continue
+
+        header = f"[{num}] {title}"
+        if meta.get("doc_type"): header += f" | {meta['doc_type']}"
+        if law_id:               header += f" | № {law_id}"
+        if meta.get("status"):   header += f" | Статус: {meta['status']}"
+        chunk_text = f"{header}\n---\n{content}"
+
+        col = r.get("_collection", "")
+        if col in ("laws_positions", "laws_supreme", "laws_ccu"):
+            court_chunks.append(chunk_text)
+        elif col == "laws_kmu":
+            kmu_chunks.append(chunk_text)
+        else:
+            law_chunks.append(chunk_text)
+
+    parts: list[str] = []
+    if law_chunks:   parts.append("\n\n".join(law_chunks))
+    if kmu_chunks:   parts.append("--- Постанови КМУ ---\n\n" + "\n\n".join(kmu_chunks))
+    if court_chunks: parts.append("--- Судова практика ---\n\n" + "\n\n".join(court_chunks))
+    context = "\n\n".join(parts) or "Контекст відсутній."
+
+    try:
+        system_prompt = settings_cache.get("system_prompt", "Ти — AI-асистент. Відповідай виключно на основі наданого контексту. Цитуй джерела у форматі [1], [2].")
+        temperature   = settings_cache.get_float("temperature", 0.1)
+        top_p         = settings_cache.get_float("top_p", 0.8)
+        max_tokens    = max(8000, int(settings_cache.get_float("max_output_tokens", 8000)))
+        llm_timeout   = settings_cache.get_float("llm_timeout_seconds", 90.0)
+
+        rf = set(body.response_features)
+        instructions = ["Надай точну структуровану відповідь."]
+        if "response_detailed" in rf:
+            instructions.append("Дай розгорнуту відповідь з аналізом: поясни суть, вкажи винятки та нюанси.")
+        if "response_steps" in rf:
+            instructions.append("Обов'язково додай розділ «Що робити далі» з конкретними кроками.")
+        instructions.append(
+            "Посилайся на джерела у форматі [1], [2]. "
+            "Якщо контекст не містить потрібної інформації — чесно повідом про це. "
+            f"Пиши завершену відповідь до {'800' if 'response_detailed' in rf else '350'} слів."
+        )
+
+        history_block = ""
+        if body.history:
+            lines = []
+            for t in body.history[-12:]:
+                role, content_h = t.get("role",""), (t.get("content") or "").strip()[:1000]
+                if role == "user":      lines.append(f"Користувач: {content_h}")
+                elif role == "assistant": lines.append(f"Асистент: {content_h}")
+            if lines: history_block = "Попередній діалог:\n" + "\n".join(lines) + "\n\n"
+
+        prompt = (
+            f"{history_block}"
+            "Контекст з українського законодавства:\n\n"
+            f"{context}\n\n---\nПитання: {question}\n\n"
+            + " ".join(instructions)
+        )
+
+        response = await _asyncio.wait_for(
+            _asyncio.to_thread(
+                GenerativeModel(_model_name, system_instruction=system_prompt).generate_content,
+                prompt,
+                generation_config=GenerationConfig(temperature=temperature, top_p=top_p, max_output_tokens=max_tokens),
+            ),
+            timeout=llm_timeout,
+        )
+
+        tokens_used = 0
+        try: tokens_used = response.usage_metadata.total_token_count or 0
+        except Exception: pass
+
+    except _asyncio.TimeoutError:
+        raise HTTPException(504, f"AI не відповів за {llm_timeout:.0f}с")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"AI error: {e}")
+
+    cats = [r["out_metadata"].get("category", "") for r in results if r["out_metadata"].get("category")]
+    category = max(set(cats), key=cats.count) if cats else "Загальне"
+
+    return {
+        "answer": response.text,
+        "references": citations,
+        "templates": [],
+        "_meta": {
+            "processing_time_ms": int((time.time() - start_time) * 1000),
+            "tokens_used": tokens_used,
+            "category": category,
+            "_simple": True,
+            **_CLF_FALLBACK,
+        },
+    }
+
+
 class GenerateNameRequest(BaseModel):
     question: str
     answer: str
