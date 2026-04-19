@@ -2640,7 +2640,7 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
     try:
         from vertexai.generative_models import GenerativeModel, GenerationConfig
         # Для класифікації завжди використовуємо flash — thinking модель блокується safety filters
-        _mn = settings_cache.get("intent_model", "gemini-2.0-flash-001")
+        _mn = settings_cache.get("intent_model", "gemini-2.5-flash")
         _m = GenerativeModel(_mn)
         prompt = (
             "Визнач галузь права для цього юридичного питання.\n"
@@ -2745,7 +2745,7 @@ async def ask(body: AskRequest):
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
             try:
                 # Для rewrite використовуємо легку flash-модель — думаюча модель виробляє сміття на цій задачі
-                _rw_model_name = settings_cache.get("rewrite_model", "gemini-2.0-flash-001")
+                _rw_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
                 _m = GenerativeModel(
                     _rw_model_name,
                     system_instruction=(
@@ -3515,7 +3515,7 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         "Обсяг: рівно 80–100 слів українською. Завжди завершуй думку повним реченням."
     )
 
-    model_name = settings_cache.get("ai_model") or "gemini-2.0-flash-001"
+    model_name = settings_cache.get("ai_model") or "gemini-2.5-flash"
     try:
         if not _vertex_initialized:
             _init_vertex_ai()
