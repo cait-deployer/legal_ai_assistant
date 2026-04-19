@@ -144,8 +144,8 @@ def run_full_reindex(log_callback=None, stop_event=None) -> None:
     if start_index > 0:
         log(f"▶️  Відновлення з індексу {start_index} (вже: {ok} ✅  {errors} ❌)")
 
-    log("📡 Завантаження списку законів Ради...")
-    all_laws = get_all_legal_ids()
+    log("📡 Завантаження списку законів Ради (може зайняти 15–30 хв)...")
+    all_laws = get_all_legal_ids(log=log)
     total    = len(all_laws)
 
     log(f"📋 Всього: {total} законів | Воркерів: {WORKERS} | Chunk: 3000 | Batch: {EMBED_BATCH}")

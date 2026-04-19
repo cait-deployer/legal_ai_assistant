@@ -141,8 +141,8 @@ def run_full_reindex(log_callback=None, stop_event=None) -> None:
     if start_index > 0:
         log(f"▶️  Відновлення з індексу {start_index} (вже оброблено: {ok} ✅  {errors} ❌)")
 
-    log("📡 Завантаження списку КМУ документів...")
-    docs = get_all_kmu_docs()
+    log("📡 Завантаження списку КМУ документів (може зайняти 5–15 хв)...")
+    docs = get_all_kmu_docs(log=log)
     total = len(docs)
     log(f"📋 Всього: {total} НПА КМУ | Воркерів: {WORKERS} | Chunk: 4000 | Batch: {EMBED_BATCH}")
     log(f"⏱️  Орієнтовний час: ~{total // WORKERS * 3 // 3600 + 1} год")
