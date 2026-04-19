@@ -3088,9 +3088,11 @@ async def ask(body: AskRequest):
             _rerank_prompt = (
                 f"Питання: {search_question}\n\n"
                 f"Нижче {len(_candidates)} фрагментів юридичних документів.\n"
-                f"Вибери до {body.max_docs} найбільш корисних для відповіді на питання.\n"
-                "Відповідь — ТІЛЬКИ номери через пробіл, від найрелевантнішого: наприклад: 3 7 1 12\n\n"
-                f"{_chunks_text}\n\nНайрелевантніші номери:"
+                f"ОБОВ'ЯЗКОВО вибери рівно {min(body.max_docs, 8)} найкорисніших фрагментів.\n"
+                f"Якщо знайшов хоча б {min(body.max_docs, 8)} підходящих — вибери всі {min(body.max_docs, 8)}.\n"
+                "Відповідь — ТІЛЬКИ числа через пробіл, наприклад: 3 7 1 12 5 9 2 8\n"
+                "НЕ пиши нічого крім чисел.\n\n"
+                f"{_chunks_text}\n\nВибрані номери (рівно {min(body.max_docs, 8)} штук):"
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
