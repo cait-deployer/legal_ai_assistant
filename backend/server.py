@@ -2757,7 +2757,16 @@ async def ask(body: AskRequest):
                         "Відповідь — ТІЛЬКИ перефразований запит, 5–15 слів, без пояснень, без лапок."
                     ),
                 )
-                _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=120)
+                # thinking_budget=0 — вимикаємо thinking для rewrite (швидше + не обрізає вивід)
+                try:
+                    from vertexai.generative_models import ThinkingConfig
+                    _rw_cfg = GenerationConfig(
+                        temperature=0.0,
+                        max_output_tokens=256,
+                        thinking_config=ThinkingConfig(thinking_budget=0),
+                    )
+                except Exception:
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=256)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
