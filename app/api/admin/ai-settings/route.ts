@@ -31,6 +31,7 @@ const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default
   rada_source_boost:     { type: "float", default: 1.15 },
   llm_timeout_seconds:   { type: "float", default: 90 },
   max_output_tokens:     { type: "float", default: 1500 },
+  rewrite_examples:      { type: "text",  default: "" },
 }
 
 export async function GET() {
