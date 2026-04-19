@@ -2943,21 +2943,12 @@ async def ask(body: AskRequest):
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
-        # Morphology: locative/genitive → nominative for MatchText (no stemming in Qdrant)
-        _MORPH = {
-            "відрядженні": "відрядження", "відрядженням": "відрядження",
-            "відрядженнях": "відрядження", "відряджень": "відрядження",
-            "відрядні": "відрядження", "добових": "добові", "добовими": "добові",
-            "витрати": "витрат", "витратах": "витрат",
-        }
         _q_words = [_strip_punct(w) for w in search_question.split() if len(w) > 4]
         _q_words = [w for w in _q_words if len(w) > 4]
+        # rewrite (hypothetical_text) дає нормалізовані форми слів — "відрядженні" → "відрядження"
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4]
-        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
-        _title_kws = list(dict.fromkeys(
-            _raw_kws + [_MORPH[w.lower()] for w in _raw_kws if w.lower() in _MORPH]
-        ))[:14]
+        _title_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
