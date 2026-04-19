@@ -87,6 +87,8 @@ WIKI_STATE_FILE     = BASE_DIR / "wiki_state.json"        # Wiki
 CCU_STATE_FILE      = BASE_DIR / "ccu_state.json"         # КСУ
 LPD_STATE_FILE      = BASE_DIR / "lpd_state.json"         # Правові позиції ВС
 KMU_STATE_FILE      = BASE_DIR / "kmu_state.json"         # НПА КМУ
+REINDEX_KMU_STATE   = BASE_DIR / "reindex_kmu_full_state.json"   # Переіндекс КМУ
+REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переіндекс Ради
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -96,7 +98,7 @@ _SB_KEY = (
 )
 
 # ── In-memory стан по кожному джерелу ─────────────────────────────────────────
-_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu")
+_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu", "reindex_kmu", "reindex_rada")
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -108,6 +110,7 @@ _sync: dict[str, dict] = {
 }
 _lock = threading.Lock()
 MAX_LIVE_LOGS = 500
+_reindex_stop = {"kmu": threading.Event(), "rada": threading.Event()}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -302,7 +305,7 @@ def _do_rada(
         from langchain_text_splitters import MarkdownTextSplitter
         from rada_to_supabase import embeddings
 
-        splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
+        splitter = MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300)
 
         # 1. Отримуємо список законів (або з кешу при resume)
         if all_laws_cached is not None:
@@ -419,14 +422,16 @@ def _do_rada(
                     return 0
 
                 chunks     = splitter.split_text(text)
+                # Title-prefix: embedding знає назву закону в кожному чанку
+                chunks     = [f"{law_title}\n\n{c}" for c in chunks]
                 text_flags = detect_text_flags(text)
                 log(f"  ✂️ {len(chunks)} чанків | {law_meta['status']} | {coll}")
 
-                # Batch embed — по 5 чанків за раз (уникаємо ліміту токенів Google API)
+                # Batch embed — по 10 чанків за раз
                 vectors = []
                 try:
-                    for b in range(0, len(chunks), 5):
-                        vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
+                    for b in range(0, len(chunks), 10):
+                        vectors.extend(embeddings.embed_documents(chunks[b:b + 10]))
                 except Exception as e:
                     log(f"  ⚠️ Batch embed помилка, перемикаємось на посткові: {e}", "warning")
                     vectors = []
@@ -1672,6 +1677,154 @@ async def resume_kmu():
                 start_index=state["next_index"],
                 docs_cached=state.get("docs"))
     return {"ok": True, "session_id": session_id, "resume_from": state["next_index"]}
+
+
+# ── /admin/reindex/* ──────────────────────────────────────────────────────────
+
+def _make_reindex_log_cb(src: str):
+    def cb(msg: str, level: str = "info") -> None:
+        entry = {"ts": datetime.now(timezone.utc).isoformat(), "message": msg, "level": level}
+        with _lock:
+            _sync[src]["live_logs"].append(entry)
+            if len(_sync[src]["live_logs"]) > MAX_LIVE_LOGS:
+                _sync[src]["live_logs"] = _sync[src]["live_logs"][-MAX_LIVE_LOGS:]
+    return cb
+
+
+def _do_reindex_kmu(session_id: str) -> None:
+    src = "reindex_kmu"
+    log = _make_reindex_log_cb(src)
+    try:
+        from reindex_kmu_full import run_full_reindex
+        _reindex_stop["kmu"].clear()
+        run_full_reindex(log_callback=log, stop_event=_reindex_stop["kmu"])
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+def _do_reindex_rada(session_id: str) -> None:
+    src = "reindex_rada"
+    log = _make_reindex_log_cb(src)
+    try:
+        from reindex_rada_full import run_full_reindex
+        _reindex_stop["rada"].clear()
+        run_full_reindex(log_callback=log, stop_event=_reindex_stop["rada"])
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+@app.post("/admin/reindex/kmu/trigger")
+async def trigger_reindex_kmu():
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("reindex_kmu", _do_reindex_kmu, session_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/reindex/kmu/stop")
+async def stop_reindex_kmu():
+    with _lock:
+        if not _sync["reindex_kmu"]["running"]:
+            raise HTTPException(400, "Переіндекс не виконується")
+        _reindex_stop["kmu"].set()
+        _sync["reindex_kmu"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/reindex/kmu/logs")
+async def reindex_kmu_logs():
+    with _lock:
+        running   = _sync["reindex_kmu"]["running"]
+        pause_req = _sync["reindex_kmu"]["pause_requested"]
+        logs      = list(_sync["reindex_kmu"]["live_logs"])
+    state = None
+    if REINDEX_KMU_STATE.exists():
+        try:
+            s = json.loads(REINDEX_KMU_STATE.read_text(encoding="utf-8"))
+            state = {"next_index": s.get("start_index"), "ok": s.get("ok", 0), "errors": s.get("errors", 0)}
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+    }
+
+
+@app.post("/admin/reindex/kmu/resume")
+async def resume_reindex_kmu():
+    if _sync["reindex_kmu"]["running"]:
+        raise HTTPException(409, "Переіндекс KMU вже виконується")
+    if not REINDEX_KMU_STATE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    session_id = str(uuid.uuid4())
+    _start_sync("reindex_kmu", _do_reindex_kmu, session_id)
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/reindex/rada/trigger")
+async def trigger_reindex_rada():
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("reindex_rada", _do_reindex_rada, session_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/reindex/rada/stop")
+async def stop_reindex_rada():
+    with _lock:
+        if not _sync["reindex_rada"]["running"]:
+            raise HTTPException(400, "Переіндекс не виконується")
+        _reindex_stop["rada"].set()
+        _sync["reindex_rada"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/reindex/rada/logs")
+async def reindex_rada_logs():
+    with _lock:
+        running   = _sync["reindex_rada"]["running"]
+        pause_req = _sync["reindex_rada"]["pause_requested"]
+        logs      = list(_sync["reindex_rada"]["live_logs"])
+    state = None
+    if REINDEX_RADA_STATE.exists():
+        try:
+            s = json.loads(REINDEX_RADA_STATE.read_text(encoding="utf-8"))
+            state = {"next_index": s.get("start_index"), "ok": s.get("ok", 0), "errors": s.get("errors", 0)}
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+    }
+
+
+@app.post("/admin/reindex/rada/resume")
+async def resume_reindex_rada():
+    if _sync["reindex_rada"]["running"]:
+        raise HTTPException(409, "Переіндекс Ради вже виконується")
+    if not REINDEX_RADA_STATE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    session_id = str(uuid.uuid4())
+    _start_sync("reindex_rada", _do_reindex_rada, session_id)
+    return {"ok": True, "session_id": session_id}
 
 
 # ── /admin/logs (unified history across all sources) ─────────────────────────

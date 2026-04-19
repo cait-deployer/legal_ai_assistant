@@ -122,8 +122,16 @@ def _process_one(doc: dict) -> tuple[str, bool]:
     return stored_id, uploaded > 0
 
 
-def run_full_reindex() -> None:
+def run_full_reindex(log_callback=None, stop_event=None) -> None:
     from kmu_scanner import get_all_kmu_docs
+
+    def log(msg: str, level: str = "info") -> None:
+        _log(msg)
+        if log_callback:
+            try:
+                log_callback(msg, level)
+            except Exception:
+                pass
 
     state = _load_state()
     start_index = state.get("start_index", 0)
@@ -131,17 +139,22 @@ def run_full_reindex() -> None:
     errors = state.get("errors", 0)
 
     if start_index > 0:
-        _log(f"▶️  Відновлення з індексу {start_index} (вже оброблено: {ok} ✅  {errors} ❌)")
+        log(f"▶️  Відновлення з індексу {start_index} (вже оброблено: {ok} ✅  {errors} ❌)")
 
-    _log("📡 Завантаження списку КМУ документів...")
+    log("📡 Завантаження списку КМУ документів...")
     docs = get_all_kmu_docs()
     total = len(docs)
-    _log(f"📋 Всього: {total} НПА КМУ | Воркерів: {WORKERS} | Chunk: 4000 | Batch: {EMBED_BATCH}")
-    _log(f"⏱️  Орієнтовний час: ~{total // WORKERS * 3 // 3600 + 1} год")
+    log(f"📋 Всього: {total} НПА КМУ | Воркерів: {WORKERS} | Chunk: 4000 | Batch: {EMBED_BATCH}")
+    log(f"⏱️  Орієнтовний час: ~{total // WORKERS * 3 // 3600 + 1} год")
 
     i = start_index
     try:
         while i < total:
+            if stop_event and stop_event.is_set():
+                log(f"⏸️  Зупинено. Збережено прогрес: {i}/{total}", "warning")
+                _save_state({"start_index": i, "ok": ok, "errors": errors})
+                return
+
             batch_end = min(i + WORKERS, total)
             batch     = docs[i:batch_end]
 
@@ -153,25 +166,25 @@ def run_full_reindex() -> None:
                         stored_id, success = fut.result()
                         if success:
                             ok += 1
-                            _log(f"  ✅ [{ok}/{total}] {stored_id[:70]}")
+                            log(f"  ✅ [{ok}/{total}] {stored_id[:70]}", "success")
                         else:
                             errors += 1
-                            _log(f"  ⚠️ [{i}/{total}] {doc['id'][:70]} — порожній або помилка")
+                            log(f"  ⚠️ [{i}/{total}] {doc['id'][:70]} — порожній або помилка", "warning")
                     except Exception as e:
                         errors += 1
-                        _log(f"  ❌ {doc['id'][:70]}: {e}")
+                        log(f"  ❌ {doc['id'][:70]}: {e}", "error")
 
             i = batch_end
 
             # Зберігаємо прогрес кожні 50 батчів (~400 документів)
             if (i // WORKERS) % 50 == 0:
                 _save_state({"start_index": i, "ok": ok, "errors": errors})
-                _log(f"💾 Прогрес збережено: {i}/{total} ({ok} ✅ {errors} ❌)")
+                log(f"💾 Прогрес збережено: {i}/{total} ({ok} ✅ {errors} ❌)")
 
             time.sleep(SLEEP_SEC)
 
     except KeyboardInterrupt:
-        _log(f"\n⏸️  Зупинено користувачем. Збережено прогрес: {i}/{total}")
+        log(f"\n⏸️  Зупинено користувачем. Збережено прогрес: {i}/{total}", "warning")
         _save_state({"start_index": i, "ok": ok, "errors": errors})
         return
 
@@ -179,11 +192,9 @@ def run_full_reindex() -> None:
     if os.path.exists(STATE_FILE):
         os.remove(STATE_FILE)
 
-    _log(f"\n{'='*60}")
-    _log(f"✅ Переіндекс завершено!")
-    _log(f"   Оброблено: {ok}/{total}")
-    _log(f"   Помилки:   {errors}")
-    _log(f"   Перезапусти backend: systemctl restart backend.service")
+    log(f"{'='*60}")
+    log(f"✅ Переіндекс КМУ завершено! Оброблено: {ok}/{total}. Помилки: {errors}", "success")
+    log("   Перезапусти backend: systemctl restart backend.service")
 
 
 if __name__ == "__main__":
