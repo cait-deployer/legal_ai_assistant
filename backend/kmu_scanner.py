@@ -18,7 +18,8 @@ KMU_SECTION_CODE  = "o2"
 KMU_SECTION_LABEL = "Кабінет Міністрів України"
 
 WORKERS = 4
-text_splitter = MarkdownTextSplitter(chunk_size=1500, chunk_overlap=200)
+EMBED_BATCH = 10
+text_splitter = MarkdownTextSplitter(chunk_size=4000, chunk_overlap=400)
 _http_sem = threading.Semaphore(WORKERS)
 
 
@@ -69,19 +70,21 @@ def process_kmu_doc(
     scraped_at = datetime.now(timezone.utc).isoformat()
 
     chunks = text_splitter.split_text(text)
+    # Title-prefix: embedding знає назву документу в кожному чанку
+    prefixed = [f"{title}\n\n{chunk}" for chunk in chunks]
 
     vectors: list = []
     try:
-        for b in range(0, len(chunks), 5):
-            vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
+        for b in range(0, len(prefixed), EMBED_BATCH):
+            vectors.extend(embeddings.embed_documents(prefixed[b:b + EMBED_BATCH]))
     except Exception as e:
         print(f"⚠️ KMU embed fallback: {e}")
         vectors = []
-        for chunk in chunks:
-            try:    vectors.append(embeddings.embed_query(chunk))
+        for pc in prefixed:
+            try:    vectors.append(embeddings.embed_query(pc))
             except: vectors.append(None)
 
-    for i, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
+    for i, (chunk_text, vector) in enumerate(zip(prefixed, vectors)):
         if vector is None:
             continue
         upload_to_qdrant(
