@@ -2673,8 +2673,11 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
             logger.info("INTENT '%s' → fallback all collections", intent_raw)
             return all_cols
     except Exception as e:
-        logger.info("INTENT classifier failed (%s) → fallback all collections", e)
-        return all_cols
+        # Safety filter або інша помилка — НЕ all collections, а найбільш поширені
+        _safe_default = ["rada_labor", "rada_civil", "laws_kmu", "rada_finance", "laws_positions"]
+        result = [c for c in _safe_default if c in all_cols] or all_cols
+        logger.info("INTENT classifier failed (%s) → safe default: %s", e, result)
+        return result
 
 
 # ── /ask — основний чат-ендпоінт ──────────────────────────────────────────────
