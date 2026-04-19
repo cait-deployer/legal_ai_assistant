@@ -2743,8 +2743,10 @@ async def ask(body: AskRequest):
         async def _rewrite_query(q: str) -> str | None:
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
             try:
+                # Для rewrite використовуємо легку flash-модель — думаюча модель виробляє сміття на цій задачі
+                _rw_model_name = settings_cache.get("rewrite_model", "gemini-2.0-flash-001")
                 _m = GenerativeModel(
-                    _model_name,
+                    _rw_model_name,
                     system_instruction=(
                         "Ти перефразовуєш запит користувача у стислий пошуковий запит "
                         "з офіційною юридичною термінологією українською мовою. "
@@ -2958,8 +2960,14 @@ async def ask(body: AskRequest):
             _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             if _key in _existing_ids:
                 continue
-            # Відхиляємо keyword результат якщо заголовок документа нічого спільного з запитом не має
-            _src = (r["out_metadata"].get("source", "") + " " + r["out_metadata"].get("doc_type", "")).lower()
+            # Відхиляємо keyword результат якщо ні заголовок НІ зміст чанку не мають нічого спільного з запитом
+            # Перевіряємо і source (title) і перші 600 символів контенту — щоб знаходити документи
+            # де запитне слово є в тексті (напр. "добових" у таблиці) але не в заголовку
+            _src = (
+                r["out_metadata"].get("source", "") + " " +
+                r["out_metadata"].get("doc_type", "") + " " +
+                r.get("out_content", "")[:600]
+            ).lower()
             if not any(s in _src for s in _kw_stems):
                 continue
             results.append(r)
