@@ -3047,14 +3047,14 @@ async def ask(body: AskRequest):
             search_qdrant, query_vector, fetch_k, target_collections, match_threshold
         )
 
-    # LOW CONFIDENCE: якщо найкращий сирий score слабкий — не зупиняємось, але обмежуємо до top-3
+    # LOW CONFIDENCE: якщо найкращий сирий score слабкий — не зупиняємось, не обрізаємо
+    # Letting BM25 + title boost run fully — вони можуть витягнути релевантні документи
     # Gemini отримає guardrail в промпті і поверне "ось що є + рекомендую уточнити"
     _RAW_GATE = 0.42
     low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
     if low_confidence:
-        logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → proceeding with top-3 only",
+        logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → continuing (BM25+title will compensate)",
                     results[0]["similarity"], _RAW_GATE)
-        results = results[:3]
     elif not results:
         return {
             "answer": "На жаль, у базі знань не знайдено документів за вашим запитом. Спробуйте переформулювати або уточнити питання.",
@@ -3077,14 +3077,16 @@ async def ask(body: AskRequest):
         logger.info("DOCS [%s]: %s", _c, " | ".join(_ids[:5]))
 
     # Source priority boost — піднімаємо Раду відносно Wiki/інших
+    # laws_supreme soft penalty ×0.88: широкі PDF-огляди матчаться на все, знижуємо їх вагу
     # Значення > 1.0 = Рада іде вище; 1.0 = без буста (можна змінити в адмінці)
     rada_boost = settings_cache.get_float("rada_source_boost", 1.15)
-    if abs(rada_boost - 1.0) > 0.001:
-        for r in results:
-            col = r.get("_collection", "")
-            if col.startswith("rada_") or col == "laws_positions":
-                r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
-        results.sort(key=lambda x: x["similarity"], reverse=True)
+    for r in results:
+        col = r.get("_collection", "")
+        if col == "laws_supreme":
+            r["similarity"] = r["similarity"] * 0.88
+        elif abs(rada_boost - 1.0) > 0.001 and (col.startswith("rada_") or col == "laws_positions"):
+            r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
+    results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Dedup: max 2 chunks per law_id globally so one doc can't eat all slots
     _seen_lid: dict[str, int] = {}
@@ -3257,14 +3259,16 @@ async def ask(body: AskRequest):
                 f"[{i+1}] {c['out_content'][:350]}"
                 for i, c in enumerate(_candidates)
             )
+            # Cap: мін 8, до половини max_docs (щоб при 20-doc плані не різати до 8)
+            _rr_select = min(body.max_docs, max(8, body.max_docs // 2))
             _rerank_prompt = (
                 f"Питання: {search_question}\n\n"
                 f"Нижче {len(_candidates)} фрагментів юридичних документів.\n"
-                f"ОБОВ'ЯЗКОВО вибери рівно {min(body.max_docs, 8)} найкорисніших фрагментів.\n"
-                f"Якщо знайшов хоча б {min(body.max_docs, 8)} підходящих — вибери всі {min(body.max_docs, 8)}.\n"
+                f"ОБОВ'ЯЗКОВО вибери рівно {_rr_select} найкорисніших фрагментів.\n"
+                f"Якщо знайшов хоча б {_rr_select} підходящих — вибери всі {_rr_select}.\n"
                 "Відповідь — ТІЛЬКИ числа через пробіл, наприклад: 3 7 1 12 5 9 2 8\n"
                 "НЕ пиши нічого крім чисел.\n\n"
-                f"{_chunks_text}\n\nВибрані номери (рівно {min(body.max_docs, 8)} штук):"
+                f"{_chunks_text}\n\nВибрані номери (рівно {_rr_select} штук):"
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
@@ -3292,14 +3296,13 @@ async def ask(body: AskRequest):
                         _indices.append(idx)
                 except ValueError:
                     pass
-            _min_results = min(8, body.max_docs)
             if len(_indices) >= 2:
                 reranked = [_candidates[i] for i in _indices[:body.max_docs]]
                 # якщо реранкер вибрав менше мінімуму — доповнюємо семантичними топ-результатами
-                if len(reranked) < _min_results:
+                if len(reranked) < _rr_select:
                     _ranked_ids = {(r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) for r in reranked}
                     for _c in _candidates:
-                        if len(reranked) >= _min_results:
+                        if len(reranked) >= _rr_select:
                             break
                         _ck = (_c["out_metadata"].get("law_id"), _c["out_metadata"].get("chunk_index"))
                         if _ck not in _ranked_ids:
@@ -3656,6 +3659,8 @@ async def ask(body: AskRequest):
             "tokens_used": tokens_used,
             "category": category,
             "low_confidence": low_confidence,
+            "top_score": round(results[0]["similarity"], 3) if results else 0.0,
+            "n_docs": len(results),
             **classification,
         },
     }
