@@ -2723,21 +2723,33 @@ async def ask(body: AskRequest):
                 _m = GenerativeModel(_model_name)
                 try:
                     from vertexai.generative_models import ThinkingConfig as _TC
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150, thinking_config=_TC(thinking_budget=0))
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60, thinking_config=_TC(thinking_budget=0))
                 except Exception:
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
-                        "Перефразуй запит у формальний юридичний стиль українською мовою. "
-                        "Тільки змінюй формулювання — не вигадуй законів, цифр чи статей. "
-                        "Відповідь — лише перефразований запит, без пояснень.\n\n"
-                        f"Запит: {q}\n\nПерефразування:"
+                        "Ти — помічник для пошуку в базі українського законодавства.\n"
+                        "Завдання: перефразуй запит користувача у стислий пошуковий запит "
+                        "з офіційною юридичною термінологією українською мовою.\n"
+                        "Правила:\n"
+                        "- Заміни розмовні слова на офіційні юридичні терміни\n"
+                        "- Не вигадуй номери законів, статей чи цифри\n"
+                        "- Відповідь: ТІЛЬКИ перефразований запит, 5-15 слів, без пояснень\n\n"
+                        "Приклади:\n"
+                        "Запит: як платять відрядні за кордон\n"
+                        "Відповідь: норми відшкодування витрат на відрядження за кордон\n\n"
+                        "Запит: скільки днів відпустки на рік\n"
+                        "Відповідь: тривалість щорічної основної оплачуваної відпустки\n\n"
+                        "Запит: як звільнити працівника без його згоди\n"
+                        "Відповідь: підстави розірвання трудового договору з ініціативи роботодавця\n\n"
+                        f"Запит: {q}\n"
+                        "Відповідь:"
                     ),
                     generation_config=_rw_cfg,
                 )
-                text = resp.text.strip()
-                if text and text.lower() != q.lower():
+                text = resp.text.strip().split("\n")[0].strip()
+                if text and text.lower() != q.lower() and len(text) < 200:
                     logger.info("REWRITE: %s → %s", q[:80], text[:150])
                     return text
                 return None
