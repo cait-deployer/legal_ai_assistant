@@ -2762,7 +2762,7 @@ async def ask(body: AskRequest):
                     from vertexai.generative_models import ThinkingConfig
                     _rw_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=256,
+                        max_output_tokens=2500,
                         thinking_config=ThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
