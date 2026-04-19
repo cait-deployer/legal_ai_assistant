@@ -2638,15 +2638,23 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
             _m.generate_content, prompt,
             generation_config=GenerationConfig(temperature=0.0, max_output_tokens=50),
         )
-        intent = resp.text.strip().lower().rstrip(".").split()[0] if resp.text.strip() else ""
-        cols = _INTENT_MAP.get(intent)
+        intent_raw = resp.text.strip().lower().rstrip(".").split()[0] if resp.text.strip() else ""
+        # Exact match first, then prefix match (handles Gemini truncating e.g. "фінансо" → "фінансове")
+        cols = _INTENT_MAP.get(intent_raw)
+        intent = intent_raw
+        if cols is None:
+            for k, v in _INTENT_MAP.items():
+                if k.startswith(intent_raw) or intent_raw.startswith(k):
+                    cols = v
+                    intent = k
+                    break
         if cols:
             # Фільтруємо тільки ті що існують в all_cols
             result = [c for c in cols if c in all_cols]
-            logger.info("INTENT '%s' → collections: %s", intent, result)
+            logger.info("INTENT '%s' (raw='%s') → collections: %s", intent, intent_raw, result)
             return result if result else all_cols
         else:
-            logger.info("INTENT '%s' → fallback all collections", intent)
+            logger.info("INTENT '%s' → fallback all collections", intent_raw)
             return all_cols
     except Exception as e:
         logger.info("INTENT classifier failed (%s) → fallback all collections", e)
@@ -2749,7 +2757,7 @@ async def ask(body: AskRequest):
                     generation_config=_rw_cfg,
                 )
                 text = resp.text.strip().split("\n")[0].strip()
-                if text and text.lower() != q.lower() and len(text) < 200:
+                if text and text.lower() != q.lower() and 5 < len(text) < 300:
                     logger.info("REWRITE: %s → %s", q[:80], text[:150])
                     return text
                 return None
