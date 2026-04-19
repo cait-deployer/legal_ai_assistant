@@ -2744,15 +2744,7 @@ async def ask(body: AskRequest):
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
             try:
                 _m = GenerativeModel(_model_name)
-                # Вимикаємо думання — потрібна швидка детермінована відповідь
-                try:
-                    from vertexai.generative_models import ThinkingConfig
-                    _rw_cfg = GenerationConfig(
-                        temperature=0.0, max_output_tokens=60,
-                        thinking_config=ThinkingConfig(thinking_budget=0),
-                    )
-                except Exception:
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60)
+                _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=80)
                 resp = await _asyncio.to_thread(
                     _m.generate_content,
                     (
@@ -2775,14 +2767,28 @@ async def ask(body: AskRequest):
                     ),
                     generation_config=_rw_cfg,
                 )
+                # Debug: log all parts to understand model output
+                try:
+                    _dbg = [(getattr(p, "thought", None), getattr(p, "text", "")[:80]) for p in resp.candidates[0].content.parts]
+                    logger.info("REWRITE parts: %s", _dbg)
+                except Exception:
+                    pass
+                # Primary: resp.text (works when thinking disabled)
                 raw = ""
                 try:
-                    for part in resp.candidates[0].content.parts:
-                        if not getattr(part, "thought", False) and getattr(part, "text", ""):
-                            raw = part.text
-                            break
+                    raw = resp.text or ""
                 except Exception:
-                    raw = getattr(resp, "text", "") or ""
+                    pass
+                if not raw:
+                    # Fallback: concatenate all non-thought parts
+                    try:
+                        raw = " ".join(
+                            getattr(p, "text", "").strip()
+                            for p in resp.candidates[0].content.parts
+                            if not getattr(p, "thought", False) and getattr(p, "text", "")
+                        )
+                    except Exception:
+                        pass
                 text = raw.strip().split("\n")[0].strip()
                 logger.info("REWRITE raw=%r", text[:80])
                 if text and text.lower() != q.lower() and 5 < len(text) < 300:
@@ -3005,6 +3011,14 @@ async def ask(body: AskRequest):
     except Exception as _tb_err:
         logger.warning("Title boost error: %s", _tb_err)
 
+    # Unified pre-sort: title_match chunks отримують бонус якщо вони підтверджені семантикою
+    # Мета: реранкер бачить найбільш різноманітних кандидатів, а не просто топ-40 за вектором
+    _seen_laws_in_semantic = {r["out_metadata"].get("law_id") for r in results if not r.get("_title_match")}
+    for r in results:
+        if r.get("_title_match") and r["out_metadata"].get("law_id") in _seen_laws_in_semantic:
+            r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+
     # LLM Reranker: якщо кандидатів більше ніж max_docs — просимо Gemini вибрати найрелевантніші
     if len(results) > body.max_docs:
         try:
@@ -3036,22 +3050,40 @@ async def ask(body: AskRequest):
             )
             _rr_raw = ""
             try:
-                for _p in _rr_resp.candidates[0].content.parts:
-                    if not getattr(_p, "thought", False) and getattr(_p, "text", ""):
-                        _rr_raw = _p.text
-                        break
+                _rr_raw = _rr_resp.text or ""
             except Exception:
-                _rr_raw = getattr(_rr_resp, "text", "") or ""
+                pass
+            if not _rr_raw:
+                try:
+                    _rr_raw = " ".join(
+                        getattr(_p, "text", "").strip()
+                        for _p in _rr_resp.candidates[0].content.parts
+                        if not getattr(_p, "thought", False) and getattr(_p, "text", "")
+                    )
+                except Exception:
+                    pass
             _indices = []
             for tok in _rr_raw.split():
                 try:
-                    idx = int(tok.strip(".,;[]")) - 1
+                    idx = int(tok.strip(".,;[]()")) - 1
                     if 0 <= idx < len(_candidates) and idx not in _indices:
                         _indices.append(idx)
                 except ValueError:
                     pass
+            _min_results = min(5, body.max_docs)
             if len(_indices) >= 2:
-                results = [_candidates[i] for i in _indices[:body.max_docs]]
+                reranked = [_candidates[i] for i in _indices[:body.max_docs]]
+                # якщо реранкер вибрав менше мінімуму — доповнюємо семантичними топ-результатами
+                if len(reranked) < _min_results:
+                    _ranked_ids = {(r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) for r in reranked}
+                    for _c in _candidates:
+                        if len(reranked) >= _min_results:
+                            break
+                        _ck = (_c["out_metadata"].get("law_id"), _c["out_metadata"].get("chunk_index"))
+                        if _ck not in _ranked_ids:
+                            reranked.append(_c)
+                            _ranked_ids.add(_ck)
+                results = reranked
                 logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
             else:
                 results = results[:body.max_docs]
