@@ -23,9 +23,9 @@ from langchain_text_splitters import MarkdownTextSplitter
 from rada_to_supabase import embeddings
 from qdrant_storage import upload_to_qdrant, delete_law_chunks, get_collection_for_category
 
-WORKERS        = 8
+WORKERS        = 4
 EMBED_BATCH    = 10
-SLEEP_SEC      = 0.2
+SLEEP_SEC      = 0.5
 STATE_FILE     = "reindex_rada_full_state.json"
 IDS_CACHE_FILE = "reindex_rada_ids_cache.json"
 IDS_CACHE_TTL  = 48 * 3600  # секунд: 48 год
@@ -83,8 +83,16 @@ def _process_one(law: dict) -> tuple[str, str, bool]:
     law_url   = f"{BASE}/laws/show/{law_id}"
     coll      = get_collection_for_category(category)
 
-    with _http_sem:
-        text = get_law_text(law_id)
+    text = None
+    for _attempt in range(3):
+        with _http_sem:
+            text = get_law_text(law_id)
+        if text and len(text) >= 50:
+            break
+        if text == "__RESTRICTED__":
+            break
+        if _attempt < 2:
+            time.sleep(1.5)
 
     if not text or len(text) < 50:
         return law_id, coll, False

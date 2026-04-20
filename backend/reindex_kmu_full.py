@@ -24,9 +24,9 @@ from rada_to_supabase import embeddings
 from qdrant_storage import upload_to_qdrant, delete_law_chunks
 
 COLLECTION     = "laws_kmu"
-WORKERS        = 8
+WORKERS        = 4
 EMBED_BATCH    = 10
-SLEEP_SEC      = 0.2
+SLEEP_SEC      = 0.5
 STATE_FILE     = "reindex_kmu_full_state.json"
 IDS_CACHE_FILE = "reindex_kmu_ids_cache.json"
 IDS_CACHE_TTL  = 48 * 3600  # секунд: 48 год
@@ -85,8 +85,14 @@ def _process_one(doc: dict) -> tuple[str, bool]:
     doc_type  = _kmu_doc_type(title, law_id)
     law_url   = f"{BASE}/laws/show/{law_id}"
 
-    with _http_sem:
-        text = get_law_text(law_id)
+    text = None
+    for _attempt in range(3):
+        with _http_sem:
+            text = get_law_text(law_id)
+        if text and len(text) >= 100:
+            break
+        if _attempt < 2:
+            time.sleep(1.5)
 
     if not text or len(text) < 100:
         return stored_id, False
