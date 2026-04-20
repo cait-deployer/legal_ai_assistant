@@ -286,8 +286,8 @@ export default function ReindexPage() {
             <p className="font-semibold mb-1">Важливо перед запуском</p>
             <p className="text-amber-400/70 text-xs">
               Переіндекс видаляє старі чанки та завантажує нові з покращеними налаштуваннями
-              (chunk_size 1500→3000/4000, title-prefix embedding, 8 воркерів).
-              Тривалість: <strong>КМУ ~10–12 год, Рада ~20–30 год</strong>.
+              (chunk_size 3000/4000, title-prefix embedding, 4 воркери, retry при помилках).
+              Тривалість: <strong>КМУ ~20–24 год, Рада ~40–50 год</strong>.
               Під час переіндексу бекенд продовжує відповідати на запити.
               Зупинка зберігає прогрес — можна відновити.
             </p>
