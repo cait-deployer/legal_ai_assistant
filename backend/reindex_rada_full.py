@@ -128,7 +128,7 @@ def _process_one(law: dict) -> tuple[str, str, bool]:
     for i, (chunk_text, vector) in enumerate(zip(prefixed, vectors)):
         if vector is None:
             continue
-        upload_to_qdrant(
+        ok = upload_to_qdrant(
             chunk_text,
             {
                 "source":          law_title,
@@ -148,7 +148,8 @@ def _process_one(law: dict) -> tuple[str, str, bool]:
             vector,
             collection_name=coll,
         )
-        uploaded += 1
+        if ok:
+            uploaded += 1
 
     return law_id, coll, uploaded > 0
 

@@ -3,6 +3,7 @@ Qdrant storage — мульти-колекційна архітектура.
 Кожна правова галузь має окрему колекцію замість однієї ukrainian_laws.
 """
 import os
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from qdrant_client import QdrantClient
@@ -149,10 +150,16 @@ def upload_to_qdrant(
         payload["sync_session_id"] = session_id
 
     point = PointStruct(id=str(uuid.uuid4()), vector=embedding, payload=payload)
-    try:
-        get_client().upsert(collection_name=collection_name, points=[point])
-    except Exception as e:
-        print(f"⚠️  Qdrant upload error [{collection_name}]: {e}")
+    for _attempt in range(3):
+        try:
+            get_client().upsert(collection_name=collection_name, points=[point])
+            return True
+        except Exception as e:
+            if _attempt < 2:
+                time.sleep(2 ** _attempt)
+            else:
+                print(f"⚠️  Qdrant upload error [{collection_name}]: {e}")
+    return False
 
 
 # ── ЧИТАННЯ ІСНУЮЧИХ ЗАКОНІВ ───────────────────────────────────────────────────
@@ -214,16 +221,20 @@ def get_existing_law_ids() -> set:
 
 def delete_law_chunks(law_id: str, collection_name: str) -> None:
     """Видаляє всі чанки закону з вказаної колекції."""
-    try:
-        get_client().delete(
-            collection_name=collection_name,
-            points_selector=Filter(
-                must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]
-            ),
-        )
-        print(f"🗑️  Видалено '{law_id}' з '{collection_name}'.")
-    except Exception as e:
-        print(f"❌ delete_law_chunks [{collection_name}]: {e}")
+    for _attempt in range(3):
+        try:
+            get_client().delete(
+                collection_name=collection_name,
+                points_selector=Filter(
+                    must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]
+                ),
+            )
+            return
+        except Exception as e:
+            if _attempt < 2:
+                time.sleep(2 ** _attempt)
+            else:
+                print(f"❌ delete_law_chunks [{collection_name}]: {e}")
 
 
 # ── ПОШУК ─────────────────────────────────────────────────────────────────────

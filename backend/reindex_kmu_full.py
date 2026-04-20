@@ -124,7 +124,7 @@ def _process_one(doc: dict) -> tuple[str, bool]:
     for i, (chunk_text, vector) in enumerate(zip(prefixed, vectors)):
         if vector is None:
             continue
-        upload_to_qdrant(
+        ok = upload_to_qdrant(
             chunk_text,
             {
                 "source":        title or doc_type,
@@ -143,7 +143,8 @@ def _process_one(doc: dict) -> tuple[str, bool]:
             vector,
             collection_name=COLLECTION,
         )
-        uploaded += 1
+        if ok:
+            uploaded += 1
 
     return stored_id, uploaded > 0
 
