@@ -25,7 +25,7 @@ from qdrant_storage import upload_to_qdrant, delete_law_chunks
 
 COLLECTION     = "laws_kmu"
 WORKERS        = 4
-EMBED_BATCH    = 10
+EMBED_BATCH    = 5
 SLEEP_SEC      = 0.5
 STATE_FILE     = "reindex_kmu_full_state.json"
 IDS_CACHE_FILE = "reindex_kmu_ids_cache.json"
@@ -105,7 +105,7 @@ def _process_one(doc: dict) -> tuple[str, bool]:
         return stored_id, False
 
     # Title-prefix: embedding бачить назву документу в кожному чанку
-    prefixed = [f"{title}\n\n{chunk}" for chunk in chunks]
+    prefixed = [f"{title}\n\n{chunk}"[:8000] for chunk in chunks]
 
     vectors: list = []
     try:

@@ -104,7 +104,7 @@ def repair_kmu() -> None:
         if not chunks:
             return stored_id, False
 
-        prefixed = [f"{title}\n\n{chunk}" for chunk in chunks]
+        prefixed = [f"{title}\n\n{chunk}"[:8000] for chunk in chunks]
         vectors: list = []
         try:
             for b in range(0, len(prefixed), EMBED_BATCH):
@@ -229,7 +229,7 @@ def repair_rada() -> None:
         if not chunks:
             return law_id, coll, False
 
-        prefixed = [f"{law_title}\n\n{chunk}" for chunk in chunks]
+        prefixed = [f"{law_title}\n\n{chunk}"[:8000] for chunk in chunks]
         vectors: list = []
         try:
             for b in range(0, len(prefixed), EMBED_BATCH):
