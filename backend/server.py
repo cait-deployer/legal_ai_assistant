@@ -3009,7 +3009,7 @@ async def ask(body: AskRequest):
     target_collections = await _classify_and_route(search_question, plan_collections, _model_name)
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
-    match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.35))
+    match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.33))
 
     # 3. Multi-query пошук: оригінал + rewrite → merge по max score
     def _merge_results(lists: list[list]) -> list:
@@ -3045,8 +3045,14 @@ async def ask(body: AskRequest):
     _RAW_GATE = 0.42
     low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
     if low_confidence:
-        logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → continuing (BM25+title will compensate)",
+        logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → widening BM25/title scope",
                     results[0]["similarity"], _RAW_GATE)
+        _lc_extra = ["rada_labor", "rada_civil", "laws_kmu", "rada_finance",
+                     "laws_positions", "rada_admin", "rada_state"]
+        target_collections = list(dict.fromkeys(
+            target_collections + [c for c in _lc_extra if c in plan_collections]
+        ))
+        logger.info("LOW CONFIDENCE: target_collections expanded → %s", target_collections)
     elif not results:
         return {
             "answer": "На жаль, у базі знань не знайдено документів за вашим запитом. Спробуйте переформулювати або уточнити питання.",
@@ -3163,10 +3169,13 @@ async def ask(body: AskRequest):
             _src = (
                 r["out_metadata"].get("source", "") + " " +
                 r["out_metadata"].get("doc_type", "") + " " +
-                r.get("out_content", "")[:600]
+                r.get("out_content", "")[:1500]
             ).lower()
             if not any(s in _src for s in _kw_stems):
                 continue
+            # Динамічний score: більше збіглих стемів → вищий score (0.25–0.55)
+            _matched = sum(1 for s in _kw_stems if s in _src)
+            r["similarity"] = 0.25 + 0.30 * (_matched / max(len(_kw_stems), 1))
             results.append(r)
             _existing_ids.add(_key)
             _kw_added += 1
@@ -3216,6 +3225,10 @@ async def ask(body: AskRequest):
             for r in _title_results:
                 _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
                 if _key not in _existing_ids:
+                    # Динамічний score: скільки _title_kws є в назві документа (0.50–0.85)
+                    _tsrc = r["out_metadata"].get("source", "").lower()
+                    _tmatched = sum(1 for kw in _title_kws if kw.lower() in _tsrc)
+                    r["similarity"] = 0.50 + 0.35 * (_tmatched / max(len(_title_kws), 1))
                     results.append(r)
                     _existing_ids.add(_key)
                     _title_added += 1
@@ -3233,6 +3246,16 @@ async def ask(body: AskRequest):
             r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
+    # Protected slots: laws_kmu і laws_positions з title match гарантовано виживають крізь reranker
+    # Причина: реранкер оптимізує "лінгвістичну очевидність", а КМУ/позиції мають сухий табличний текст
+    _protected_colls = {"laws_kmu", "laws_positions"}
+    _rr_protected = [r for r in results
+                     if r.get("_collection") in _protected_colls and r.get("_title_match")][:2]
+    _rr_protected_keys = {
+        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+        for r in _rr_protected
+    }
+
     # LLM Reranker: якщо кандидатів більше ніж max_docs — просимо Gemini вибрати найрелевантніші
     if len(results) > body.max_docs:
         try:
@@ -3246,21 +3269,26 @@ async def ask(body: AskRequest):
                 )
             except Exception:
                 _rr_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
-            _candidates = results[:min(len(results), 60)]
+            _open_candidates = [r for r in results
+                                if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+                                not in _rr_protected_keys]
+            _candidates = _open_candidates[:min(len(_open_candidates), 60)]
             _chunks_text = "\n\n".join(
                 f"[{i+1}] {c['out_content'][:350]}"
                 for i, c in enumerate(_candidates)
             )
-            # Cap: мін 8, до половини max_docs (щоб при 20-doc плані не різати до 8)
+            # Cap: мін 8, до половини max_docs; з урахуванням protected slots
             _rr_select = min(body.max_docs, max(8, body.max_docs // 2))
+            _rr_slots = max(1, _rr_select - len(_rr_protected))
             _rerank_prompt = (
                 f"Питання: {search_question}\n\n"
                 f"Нижче {len(_candidates)} фрагментів юридичних документів.\n"
-                f"ОБОВ'ЯЗКОВО вибери рівно {_rr_select} найкорисніших фрагментів.\n"
-                f"Якщо знайшов хоча б {_rr_select} підходящих — вибери всі {_rr_select}.\n"
+                "Постанови КМУ та правові позиції ВС — первинні юридичні джерела, надавай їм перевагу при рівній релевантності.\n"
+                f"ОБОВ'ЯЗКОВО вибери рівно {_rr_slots} найкорисніших фрагментів.\n"
+                f"Якщо знайшов хоча б {_rr_slots} підходящих — вибери всі {_rr_slots}.\n"
                 "Відповідь — ТІЛЬКИ числа через пробіл, наприклад: 3 7 1 12 5 9 2 8\n"
                 "НЕ пиши нічого крім чисел.\n\n"
-                f"{_chunks_text}\n\nВибрані номери (рівно {_rr_select} штук):"
+                f"{_chunks_text}\n\nВибрані номери (рівно {_rr_slots} штук):"
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
@@ -3289,18 +3317,22 @@ async def ask(body: AskRequest):
                 except ValueError:
                     pass
             if len(_indices) >= 2:
-                reranked = [_candidates[i] for i in _indices[:body.max_docs]]
+                reranked = [_candidates[i] for i in _indices[:_rr_slots]]
                 # якщо реранкер вибрав менше мінімуму — доповнюємо семантичними топ-результатами
-                if len(reranked) < _rr_select:
+                if len(reranked) < _rr_slots:
                     _ranked_ids = {(r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) for r in reranked}
                     for _c in _candidates:
-                        if len(reranked) >= _rr_select:
+                        if len(reranked) >= _rr_slots:
                             break
                         _ck = (_c["out_metadata"].get("law_id"), _c["out_metadata"].get("chunk_index"))
                         if _ck not in _ranked_ids:
                             reranked.append(_c)
                             _ranked_ids.add(_ck)
-                results = reranked
+                # Merge: protected (laws_kmu/positions з title match) + reranked open candidates
+                results = (_rr_protected + reranked)[:body.max_docs]
+                if _rr_protected:
+                    logger.info("RERANKER: protected=%d + reranked=%d → total=%d",
+                                len(_rr_protected), len(reranked), len(results))
                 logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
             else:
                 results = results[:body.max_docs]
@@ -3412,9 +3444,9 @@ async def ask(body: AskRequest):
 
     # Контекст: 1) закони Ради, 2) постанови КМУ, 3) судова практика
     # Per-bucket cap — не даємо одному типу з'їсти весь context window
-    _MAX_LAW = 4
-    _MAX_KMU = 3
-    _MAX_COURT = 2
+    _MAX_LAW = 15
+    _MAX_KMU = 8
+    _MAX_COURT = 6
     parts: list[str] = []
     if law_chunks:
         parts.append("\n\n".join(law_chunks[:_MAX_LAW]))
@@ -3430,8 +3462,8 @@ async def ask(body: AskRequest):
         )
     context = "\n\n".join(parts) if parts else "Контекст відсутній."
     # Hard cap на весь context — захист від MAX_TOKENS на відповіді
-    if len(context) > 14000:
-        context = context[:14000] + "\n\n[...контекст обрізано для економії токенів]"
+    if len(context) > 80000:
+        context = context[:80000] + "\n\n[...контекст обрізано для економії токенів]"
 
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
@@ -3503,15 +3535,21 @@ async def ask(body: AskRequest):
                 "НЕ починай відповідь з «не знайдено» — спочатку покажи що є."
             )
 
-        # Clarifying / follow-up question — завжди в кінці, підтримує діалог
-        response_instructions.append(
-            "ОБОВ'ЯЗКОВО в самому кінці відповіді постав одне конкретне питання до користувача. "
-            "Якщо ситуація неоднозначна — уточни деталь, яка суттєво вплине на відповідь "
-            "(тип організації, статус особи, країна відрядження, тип договору тощо). "
-            "Якщо все зрозуміло — постав розвивальне питання щоб продовжити діалог "
-            "(наприклад: чи є ще нюанси ситуації, який наступний крок потрібен, яка форма документа). "
-            "Питання — окремим рядком після основної відповіді. Коротко і конкретно. Лише одне."
-        )
+        # Clarifying / follow-up question — умовно: обов'язково якщо тема неоднозначна
+        _top_for_q = results[0]["similarity"] if results else 0.0
+        if low_confidence or _top_for_q < 0.75:
+            response_instructions.append(
+                "ОБОВ'ЯЗКОВО в самому кінці відповіді постав одне конкретне уточнювальне питання. "
+                "Уточни деталь, яка суттєво вплине на відповідь "
+                "(тип організації, статус особи, країна відрядження, тип договору тощо). "
+                "Питання — окремим рядком після основної відповіді. Коротко і конкретно. Лише одне."
+            )
+        else:
+            response_instructions.append(
+                "Якщо є природне продовження теми або корисний наступний крок — "
+                "постав одне коротке питання в кінці відповіді. "
+                "Якщо відповідь повна і питання буде штучним — не питай."
+            )
 
         # Plan-aware length limit — відповідь завжди завершена, не обривається
         if "response_detailed" in rf or "response_scenarios" in rf:

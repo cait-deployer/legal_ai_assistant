@@ -16,7 +16,7 @@
         │
         ▼
 [1] Query Rewrite — Gemini few-shot переформульовує в юридичний стиль
-     └─ ThinkingConfig(budget=0), temperature=0, few-shot прикладів 7 шт
+     └─ ThinkingConfig(budget=0), temperature=0, few-shot приклади з Supabase `rewrite_examples`
         │
         ├──────────────────────────────────────┐
         ▼                                      ▼
@@ -57,8 +57,9 @@
         ▼
 [9] Keyword search (BM25 MatchText на поле content):
      - Топ-4 слова з питання, morphological (pymorphy3 UA)
-     - Stem слова шукаються в source+doc_type+content[:600] — відхиляємо нерелевантні
-     - Score = 0.45 фіксований; нові документи додаються до пулу
+     - Stem слова шукаються в source+doc_type+content[:1500] — відхиляємо нерелевантні
+     - Score динамічний: 0.25 + 0.30×(matched/total) → діапазон 0.25–0.55
+     - Нові документи додаються до пулу
         │
         ▼
 [10] Title boost (MatchText на поле source):
@@ -67,7 +68,8 @@
      - chunks_per_doc=1, cap=20 документів
      - Пріоритет: laws_kmu(0) > laws_supreme(1) > laws_ccu(2) > laws_wiki(3) > rada_*
      - Якщо документ знайдено і title boost і semantic → +0.10 до similarity
-     - Score = 0.75 фіксований; нові документи додаються до пулу
+     - Score динамічний: 0.50 + 0.35×(matched_kws/total_kws) → діапазон 0.50–0.85
+     - Нові документи додаються до пулу
         │
         ▼
 [11] LLM Reranker (Gemini, якщо кандидатів > max_docs):
@@ -96,9 +98,9 @@
      - System prompt з Supabase app_settings
      - Response instructions: деталізація / кроки / сценарії (з плану)
      - Citation rule: обов'язково [N] на кожне твердження
-     - Guardrail якщо top_score < 0.68 → "покажи що є + скажи що не знайдено"
+     - Guardrail якщо top_score < 0.68 → "перелічи всі знайдені документи, поясни що є в чанку і чого бракує (таблиці, суми), дай посилання"
      - Guardrail якщо low_confidence → "слабко впевнено + ⚠️ рекомендую уточнити"
-     - Clarifying question: якщо питання неоднозначне — одне уточнення
+     - Clarifying question: обов'язково якщо `low_confidence` або `top_score < 0.75`; інакше — необов'язково (тільки якщо є природне продовження)
      - Ліміт слів: 350 (base) або 800 (response_detailed/scenarios)
         │
         ▼
@@ -204,7 +206,8 @@
 | `laws_positions` | `lpd_scanner.py` | JSON API lpd.court.gov.ua, title вставляється на початку, chunk ~2000 |
 
 **Incremental sync:** перевіряє `get_existing_law_ids()` і пропускає вже проіндексовані (по `law_id`).  
-**Full reindex:** `reindex_kmu_full.py` / `reindex_rada_full.py` — видаляють старі чанки і завантажують нові з оновленими налаштуваннями. Запускаються з адмінки або вручну.
+**Full reindex:** `reindex_kmu_full.py` / `reindex_rada_full.py` — видаляють старі чанки і завантажують нові з оновленими налаштуваннями. Запускаються з адмінки або вручну.  
+**IDs cache:** після збору списку законів (15–30 хв) зберігається JSON-файл (`reindex_*_ids_cache.json`, TTL 48 год). При краші сервера під час обробки — наступний запуск завантажує з кешу і пропускає фазу збору. Видаляється після успішного завершення.
 
 ---
 
@@ -233,7 +236,7 @@ POST /ask
 ### 3.3 Крок 1 — Query Rewrite
 
 Gemini переформульовує запит у формальний юридичний стиль:
-- Few-shot: 7 пар приклад→результат (спеціалізовані для теми добових/відряджень)
+- Few-shot приклади завантажуються з `app_settings.rewrite_examples` (Supabase) — редагуються з адмінки без деплою
 - `ThinkingConfig(thinking_budget=0)` — вимкнено thinking (швидше, без усічення виводу)
 - `temperature=0.0`, `max_output_tokens=2500`
 - Перевірка: rewrite відхиляється якщо < 4 слів або > 300 символів або збігається з оригіналом
@@ -290,13 +293,14 @@ low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
 # НЕ обрізаємо results — BM25 і title boost ще не запускались і можуть компенсувати
 ```
 
-**Раніше** — жорстка зупинка ("не знайдено"). **Тепер** — тільки флаг:
-- Pipeline продовжується повністю (boost → BM25 → title boost → reranker)
+**Раніше** — жорстка зупинка ("не знайдено"). **Тепер** — тільки флаг + ширший routing:
+- `target_collections` розширюється extra-набором: `[rada_labor, rada_civil, laws_kmu, rada_finance, laws_positions, rada_admin, rada_state]` (тільки дозволені планом)
+- Pipeline продовжується повністю (boost → BM25 → title boost → reranker) — вже по ширшому набору
 - Hard-stop (min_score 0.55) **пропускається** для low_confidence
 - Gemini отримує окремий guardrail: *"слабка впевненість — покажи що є + ⚠️ рекомендую уточнити"*
 - `_meta.low_confidence: true` у відповіді
 
-**Чому так:** юридичні embeddings нестабільні — один і той самий закон може давати raw score 0.38–0.45 залежно від формулювання. BM25 і title boost додають документи незалежно від вектора і часто рятують ситуацію.
+**Чому так:** юридичні embeddings нестабільні — один і той самий закон може давати raw score 0.38–0.45 залежно від формулювання. BM25 і title boost додають документи незалежно від вектора і часто рятують ситуацію. Ширший routing при low_confidence дає їм більше шансів знайти потрібне.
 
 ### 3.8 Крок 6–8 — Score adjustment та Diversity
 
@@ -320,7 +324,7 @@ low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
 `search_qdrant_text()` — MatchText по полю `content`:
 - Слова > 4 символів з оригінального питання
 - Morphological via **pymorphy3** (UA): `відрядженні → відрядження`
-- Результат додається тільки якщо stem є в `source + doc_type + content[:600]`
+- Результат додається тільки якщо stem є в `source + doc_type + content[:1500]`
 - Score фіксований = 0.45; **нові** документи додаються до пулу (не замінюють вектор)
 
 ### 3.10 Крок 10 — Title Boost
@@ -335,17 +339,23 @@ low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
 - Якщо документ знайдено **і** title boost **і** vector search → score += 0.10 (підтверджений обома)
 - Score фіксований = 0.75; **нові** документи додаються до пулу
 
-### 3.11 Крок 11 — LLM Reranker
+### 3.11 Крок 11 — LLM Reranker з protected layer
 
-Якщо кандидатів більше ніж `max_docs`:
-- Бере до 60 кандидатів (по 350 символів кожен)
-- Gemini (ThinkingConfig budget=0, temperature=0): вибрати рівно `_rr_select` найкорисніших
+**Protected slots (виконується ДО reranker):**
+- `laws_kmu` і `laws_positions` документи з `_title_match=True` → max 2 protected slots
+- Вони не потрапляють до reranker — гарантовано виживають
+- Причина: реранкер оптимізує "лінгвістичну очевидність", а КМУ постанови/позиції ВС — сухий табличний текст, який програє огля-дам ВС без цього захисту
+
+**Reranker (відкриті кандидати):**
+- Бере до 60 відкритих кандидатів (по 350 символів кожен)
+- Gemini (ThinkingConfig budget=0, temperature=0): вибрати рівно `_rr_slots` найкорисніших
   ```python
   _rr_select = min(max_docs, max(8, max_docs // 2))
-  # max_docs=12 → 8 | max_docs=16 → 8 | max_docs=20 → 10
+  _rr_slots = max(1, _rr_select - len(_rr_protected))
   ```
-- Prompt: few-shot числа через пробіл: `"3 7 1 12 5 9 2 8"`
+- Prompt включає: "Постанови КМУ та правові позиції ВС — первинні юридичні джерела, надавай їм перевагу"
 - Якщо reranker повернув < 2 індексів → fallback до семантичного top-N
+- **Фінал:** `_rr_protected + reranked_open`, cap = `max_docs`
 
 ### 3.12 Крок 12 — Hard-stop
 
@@ -461,6 +471,7 @@ Context cap: **14 000 символів** (обрізається якщо біл
 | `rada_source_boost` | `1.15` | Буст для rada_* та laws_positions |
 | `system_prompt` | fallback | Системний промпт Gemini |
 | `llm_timeout_seconds` | `90.0` | Timeout для Gemini |
+| `rewrite_examples` | `""` | Few-shot приклади для Query Rewrite: `"розмовна фраза → юридичний термін"` (по одному на рядок) |
 | `schedule_enabled` | `false` | Авто-синхронізація РАДА о 01:00 UTC |
 
 ---
@@ -508,8 +519,12 @@ Gemini повертає 1–2 галузі. Міждисциплінарні п�
 ### 6.5 laws_supreme — PDF без структури
 Чанки з quarterly PDF-оглядів не мають прив'язки до конкретних справ або норм. Корисні для загального розуміння тренду практики ВС, але не для цитування конкретної норми.
 
-### 6.6 Fixed BM25/title scores (P1 — ще не вирішено)
-BM25 завжди дає score=0.45, title boost завжди 0.75 незалежно від якості матчу. Це спрощення, яке іноді переоцінює слабкі keyword-збіги. Ідеальне рішення — динамічне зважування: `final = 0.6×vector + 0.2×bm25 + 0.2×title`.
+### 6.6 Динамічні BM25/title scores (вирішено)
+BM25 score тепер динамічний: `0.25 + 0.30 × (matched_stems / total_stems)` → діапазон 0.25–0.55.  
+Title boost score: `0.50 + 0.35 × (matched_kws / total_kws)` → діапазон 0.50–0.85.  
+Слабкий keyword збіг (1 з 5 слів) → ~0.31; сильний (5 з 5) → 0.55. Reranker тепер бачить реальний сигнал якості.
+
+**Що залишається:** Qdrant MatchText не дає справжній BM25 TF-IDF score — він binary (збіглось/ні). Справжній BM25 потребує sparse vectors і повного реіндексу.
 
 ---
 
