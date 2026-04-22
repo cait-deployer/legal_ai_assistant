@@ -3233,14 +3233,7 @@ async def ask(body: AskRequest):
         try:
             import asyncio as _aio
             _rerank_model = GenerativeModel(_model_name)
-            try:
-                from vertexai.generative_models import ThinkingConfig
-                _rr_cfg = GenerationConfig(
-                    temperature=0.0, max_output_tokens=150,
-                    thinking_config=ThinkingConfig(thinking_budget=0),
-                )
-            except Exception:
-                _rr_cfg = GenerationConfig(temperature=0.0, max_output_tokens=150)
+            _rr_cfg = GenerationConfig(temperature=0.0, max_output_tokens=200)
             _open_candidates = [r for r in results
                                 if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
                                 not in _rr_protected_keys]
