@@ -229,7 +229,7 @@ function SourcePanel({ source, state, onRefresh }: {
     setLoading(false)
   }
 
-  const radaBody = source === "rada" && radaCol ? { rada_collection: radaCol } : {}
+  const radaBody: Record<string, string> = source === "rada" && radaCol ? { rada_collection: radaCol } : {}
 
   return (
     <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 space-y-3">
