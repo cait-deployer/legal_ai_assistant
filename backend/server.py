@@ -3042,7 +3042,7 @@ async def ask(body: AskRequest):
     # LOW CONFIDENCE: якщо найкращий сирий score слабкий — не зупиняємось, не обрізаємо
     # Letting BM25 + title boost run fully — вони можуть витягнути релевантні документи
     # Gemini отримає guardrail в промпті і поверне "ось що є + рекомендую уточнити"
-    _RAW_GATE = 0.42
+    _RAW_GATE = settings_cache.get_float("raw_gate_threshold", 0.42)
     low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
     if low_confidence:
         logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → widening BM25/title scope",
@@ -3478,7 +3478,7 @@ async def ask(body: AskRequest):
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        max_output_tokens = max(8000, int(settings_cache.get_float("max_output_tokens", 8000)))
+        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 3000))
 
         # Build response instructions based on plan features
         rf = set(body.response_features)

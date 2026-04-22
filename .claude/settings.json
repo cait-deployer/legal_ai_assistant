@@ -13,6 +13,15 @@
             "command": "jq -r '.tool_input.file_path // empty' | xargs -I{} sh -c 'case \"{}\" in *.env|*.env.*|*service-account*|*service_account*|*credentials*|*secret*) echo \"BLOCKED: protected file: {}\" >&2; exit 2;; esac'"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | grep -qE '(git push --force|git reset --hard|rm -rf|DROP TABLE|DELETE FROM.*WHERE|systemctl stop)' && { echo 'BLOCKED: dangerous command detected' >&2; exit 2; } || exit 0"
+          }
+        ]
       }
     ]
   }

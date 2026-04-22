@@ -1,0 +1,25 @@
+# Dependencies & build output
+node_modules/
+.next/
+__pycache__/
+*.pyc
+*.pyo
+
+# Reindex runtime files (large, change constantly)
+backend/reindex_*_ids_cache.json
+backend/reindex_*_state.json
+backend/sync_state.json
+backend/wiki_state.json
+backend/ccu_state.json
+
+# Logs
+*.log
+logs/
+
+# Env & secrets (never read)
+.env
+.env.*
+backend/service-account.json
+
+# Git internals
+.git/

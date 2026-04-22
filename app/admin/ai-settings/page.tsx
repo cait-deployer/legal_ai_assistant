@@ -8,14 +8,20 @@ import { toast } from "sonner"
 type Settings = {
   service_account_json: string
   vertex_location: string
+  vertex_project_id: string
   ai_model: string
+  intent_model: string
+  rewrite_model: string
   embedding_model: string
   system_prompt: string
   rewrite_examples: string
   temperature: number
   top_p: number
+  llm_timeout_seconds: number
   match_threshold_docs: number
+  match_threshold_templates: number
   min_relevance_score: number
+  raw_gate_threshold: number
   rada_source_boost: number
   max_output_tokens: number
 }
@@ -25,7 +31,10 @@ type SaInfo = { project_id: string; client_email: string } | null
 const DEFAULTS: Settings = {
   service_account_json: "",
   vertex_location: "us-central1",
+  vertex_project_id: "",
   ai_model: "gemini-2.0-flash-lite",
+  intent_model: "gemini-2.5-flash",
+  rewrite_model: "gemini-2.5-flash",
   embedding_model: "text-embedding-004",
   system_prompt: `Ти — URAI, AI-юрист з глибокими знаннями українського законодавства. Твоя місія — давати точні, структуровані та практично корисні відповіді виключно на основі наданого контексту.
 
@@ -75,8 +84,11 @@ const DEFAULTS: Settings = {
 штраф за прострочення договору → відповідальність за порушення строків виконання договірних зобов'язань неустойка пеня`,
   temperature: 0.1,
   top_p: 0.8,
+  llm_timeout_seconds: 90,
   match_threshold_docs: 0.4,
+  match_threshold_templates: 0.3,
   min_relevance_score: 0.35,
+  raw_gate_threshold: 0.42,
   rada_source_boost: 1.15,
   max_output_tokens: 3000,
 }
@@ -434,6 +446,16 @@ export default function AiSettingsPage() {
             >
               <TextInput value={settings.vertex_location} onChange={v => set("vertex_location", v)} placeholder="us-central1" mono />
             </Field>
+            <div className="mt-5">
+              <Field
+                label="Project ID (довідково)"
+                hint="Зчитується автоматично з Service Account JSON. Тут тільки для перегляду."
+                restart="none"
+                tooltip="Google Cloud Project ID. Бекенд бере його з service_account_json автоматично — це поле лише для довідки. Змінювати тут не потрібно."
+              >
+                <TextInput value={settings.vertex_project_id} onChange={v => set("vertex_project_id", v)} placeholder="urai-492512" mono />
+              </Field>
+            </div>
           </div>
         </section>
 
@@ -448,6 +470,22 @@ export default function AiSettingsPage() {
               tooltip="Модель Gemini для генерації юридичних відповідей. gemini-2.5-flash — найкращий баланс якість/ціна. gemini-1.5-pro — вища якість але дорожче. Зміна набирає чинності одразу після Зберегти."
             >
               <TextInput value={settings.ai_model} onChange={v => set("ai_model", v)} placeholder="gemini-2.5-flash" mono />
+            </Field>
+            <Field
+              label="Модель класифікації питань (intent_model)"
+              hint="Визначає: чи питання юридичне взагалі. Напр.: gemini-2.5-flash"
+              restart="cache"
+              tooltip="Gemini-модель для швидкого визначення типу питання — юридичне чи загальне. Якщо не юридичне — бот відповідає без пошуку в базі. Flash-моделі достатньо, задача бінарна: так/ні. Рекомендовано: gemini-2.5-flash."
+            >
+              <TextInput value={settings.intent_model} onChange={v => set("intent_model", v)} placeholder="gemini-2.5-flash" mono />
+            </Field>
+            <Field
+              label="Модель переформулювання запиту (rewrite_model)"
+              hint="Переформульовує розмовний запит у юридичну термінологію перед пошуком"
+              restart="cache"
+              tooltip="Gemini-модель яка перетворює 'скільки добових за кордон' → 'норми відшкодування витрат на відрядження за кордон' перед пошуком у Qdrant. Flash достатньо. Рекомендовано: gemini-2.5-flash."
+            >
+              <TextInput value={settings.rewrite_model} onChange={v => set("rewrite_model", v)} placeholder="gemini-2.5-flash" mono />
             </Field>
             <Field
               label="Модель ембедингів"
@@ -480,6 +518,14 @@ export default function AiSettingsPage() {
             >
               <SliderInput value={settings.top_p} onChange={v => set("top_p", v)} min={0} max={1} step={0.05} />
             </Field>
+            <Field
+              label="Таймаут відповіді AI, секунди (llm_timeout_seconds)"
+              hint="Якщо Gemini не відповів за цей час — помилка 504. Рекомендовано: 60–120"
+              restart="cache"
+              tooltip="Максимальний час очікування відповіді від Gemini. При перевищенні — користувач бачить помилку «AI не відповів». 90с — безпечне значення. Менше 60с = часті помилки на складних запитах. Більше 150с = юзер чекає занадто довго. Ризик: якщо занизити — деякі деталізовані запити будуть обриватись."
+            >
+              <SliderInput value={settings.llm_timeout_seconds} onChange={v => set("llm_timeout_seconds", v)} min={30} max={180} step={10} />
+            </Field>
           </div>
         </section>
 
@@ -496,12 +542,28 @@ export default function AiSettingsPage() {
               <SliderInput value={settings.match_threshold_docs} onChange={v => set("match_threshold_docs", v)} min={0} max={1} step={0.01} />
             </Field>
             <Field
+              label="Поріг відповідності шаблонів (match_threshold_templates)"
+              hint="Мін. схожість для колекції шаблонів документів. Рекомендовано: 0.25–0.35"
+              restart="cache"
+              tooltip="Аналог match_threshold_docs але для колекції шаблонів і зразків документів (якщо є). Зазвичай трохи нижче ніж для законів — шаблони коротші і менш точні за змістом. Якщо колекція шаблонів не активна — значення не впливає на роботу."
+            >
+              <SliderInput value={settings.match_threshold_templates} onChange={v => set("match_threshold_templates", v)} min={0} max={1} step={0.01} />
+            </Field>
+            <Field
               label="Пріоритет джерел Ради (rada_source_boost)"
               hint="Множник score для документів Ради та ВСУ відносно Wiki/КСУ. 1.0 = без пріоритету, 1.15 = Рада іде вище Wiki при рівній релевантності. Рекомендовано: 1.1–1.3"
               restart="cache"
               tooltip="Підвищує ймовірність що в цитатах з'являться офіційні закони, а не Wiki-статті"
             >
               <SliderInput value={settings.rada_source_boost} onChange={v => set("rada_source_boost", v)} min={1.0} max={1.5} step={0.01} />
+            </Field>
+            <Field
+              label="Поріг розширення пошуку (raw_gate_threshold)"
+              hint="Якщо найкращий результат нижче — пошук розширюється на всі колекції. Рекомендовано: 0.38–0.45"
+              restart="cache"
+              tooltip="Якщо найрелевантніший документ має схожість нижче цього порогу — система вважає запит 'низькодостовірним' і повторює пошук по ВСІХ колекціях (не тільки найімовірніших). Вище = пошук розширюється частіше → повільніше але більше охоплення. Нижче = рідше розширення → швидше але ризик пропустити документ у рідкісній колекції."
+            >
+              <SliderInput value={settings.raw_gate_threshold} onChange={v => set("raw_gate_threshold", v)} min={0.2} max={0.7} step={0.01} />
             </Field>
             <Field
               label="Мінімальна релевантність для відповіді (min_relevance_score)"
