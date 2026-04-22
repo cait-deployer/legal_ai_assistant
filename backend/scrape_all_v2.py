@@ -154,13 +154,13 @@ def _get_ids(source: str) -> list[dict]:
 
     if source == "rada":
         from rada_scanner import get_all_legal_ids
-        items = get_all_legal_ids()
+        items = get_all_legal_ids(log=_log)
     elif source == "kmu":
         from kmu_scanner import get_all_kmu_docs
-        items = get_all_kmu_docs()
+        items = get_all_kmu_docs(log=_log)
     elif source == "ccu":
         from ccu_scanner import get_all_ccu_docs
-        items = get_all_ccu_docs()
+        items = get_all_ccu_docs(log=_log)
     elif source == "supreme":
         from supreme_scanner import get_supreme_reviews
         items = get_supreme_reviews()
