@@ -31,7 +31,7 @@ STATE_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scrape_a
 CACHE_TTL   = 48 * 3600   # 48h — кеш списку ID
 WORKERS     = 4            # паралельні воркери для HTTP (Rada, KMU)
 BATCH_SIZE  = 100          # скільки документів на батч ThreadPoolExecutor
-SAVE_EVERY  = 100          # зберігати стан кожні N документів
+SAVE_EVERY  = 50           # зберігати стан кожні N документів
 
 SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki"]
 
@@ -150,7 +150,7 @@ def _get_ids(source: str) -> list[dict]:
         _log(f"  Кеш: {len(cached)} ID ({source})")
         return cached
 
-    _log(f"  Завантажуємо список {source}...")
+    _log(f"  ⏳ Завантажуємо список {source}... (може зайняти декілька хвилин)")
 
     if source == "rada":
         from rada_scanner import get_all_legal_ids
@@ -376,6 +376,8 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
 
     use_threads = source in ("rada", "kmu")
 
+    _ST_ICON = {"ok": "✅", "empty": "⚠️", "restricted": "🔒", "error": "❌", "skipped": "⏭️"}
+
     if use_threads:
         i = start_idx
         while i < total and not _stop.is_set():
@@ -383,44 +385,51 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
             batch     = list(enumerate(items[i:batch_end], start=i))
 
             with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-                futs = {ex.submit(_process_one, source, doc, status): j for j, doc in batch}
+                futs = {ex.submit(_process_one, source, doc, status): (j, doc) for j, doc in batch}
                 for fut in as_completed(futs):
-                    j = futs[fut]
+                    j, doc = futs[fut]
+                    law_id = _law_id_for(source, doc)
                     try:
                         st = fut.result()
                     except Exception as ex2:
-                        _log(f"  ❌ {source}[{j}]: {ex2}")
+                        _log(f"  ❌ [{j+1}/{total}] {law_id}: {ex2}", "error")
                         st = "error"
                     stats[st] = stats.get(st, 0) + 1
                     processed += 1
+                    icon = _ST_ICON.get(st, "?")
+                    title = doc.get("title", "")[:60]
+                    _log(f"  {icon} [{j+1}/{total}] {law_id} — {st}" + (f" | {title}" if title else ""))
 
             i = batch_end
             state["inner_idx"] = i
-
-            if processed % SAVE_EVERY == 0 or i >= total:
-                _save_state(state)
-                _save_status(status)
-                _log(
-                    f"  [{source}] {i}/{total} — "
-                    f"ok={stats.get('ok',0)} skip={stats.get('skipped',0)} "
-                    f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}"
-                )
+            _save_state(state)
+            _save_status(status)
+            _log(
+                f"\n  📊 [{source}] {i}/{total} — "
+                f"ok={stats.get('ok',0)} skip={stats.get('skipped',0)} "
+                f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}\n"
+            )
     else:
         for j in range(start_idx, total):
             if _stop.is_set():
                 break
-            st = _process_one(source, items[j], status)
+            doc    = items[j]
+            law_id = _law_id_for(source, doc)
+            st = _process_one(source, doc, status)
             stats[st] = stats.get(st, 0) + 1
             processed += 1
             state["inner_idx"] = j + 1
+            icon = _ST_ICON.get(st, "?")
+            title = doc.get("title", "")[:60]
+            _log(f"  {icon} [{j+1}/{total}] {law_id} — {st}" + (f" | {title}" if title else ""))
 
             if processed % SAVE_EVERY == 0 or j + 1 >= total:
                 _save_state(state)
                 _save_status(status)
                 _log(
-                    f"  [{source}] {j+1}/{total} — "
+                    f"\n  📊 [{source}] {j+1}/{total} — "
                     f"ok={stats.get('ok',0)} skip={stats.get('skipped',0)} "
-                    f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}"
+                    f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}\n"
                 )
 
     state["inner_idx"] = total

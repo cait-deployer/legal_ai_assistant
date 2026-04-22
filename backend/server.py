@@ -2057,6 +2057,135 @@ async def v2_analytics(
     }
 
 
+@app.get("/admin/v2/disk")
+async def v2_disk():
+    """Статистика диску: кількість файлів і розмір по кожному джерелу."""
+    import shutil
+    RAW_PATH = Path("/root/laws_raw")
+    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki"]
+    result: dict = {}
+    for src in SOURCES_V2:
+        src_dir = RAW_PATH / src
+        if not src_dir.exists():
+            result[src] = {"files": 0, "size_mb": 0, "recent": []}
+            continue
+        txt_files = sorted(src_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+        total_size = sum(p.stat().st_size for p in txt_files)
+        recent = []
+        for p in txt_files[:5]:
+            meta_path = p.parent / f"{p.stem}.meta.json"
+            title = ""
+            if meta_path.exists():
+                try:
+                    title = json.loads(meta_path.read_text("utf-8")).get("title", "")[:80]
+                except Exception:
+                    pass
+            recent.append({
+                "law_id":   p.stem,
+                "size_kb":  round(p.stat().st_size / 1024, 1),
+                "title":    title,
+                "mtime":    datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
+            })
+        result[src] = {
+            "files":   len(txt_files),
+            "size_mb": round(total_size / 1024 / 1024, 2),
+            "recent":  recent,
+        }
+    # Total disk usage of /root/laws_raw
+    total_mb = 0
+    if RAW_PATH.exists():
+        try:
+            total_bytes = sum(f.stat().st_size for f in RAW_PATH.rglob("*") if f.is_file())
+            total_mb = round(total_bytes / 1024 / 1024, 2)
+        except Exception:
+            pass
+    return {"sources": result, "total_mb": total_mb}
+
+
+@app.get("/admin/v2/disk/files")
+async def v2_disk_files(
+    source:  str | None = None,
+    search:  str | None = None,
+    sort_by: str = "mtime",   # mtime | law_id | size
+    order:   str = "desc",
+    limit:   int = 50,
+    offset:  int = 0,
+):
+    """Пагінований список файлів на диску з пошуком за ID та назвою."""
+    RAW_PATH   = Path("/root/laws_raw")
+    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki"]
+    sources    = [source] if source else SOURCES_V2
+    search_lc  = search.lower().strip() if search else None
+
+    entries: list[dict] = []
+    for src in sources:
+        src_dir = RAW_PATH / src
+        if not src_dir.exists():
+            continue
+        for txt_path in src_dir.glob("*.txt"):
+            law_id_val = txt_path.stem
+            # Quick ID filter before reading meta
+            if search_lc and search_lc not in law_id_val.lower():
+                # Still need to check title — defer
+                pass
+            meta_path = txt_path.parent / f"{law_id_val}.meta.json"
+            title = ""
+            if meta_path.exists():
+                try:
+                    title = json.loads(meta_path.read_text("utf-8")).get("title", "")
+                except Exception:
+                    pass
+            if search_lc:
+                if search_lc not in law_id_val.lower() and search_lc not in title.lower():
+                    continue
+            stat = txt_path.stat()
+            entries.append({
+                "law_id":  law_id_val,
+                "source":  src,
+                "title":   title[:120],
+                "size_kb": round(stat.st_size / 1024, 1),
+                "mtime":   datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            })
+
+    # Sort
+    rev = order == "desc"
+    if sort_by == "law_id":
+        entries.sort(key=lambda x: x["law_id"], reverse=rev)
+    elif sort_by == "size":
+        entries.sort(key=lambda x: x["size_kb"], reverse=rev)
+    else:
+        entries.sort(key=lambda x: x["mtime"], reverse=rev)
+
+    total = len(entries)
+    page  = entries[offset : offset + limit]
+    return {"files": page, "total": total, "offset": offset, "limit": limit}
+
+
+@app.get("/admin/v2/disk/law")
+async def v2_disk_law(source: str, law_id: str):
+    """Повертає текст і метадані конкретного закону з диску."""
+    RAW_PATH = Path("/root/laws_raw")
+    txt_path  = RAW_PATH / source / f"{law_id}.txt"
+    meta_path = RAW_PATH / source / f"{law_id}.meta.json"
+    if not txt_path.exists():
+        raise HTTPException(404, f"Файл не знайдено: {txt_path}")
+    text = txt_path.read_text("utf-8")
+    meta: dict = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text("utf-8"))
+        except Exception:
+            pass
+    return {
+        "law_id":   law_id,
+        "source":   source,
+        "meta":     meta,
+        "text":     text,
+        "size_kb":  round(txt_path.stat().st_size / 1024, 1),
+        "chars":    len(text),
+    }
+
+
 # ── /admin/logs (unified history across all sources) ─────────────────────────
 
 @app.get("/admin/logs")

@@ -286,13 +286,22 @@ def _run_main(source: str | None = None, init_only: bool = False) -> None:
 
                 state["file_idx"] = file_i + 1
 
+                chunks  = res.get("chunks", 0)
+                errors  = res.get("errors", 0)
+                icon    = "✅" if errors == 0 else "⚠️"
+                _log(
+                    f"  {icon} [{file_i+1}/{total}] {src}/{lid} — "
+                    f"{chunks} чанків, {res.get('uploaded', 0)} завантажено"
+                    + (f", {errors} помилок" if errors else "")
+                )
+
                 if processed % SAVE_EVERY == 0:
                     _save_state(state)
                     total_up = sum(s["uploaded"] for s in state["stats"].values())
                     _log(
-                        f"  [{src}] {file_i+1}/{total} | "
-                        f"всього uploaded={total_up} | "
-                        f"laws={st['laws']} chunks={st['chunks']} err={st['errors']}"
+                        f"\n  📊 [{src}] {file_i+1}/{total} | "
+                        f"uploaded={total_up} | "
+                        f"laws={st['laws']} chunks={st['chunks']} err={st['errors']}\n"
                     )
 
             i += BATCH
