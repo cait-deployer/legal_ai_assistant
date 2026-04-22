@@ -271,9 +271,9 @@ function ScraperTab() {
   const statSources = Object.keys(stats)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Controls */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-4">
+      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-[#E0E6ED]">Скрапер v2</h2>
           <RunningBadge running={state?.running ?? false} paused={state?.pause_requested ?? false} />
@@ -707,12 +707,18 @@ function ReindexTab() {
 
 // ── Analytics tab ──────────────────────────────────────────────────────────────
 
+const STATUS_FILTER_MAP: Record<string, string> = {
+  "Всього": "", "OK": "ok", "Порожній": "empty", "Обмежено": "restricted", "Помилка": "error",
+}
+
 function AnalyticsTab() {
   const [data, setData] = useState<AnalyticsState | null>(null)
   const [loading, setLoading] = useState(false)
   const [filterStatus, setFilterStatus] = useState("")
   const [filterSource, setFilterSource] = useState("")
   const [offset, setOffset] = useState(0)
+  const [qdrantOpen, setQdrantOpen] = useState(false)
+  const lawsRef = useRef<HTMLDivElement>(null)
   const PAGE_SIZE = 50
 
   const fetchData = useCallback(async (off = 0, st = filterStatus, src = filterSource) => {
@@ -731,6 +737,14 @@ function AnalyticsTab() {
     fetchData(0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function handleCardClick(label: string) {
+    const st = STATUS_FILTER_MAP[label] ?? ""
+    setFilterStatus(st)
+    setOffset(0)
+    fetchData(0, st, filterSource)
+    setTimeout(() => lawsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150)
+  }
 
   function handleFilter() {
     setOffset(0)
@@ -756,47 +770,57 @@ function AnalyticsTab() {
   const totalFiltered = data?.total_filtered ?? 0
 
   const summaryCards = [
-    { label: "Всього", value: summary?.total ?? 0, color: "text-[#C9A84C]" },
-    { label: "OK", value: summary?.ok ?? 0, color: "text-emerald-400" },
-    { label: "Порожній", value: summary?.empty ?? 0, color: "text-amber-400" },
-    { label: "Обмежено", value: summary?.restricted ?? 0, color: "text-blue-400" },
-    { label: "Помилка", value: summary?.error ?? 0, color: "text-red-400" },
+    { label: "Всього",   value: summary?.total      ?? 0, color: "text-[#C9A84C]",   ring: "ring-[#C9A84C]/50",   filterVal: "" },
+    { label: "OK",       value: summary?.ok         ?? 0, color: "text-emerald-400", ring: "ring-emerald-400/50", filterVal: "ok" },
+    { label: "Порожній", value: summary?.empty      ?? 0, color: "text-amber-400",   ring: "ring-amber-400/50",   filterVal: "empty" },
+    { label: "Обмежено", value: summary?.restricted ?? 0, color: "text-blue-400",    ring: "ring-blue-400/50",    filterVal: "restricted" },
+    { label: "Помилка",  value: summary?.error      ?? 0, color: "text-red-400",     ring: "ring-red-400/50",     filterVal: "error" },
   ]
 
   return (
-    <div className="space-y-6">
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {summaryCards.map(card => (
-          <div key={card.label} className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 text-center">
-            <div className={`text-3xl font-black ${card.color}`}>{card.value.toLocaleString()}</div>
-            <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">{card.label}</div>
-          </div>
-        ))}
+    <div className="space-y-4 sm:space-y-6">
+      {/* Summary cards — clickable */}
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
+        {summaryCards.map(card => {
+          const active = filterStatus === card.filterVal
+          return (
+            <button
+              key={card.label}
+              onClick={() => handleCardClick(card.label)}
+              className={`bg-[#111827] rounded-2xl border p-3 sm:p-4 text-center transition-all hover:scale-[1.03] active:scale-[0.98] cursor-pointer ${
+                active ? `border-[#C9A84C]/40 ring-2 ${card.ring}` : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"
+              }`}
+            >
+              <div className={`text-2xl sm:text-3xl font-black ${card.color}`}>{card.value.toLocaleString()}</div>
+              <div className="text-[10px] sm:text-xs text-gray-500 mt-1 uppercase tracking-wider">{card.label}</div>
+              {active && <div className="text-[9px] text-[#C9A84C] mt-1 font-bold">↓ фільтр</div>}
+            </button>
+          )
+        })}
       </div>
 
       {/* Per-source table */}
       {Object.keys(bySource).length > 0 && (
-        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-3">
+        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-6 space-y-3">
           <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">По джерелах</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
                 <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
-                  <th className="pb-2 pr-4">Джерело</th>
-                  <th className="pb-2 pr-4 text-emerald-400">OK</th>
-                  <th className="pb-2 pr-4 text-amber-400">Порожній</th>
-                  <th className="pb-2 pr-4 text-blue-400">Обмежено</th>
+                  <th className="pb-2 pr-3">Джерело</th>
+                  <th className="pb-2 pr-3 text-emerald-400">OK</th>
+                  <th className="pb-2 pr-3 text-amber-400 hidden sm:table-cell">Порожній</th>
+                  <th className="pb-2 pr-3 text-blue-400 hidden sm:table-cell">Обмежено</th>
                   <th className="pb-2 text-red-400">Помилка</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#C9A84C]/5">
                 {Object.entries(bySource).map(([src, counts]) => (
                   <tr key={src} className="text-[#E0E6ED]">
-                    <td className="py-1.5 pr-4 font-mono">{src}</td>
-                    <td className="py-1.5 pr-4 text-emerald-400">{counts.ok}</td>
-                    <td className="py-1.5 pr-4 text-amber-400">{counts.empty}</td>
-                    <td className="py-1.5 pr-4 text-blue-400">{counts.restricted}</td>
+                    <td className="py-1.5 pr-3 font-mono">{src}</td>
+                    <td className="py-1.5 pr-3 text-emerald-400">{counts.ok}</td>
+                    <td className="py-1.5 pr-3 text-amber-400 hidden sm:table-cell">{counts.empty}</td>
+                    <td className="py-1.5 pr-3 text-blue-400 hidden sm:table-cell">{counts.restricted}</td>
                     <td className="py-1.5 text-red-400">{counts.error}</td>
                   </tr>
                 ))}
@@ -806,42 +830,67 @@ function AnalyticsTab() {
         </div>
       )}
 
-      {/* Qdrant v2 collections */}
+      {/* Qdrant v2 collections — collapsible */}
       {Object.keys(qdrantV2).length > 0 && (
-        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-3">
-          <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Qdrant v2 колекції</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
-                  <th className="pb-2 pr-4">Колекція</th>
-                  <th className="pb-2 text-right">Точок</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#C9A84C]/5">
-                {Object.entries(qdrantV2).map(([col, count]) => (
-                  <tr key={col} className="text-[#E0E6ED]">
-                    <td className="py-1.5 pr-4 font-mono">{col}</td>
-                    <td className="py-1.5 text-right">
-                      {count === -1 ? (
-                        <span className="inline-flex px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">—</span>
-                      ) : (
-                        <span className="text-emerald-400">{count.toLocaleString()}</span>
-                      )}
-                    </td>
+        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 overflow-hidden">
+          <button
+            onClick={() => setQdrantOpen(o => !o)}
+            className="w-full flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-[#C9A84C]/5 transition-colors"
+          >
+            <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Qdrant v2 колекції</h3>
+            <span className="text-gray-500 text-lg leading-none">{qdrantOpen ? "▲" : "▼"}</span>
+          </button>
+          {qdrantOpen && (
+            <div className="px-4 sm:px-6 pb-4 overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                    <th className="pb-2 pr-4">Колекція</th>
+                    <th className="pb-2 text-right">Точок</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-[#C9A84C]/5">
+                  {Object.entries(qdrantV2).map(([col, count]) => (
+                    <tr key={col} className="text-[#E0E6ED]">
+                      <td className="py-1.5 pr-4 font-mono">{col}</td>
+                      <td className="py-1.5 text-right">
+                        {count === -1 ? (
+                          <span className="inline-flex px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">—</span>
+                        ) : (
+                          <span className="text-emerald-400">{count.toLocaleString()}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
       {/* Filter & laws table */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-4">
-        <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Список законів</h3>
+      <div ref={lawsRef} className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-6 space-y-4 scroll-mt-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">
+            Список законів
+            {filterStatus && (
+              <span className={`ml-2 text-xs font-normal normal-case tracking-normal ${STATUS_BADGE[filterStatus]?.split(" ")[1] ?? "text-gray-400"}`}>
+                · {filterStatus}
+              </span>
+            )}
+          </h3>
+          {filterStatus && (
+            <button
+              onClick={() => { setFilterStatus(""); setOffset(0); fetchData(0, "", filterSource) }}
+              className="text-xs text-gray-500 hover:text-gray-300 underline transition-colors"
+            >
+              скинути фільтр
+            </button>
+          )}
+        </div>
 
-        <div className="flex flex-wrap gap-3 items-end">
+        <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 uppercase tracking-wider">Статус</label>
             <select
@@ -889,25 +938,25 @@ function AnalyticsTab() {
               <table className="w-full text-xs text-left">
                 <thead>
                   <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
-                    <th className="pb-2 pr-4">ID</th>
-                    <th className="pb-2 pr-4">Джерело</th>
-                    <th className="pb-2 pr-4">Статус</th>
-                    <th className="pb-2 pr-4">Назва</th>
-                    <th className="pb-2">Причина</th>
+                    <th className="pb-2 pr-3">ID</th>
+                    <th className="pb-2 pr-3 hidden sm:table-cell">Джерело</th>
+                    <th className="pb-2 pr-3">Статус</th>
+                    <th className="pb-2 pr-3">Назва</th>
+                    <th className="pb-2 hidden sm:table-cell">Причина</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#C9A84C]/5">
                   {laws.map(law => (
                     <tr key={law.law_id} className="text-[#E0E6ED] hover:bg-[#C9A84C]/5">
-                      <td className="py-1.5 pr-4 font-mono text-[10px] text-gray-400 max-w-[120px] truncate">{law.law_id}</td>
-                      <td className="py-1.5 pr-4">{law.source}</td>
-                      <td className="py-1.5 pr-4">
+                      <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400 max-w-[100px] sm:max-w-[140px] truncate">{law.law_id}</td>
+                      <td className="py-1.5 pr-3 hidden sm:table-cell">{law.source}</td>
+                      <td className="py-1.5 pr-3">
                         <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_BADGE[law.status] ?? STATUS_BADGE.error}`}>
                           {law.status}
                         </span>
                       </td>
-                      <td className="py-1.5 pr-4 max-w-[200px] truncate text-gray-300">{law.title || "—"}</td>
-                      <td className="py-1.5 max-w-[160px] truncate text-gray-500">{law.reason || "—"}</td>
+                      <td className="py-1.5 pr-3 max-w-[140px] sm:max-w-[260px] truncate text-gray-300">{law.title || "—"}</td>
+                      <td className="py-1.5 max-w-[140px] truncate text-gray-500 hidden sm:table-cell">{law.reason || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1038,13 +1087,13 @@ function DiskTab() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Disk summary */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-4">
+      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">
             /root/laws_raw/
-            {disk && <span className="ml-3 text-gray-400 font-normal normal-case tracking-normal">{disk.total_mb} MB всього</span>}
+            {disk && <span className="ml-2 text-gray-400 font-normal normal-case tracking-normal">{disk.total_mb} MB</span>}
           </h3>
           <button onClick={() => { fetchDisk(); fetchFiles(0) }} disabled={diskLoading}
             className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-sm hover:bg-[#1e293b] disabled:opacity-50 transition-colors">
@@ -1052,16 +1101,16 @@ function DiskTab() {
           </button>
         </div>
         {disk && (
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {SOURCES.map(src => {
               const s = disk.sources[src]
               return (
                 <button
                   key={src}
-                  onClick={() => { setFilterSource(src); setOffset(0); fetchFiles(0, search, src, sortBy, order) }}
-                  className={`text-center rounded-xl border px-3 py-3 transition-colors hover:border-[#C9A84C]/40 cursor-pointer ${filterSource === src ? "border-[#C9A84C]/40 bg-[#C9A84C]/5" : "border-[#C9A84C]/10 bg-[#0A0E1A]"}`}
+                  onClick={() => { setFilterSource(src === filterSource ? "" : src); setOffset(0); fetchFiles(0, search, src === filterSource ? "" : src, sortBy, order) }}
+                  className={`text-center rounded-xl border px-2 py-3 transition-colors hover:border-[#C9A84C]/40 cursor-pointer ${filterSource === src ? "border-[#C9A84C]/40 bg-[#C9A84C]/5 ring-1 ring-[#C9A84C]/30" : "border-[#C9A84C]/10 bg-[#0A0E1A]"}`}
                 >
-                  <div className="text-lg font-black text-emerald-400">{s?.files?.toLocaleString() ?? 0}</div>
+                  <div className="text-base sm:text-lg font-black text-emerald-400">{s?.files?.toLocaleString() ?? 0}</div>
                   <div className="text-[10px] text-gray-500 font-mono mt-0.5">{src}</div>
                   <div className="text-[10px] text-gray-600">{s?.size_mb ?? 0} MB</div>
                 </button>
@@ -1072,7 +1121,7 @@ function DiskTab() {
       </div>
 
       {/* File browser */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-4">
+      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-5 space-y-4">
         <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">
           Файли
           <span className="ml-2 text-gray-400 font-normal normal-case tracking-normal">
@@ -1125,12 +1174,12 @@ function DiskTab() {
                     <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort("law_id")}>
                       ID <SortIcon col="law_id" />
                     </th>
-                    <th className="pb-2 pr-3">Джерело</th>
+                    <th className="pb-2 pr-3 hidden sm:table-cell">Дж.</th>
                     <th className="pb-2 pr-3">Назва</th>
-                    <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none text-right" onClick={() => handleSort("size")}>
+                    <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none text-right hidden sm:table-cell" onClick={() => handleSort("size")}>
                       KB <SortIcon col="size" />
                     </th>
-                    <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort("mtime")}>
+                    <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none hidden sm:table-cell" onClick={() => handleSort("mtime")}>
                       Час <SortIcon col="mtime" />
                     </th>
                     <th className="pb-2"></th>
@@ -1139,11 +1188,11 @@ function DiskTab() {
                 <tbody className="divide-y divide-[#C9A84C]/5">
                   {files.map(f => (
                     <tr key={`${f.source}-${f.law_id}`} className="text-[#E0E6ED] hover:bg-[#C9A84C]/5 transition-colors">
-                      <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400">{f.law_id}</td>
-                      <td className="py-1.5 pr-3 text-gray-500">{f.source}</td>
-                      <td className="py-1.5 pr-3 max-w-[280px] truncate text-gray-300">{f.title || "—"}</td>
-                      <td className="py-1.5 pr-3 text-right text-gray-500">{f.size_kb}</td>
-                      <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap">
+                      <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400 max-w-[90px] truncate">{f.law_id}</td>
+                      <td className="py-1.5 pr-3 text-gray-500 hidden sm:table-cell">{f.source}</td>
+                      <td className="py-1.5 pr-3 max-w-[140px] sm:max-w-[280px] truncate text-gray-300">{f.title || "—"}</td>
+                      <td className="py-1.5 pr-3 text-right text-gray-500 hidden sm:table-cell">{f.size_kb}</td>
+                      <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap hidden sm:table-cell">
                         {new Date(f.mtime).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </td>
                       <td className="py-1.5">
@@ -1245,23 +1294,23 @@ export default function V2AdminPage() {
   const [tab, setTab] = useState<Tab>("scraper")
 
   return (
-    <div className="min-h-screen bg-[#0A0E1A] text-[#E0E6ED] p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <div className="min-h-screen bg-[#0A0E1A] text-[#E0E6ED] px-3 py-4 sm:p-6">
+      <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-black text-[#C9A84C] tracking-tight">V2 Панель</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">V2 Панель</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">
             gemini-embedding-001 · 3072 dims · 17 колекцій _v2
           </p>
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 bg-[#111827] rounded-xl border border-[#C9A84C]/10 p-1">
+        <div className="flex gap-1 bg-[#111827] rounded-xl border border-[#C9A84C]/10 p-1 overflow-x-auto">
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${
+              className={`flex-1 min-w-[70px] py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap ${
                 tab === t.id
                   ? "bg-[#C9A84C] text-[#0A0E1A]"
                   : "text-gray-400 hover:text-[#E0E6ED]"
