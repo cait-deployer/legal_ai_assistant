@@ -10,30 +10,7 @@ SDK:
 Потрібно для нових моделей: pip install google-genai
 """
 
-import os, sys, math, time
-
-# Підтягуємо service account з .env якщо ще не задано
-_sa = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-if not _sa:
-    _dotenv = os.path.join(os.path.dirname(__file__), ".env")
-    if os.path.exists(_dotenv):
-        for _line in open(_dotenv):
-            _line = _line.strip()
-            if _line.startswith("GOOGLE_APPLICATION_CREDENTIALS="):
-                _sa = _line.split("=", 1)[1].strip().strip('"').strip("'")
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _sa
-                break
-    if not _sa:
-        # fallback — стандартне розташування на сервері
-        _sa_default = os.path.join(os.path.dirname(__file__), "service-account.json")
-        if os.path.exists(_sa_default):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _sa_default
-            _sa = _sa_default
-
-if _sa:
-    print(f"Credentials: {_sa}")
-else:
-    print("⚠  GOOGLE_APPLICATION_CREDENTIALS не знайдено!")
+import os, sys, math, time, json
 
 # ── Налаштування ──────────────────────────────────────────────────────────────
 TEST_LAWS = [
@@ -58,26 +35,45 @@ sys.path.insert(0, os.path.dirname(__file__))
 from langchain_text_splitters import MarkdownTextSplitter
 from rada_scanner import get_law_text
 
+from google.oauth2 import service_account
+
 try:
     from settings_cache import settings_cache
-    _project  = settings_cache.get("vertex_project", "") or os.getenv("VERTEX_PROJECT", "urai-492512")
+    _project  = settings_cache.get("vertex_project_id", "") or settings_cache.get("vertex_project", "") or os.getenv("VERTEX_PROJECT", "urai-492512")
     _location = settings_cache.get("vertex_location", "us-central1") or "us-central1"
+    _sa_json_str = settings_cache.get("service_account_json", "")
 except Exception:
-    _project  = os.getenv("VERTEX_PROJECT", "urai-492512")
-    _location = os.getenv("VERTEX_LOCATION", "us-central1")
+    _project     = os.getenv("VERTEX_PROJECT", "urai-492512")
+    _location    = os.getenv("VERTEX_LOCATION", "us-central1")
+    _sa_json_str = ""
+
+# Будуємо credentials з SA JSON що зберігається в Supabase
+_credentials = None
+if _sa_json_str:
+    try:
+        _sa_info = json.loads(_sa_json_str)
+        _credentials = service_account.Credentials.from_service_account_info(
+            _sa_info,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        print(f"Credentials: {_sa_info.get('client_email', '?')}  project={_project}")
+    except Exception as _e:
+        print(f"⚠  Не вдалося розпарсити service_account_json: {_e}")
+else:
+    print("⚠  service_account_json не знайдено в Supabase — спробуємо ADC")
 
 print(f"Vertex AI project={_project}  location={_location}")
 
 # Старий SDK
 import vertexai
 from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
-vertexai.init(project=_project, location=_location)
+vertexai.init(project=_project, location=_location, credentials=_credentials)
 
 # Новий SDK
 try:
     from google import genai
     from google.genai.types import EmbedContentConfig
-    _genai_client = genai.Client(vertexai=True, project=_project, location=_location)
+    _genai_client = genai.Client(vertexai=True, project=_project, location=_location, credentials=_credentials)
     _new_sdk_ok = True
     print("google-genai SDK: OK")
 except ImportError:
