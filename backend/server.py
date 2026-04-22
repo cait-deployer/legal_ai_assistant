@@ -89,8 +89,13 @@ LPD_STATE_FILE      = BASE_DIR / "lpd_state.json"         # Правові по�
 KMU_STATE_FILE      = BASE_DIR / "kmu_state.json"         # НПА КМУ
 REINDEX_KMU_STATE   = BASE_DIR / "reindex_kmu_full_state.json"   # Переіндекс КМУ
 REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переіндекс Ради
-SCRAPE_V2_STATE     = BASE_DIR / "scrape_all_v2_state.json"       # Скрапер v2
 REINDEX_V2_STATE    = BASE_DIR / "reindex_v2_state.json"          # Реіндекс v2
+
+# ── V2 scraper sources ─────────────────────────────────────────────────────────
+V2_SCRAPE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki")
+
+def _scrape_v2_state_file(source: str) -> Path:
+    return BASE_DIR / f"scrape_v2_{source}_state.json"
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -100,7 +105,12 @@ _SB_KEY = (
 )
 
 # ── In-memory стан по кожному джерелу ─────────────────────────────────────────
-_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu", "reindex_kmu", "reindex_rada", "scrape_v2", "reindex_v2")
+_SOURCES = (
+    "rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu",
+    "reindex_kmu", "reindex_rada",
+    "scrape_v2_rada", "scrape_v2_kmu", "scrape_v2_ccu", "scrape_v2_supreme", "scrape_v2_wiki",
+    "reindex_v2",
+)
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -113,7 +123,8 @@ _sync: dict[str, dict] = {
 _lock = threading.Lock()
 MAX_LIVE_LOGS = 500
 _reindex_stop = {"kmu": threading.Event(), "rada": threading.Event()}
-_v2_stop = {"scrape": threading.Event(), "reindex": threading.Event()}
+_v2_stop = {"reindex": threading.Event()}
+_v2_scrape_stop = {s: threading.Event() for s in V2_SCRAPE_SOURCES}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1832,20 +1843,20 @@ async def resume_reindex_rada():
 
 # ── /admin/v2 — Scraper & Reindex v2 (gemini-embedding-001, 3072 dims) ────────
 
-def _do_scrape_v2(session_id: str, source: str | None, rada_collection: str | None) -> None:
-    src = "scrape_v2"
-    log = _make_reindex_log_cb(src)
+def _do_scrape_v2(session_id: str, source: str, rada_collection: str | None) -> None:
+    slot = f"scrape_v2_{source}"
+    log = _make_reindex_log_cb(slot)
     try:
         from scrape_all_v2 import run_scrape_all
-        _v2_stop["scrape"].clear()
+        _v2_scrape_stop[source].clear()
         run_scrape_all(source=source, rada_collection=rada_collection,
-                       log_callback=log, stop_event=_v2_stop["scrape"])
+                       log_callback=log, stop_event=_v2_scrape_stop[source])
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:
         with _lock:
-            _sync[src]["running"] = False
-            _sync[src]["pause_requested"] = False
+            _sync[slot]["running"] = False
+            _sync[slot]["pause_requested"] = False
 
 
 def _do_reindex_v2(session_id: str, source: str | None, init_only: bool) -> None:
@@ -1863,13 +1874,43 @@ def _do_reindex_v2(session_id: str, source: str | None, init_only: bool) -> None
             _sync[src]["pause_requested"] = False
 
 
+@app.get("/admin/v2/scrape/status")
+async def v2_scrape_status():
+    result = {}
+    for source in V2_SCRAPE_SOURCES:
+        slot = f"scrape_v2_{source}"
+        with _lock:
+            running   = _sync[slot]["running"]
+            pause_req = _sync[slot]["pause_requested"]
+            logs      = list(_sync[slot]["live_logs"])
+        state_file = _scrape_v2_state_file(source)
+        resume_progress = None
+        if state_file.exists():
+            try:
+                s = json.loads(state_file.read_text(encoding="utf-8"))
+                resume_progress = {"inner_idx": s.get("inner_idx", 0), "stats": s.get("stats", {})}
+            except Exception:
+                pass
+        result[source] = {
+            "running":         running,
+            "pause_requested": pause_req,
+            "can_resume":      resume_progress is not None and not running,
+            "resume_progress": resume_progress,
+            "live_logs":       logs,
+        }
+    return result
+
+
 @app.post("/admin/v2/scrape/trigger")
 async def v2_scrape_trigger(body: dict = Body(default={})):
-    source          = body.get("source") or None
+    source = body.get("source")
+    if source not in V2_SCRAPE_SOURCES:
+        raise HTTPException(400, f"source має бути одним із {list(V2_SCRAPE_SOURCES)}")
     rada_collection = body.get("rada_collection") or None
+    slot = f"scrape_v2_{source}"
     session_id = str(uuid.uuid4())
     try:
-        _start_sync("scrape_v2", _do_scrape_v2, session_id,
+        _start_sync(slot, _do_scrape_v2, session_id,
                     source=source, rada_collection=rada_collection)
     except ValueError as e:
         raise HTTPException(409, str(e))
@@ -1877,51 +1918,60 @@ async def v2_scrape_trigger(body: dict = Body(default={})):
 
 
 @app.post("/admin/v2/scrape/stop")
-async def v2_scrape_stop():
+async def v2_scrape_stop(body: dict = Body(default={})):
+    source = body.get("source")
+    if source not in V2_SCRAPE_SOURCES:
+        raise HTTPException(400, f"source має бути одним із {list(V2_SCRAPE_SOURCES)}")
+    slot = f"scrape_v2_{source}"
     with _lock:
-        if not _sync["scrape_v2"]["running"]:
+        if not _sync[slot]["running"]:
             raise HTTPException(400, "Скрапер не виконується")
-        _v2_stop["scrape"].set()
-        _sync["scrape_v2"]["pause_requested"] = True
+        _v2_scrape_stop[source].set()
+        _sync[slot]["pause_requested"] = True
     return {"ok": True}
 
 
 @app.get("/admin/v2/scrape/logs")
-async def v2_scrape_logs():
+async def v2_scrape_logs(source: str):
+    if source not in V2_SCRAPE_SOURCES:
+        raise HTTPException(400, f"source має бути одним із {list(V2_SCRAPE_SOURCES)}")
+    slot = f"scrape_v2_{source}"
     with _lock:
-        running   = _sync["scrape_v2"]["running"]
-        pause_req = _sync["scrape_v2"]["pause_requested"]
-        logs      = list(_sync["scrape_v2"]["live_logs"])
-    state = None
-    if SCRAPE_V2_STATE.exists():
+        running   = _sync[slot]["running"]
+        pause_req = _sync[slot]["pause_requested"]
+        logs      = list(_sync[slot]["live_logs"])
+    state_file = _scrape_v2_state_file(source)
+    resume_progress = None
+    if state_file.exists():
         try:
-            s = json.loads(SCRAPE_V2_STATE.read_text(encoding="utf-8"))
-            state = {
-                "source_idx": s.get("source_idx", 0),
-                "inner_idx":  s.get("inner_idx", 0),
-                "stats":      s.get("stats", {}),
-            }
+            s = json.loads(state_file.read_text(encoding="utf-8"))
+            resume_progress = {"inner_idx": s.get("inner_idx", 0), "stats": s.get("stats", {})}
         except Exception:
             pass
     return {
         "running":         running,
         "pause_requested": pause_req,
         "live_logs":       logs,
-        "can_resume":      state is not None and not running,
-        "resume_progress": state,
+        "can_resume":      resume_progress is not None and not running,
+        "resume_progress": resume_progress,
     }
 
 
 @app.post("/admin/v2/scrape/resume")
 async def v2_scrape_resume(body: dict = Body(default={})):
-    if _sync["scrape_v2"]["running"]:
-        raise HTTPException(409, "Скрапер вже виконується")
-    if not SCRAPE_V2_STATE.exists():
+    source = body.get("source")
+    if source not in V2_SCRAPE_SOURCES:
+        raise HTTPException(400, f"source має бути одним із {list(V2_SCRAPE_SOURCES)}")
+    slot = f"scrape_v2_{source}"
+    with _lock:
+        if _sync[slot]["running"]:
+            raise HTTPException(409, "Скрапер вже виконується")
+    state_file = _scrape_v2_state_file(source)
+    if not state_file.exists():
         raise HTTPException(400, "Немає збереженого стану для відновлення")
-    source          = body.get("source") or None
     rada_collection = body.get("rada_collection") or None
     session_id = str(uuid.uuid4())
-    _start_sync("scrape_v2", _do_scrape_v2, session_id,
+    _start_sync(slot, _do_scrape_v2, session_id,
                 source=source, rada_collection=rada_collection)
     return {"ok": True, "session_id": session_id}
 

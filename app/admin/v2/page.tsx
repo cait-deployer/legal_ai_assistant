@@ -10,27 +10,28 @@ type LogEntry = {
   level: string
 }
 
-type ScrapeStats = Record<string, {
+type ScrapeSourceStats = {
   ok?: number
   empty?: number
   restricted?: number
   error?: number
   skipped?: number
-}>
-
-type ScrapeResumeProgress = {
-  source_idx: number
-  inner_idx: number
-  stats: ScrapeStats
 }
 
-type ScrapePanelState = {
+type ScrapeResumeProgress = {
+  inner_idx: number
+  stats: ScrapeSourceStats
+}
+
+type SourceState = {
   running: boolean
   pause_requested: boolean
   live_logs: LogEntry[]
   can_resume: boolean
   resume_progress: ScrapeResumeProgress | null
 }
+
+type AllSourcesStatus = Record<string, SourceState>
 
 type ReindexStats = Record<string, {
   laws?: number
@@ -184,222 +185,182 @@ function RunningBadge({ running, paused }: { running: boolean; paused: boolean }
   )
 }
 
+// ── Source labels ───────────────────────────────────────────────────────────────
+
+const SOURCE_LABELS: Record<string, string> = {
+  rada:    "Верховна Рада (~15 500 законів)",
+  kmu:     "Кабінет Міністрів",
+  ccu:     "Конституційний суд",
+  supreme: "Верховний суд",
+  wiki:    "Вікіпедія (юридичні терміни)",
+}
+
+const DEFAULT_SOURCE_STATE: SourceState = {
+  running: false, pause_requested: false, live_logs: [], can_resume: false, resume_progress: null,
+}
+
+// ── SourcePanel ─────────────────────────────────────────────────────────────────
+
+function SourcePanel({ source, state, onRefresh }: {
+  source: string
+  state: SourceState
+  onRefresh: () => Promise<void>
+}) {
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState("")
+  const [radaCol, setRadaCol]   = useState("")
+
+  const stats = state.resume_progress?.stats ?? {}
+  const idx   = state.resume_progress?.inner_idx ?? 0
+
+  async function doAction(endpoint: string, body: Record<string, string>) {
+    setLoading(true); setError("")
+    try {
+      const res = await fetch(`/api/admin/v2/scrape/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, ...body }),
+      })
+      const data = await res.json()
+      if (!res.ok) setError(data.detail || data.error || "Помилка")
+      else await onRefresh()
+    } catch { setError("Помилка з'єднання") }
+    setLoading(false)
+  }
+
+  const radaBody = source === "rada" && radaCol ? { rada_collection: radaCol } : {}
+
+  return (
+    <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <span className="text-sm font-bold text-[#E0E6ED] uppercase tracking-wider">{source}</span>
+          <span className="ml-2 text-xs text-gray-500 hidden sm:inline">{SOURCE_LABELS[source]}</span>
+        </div>
+        <RunningBadge running={state.running} paused={state.pause_requested} />
+      </div>
+
+      {/* Progress stats */}
+      {state.resume_progress && (
+        <div className="space-y-1">
+          <div className="grid grid-cols-5 gap-1 text-center">
+            {(["ok","empty","restricted","error","skipped"] as const).map(k => {
+              const colors: Record<string, string> = {
+                ok: "text-emerald-400 bg-emerald-500/10",
+                empty: "text-amber-400 bg-amber-500/10",
+                restricted: "text-blue-400 bg-blue-500/10",
+                error: "text-red-400 bg-red-500/10",
+                skipped: "text-gray-400 bg-gray-500/10",
+              }
+              const labels: Record<string, string> = {
+                ok: "OK", empty: "Порожні", restricted: "Обмежено", error: "Помилки", skipped: "Пропущено"
+              }
+              return (
+                <div key={k} className={`rounded-lg py-1.5 px-1 ${colors[k]}`}>
+                  <div className="text-sm font-bold">{stats[k] ?? 0}</div>
+                  <div className="text-[10px] opacity-70">{labels[k]}</div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="text-xs text-gray-500">Позиція: <b className="text-gray-300">{idx}</b></div>
+        </div>
+      )}
+
+      {/* Rada collection filter */}
+      {source === "rada" && !state.running && (
+        <select value={radaCol} onChange={e => setRadaCol(e.target.value)}
+          className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-xs text-[#E0E6ED] w-full max-w-xs">
+          <option value="">Усі блоки Ради</option>
+          {RADA_COLLECTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      )}
+
+      {error && (
+        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</div>
+      )}
+
+      {/* Buttons */}
+      <div className="flex gap-2 flex-wrap">
+        {!state.running && (
+          <button onClick={() => doAction("trigger", radaBody)} disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-[#C9A84C] text-[#0A0E1A] font-bold text-xs hover:bg-[#d4b460] disabled:opacity-50 transition-colors">
+            Запустити
+          </button>
+        )}
+        {state.running && !state.pause_requested && (
+          <button onClick={() => doAction("stop", {})} disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-red-600 text-white font-bold text-xs hover:bg-red-700 disabled:opacity-50 transition-colors">
+            Зупинити
+          </button>
+        )}
+        {state.can_resume && !state.running && (
+          <button onClick={() => doAction("resume", radaBody)} disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white font-bold text-xs hover:bg-emerald-800 disabled:opacity-50 transition-colors">
+            Продовжити
+          </button>
+        )}
+        {state.live_logs.length > 0 && (
+          <button onClick={() => setLogsOpen(o => !o)}
+            className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs hover:bg-[#1e293b] transition-colors">
+            {logsOpen ? "▲ Сховати логи" : "▼ Логи"}
+          </button>
+        )}
+      </div>
+
+      {/* Logs (collapsible) */}
+      {logsOpen && state.live_logs.length > 0 && (
+        <LogPanel logs={state.live_logs} />
+      )}
+    </div>
+  )
+}
+
 // ── Scraper tab ────────────────────────────────────────────────────────────────
 
 function ScraperTab() {
-  const [state, setState] = useState<ScrapePanelState | null>(null)
-  const [source, setSource] = useState<string>("")
-  const [radaCollection, setRadaCollection] = useState<string>("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [allStatus, setAllStatus] = useState<AllSourcesStatus>({})
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchState = useCallback(async () => {
+  const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/v2/scrape/logs")
-      if (res.ok) setState(await res.json())
-    } catch {
-      // ignore
-    }
+      const res = await fetch("/api/admin/v2/scrape/status")
+      if (res.ok) setAllStatus(await res.json())
+    } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => {
-    fetchState()
-  }, [fetchState])
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  const anyRunning = SOURCES.some(s => allStatus[s]?.running)
 
   useEffect(() => {
-    if (state?.running) {
-      pollRef.current = setInterval(fetchState, 3000)
+    if (anyRunning) {
+      pollRef.current = setInterval(fetchStatus, 3000)
     } else {
       if (pollRef.current) clearInterval(pollRef.current)
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [state?.running, fetchState])
-
-  async function handleStart() {
-    setLoading(true)
-    setError("")
-    try {
-      const body: Record<string, string> = {}
-      if (source) body.source = source
-      if (source === "rada" && radaCollection) body.rada_collection = radaCollection
-      const res = await fetch("/api/admin/v2/scrape/trigger", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) setError(data.detail || data.error || "Помилка запуску")
-      else { await fetchState(); pollRef.current = setInterval(fetchState, 3000) }
-    } catch {
-      setError("Помилка з'єднання")
-    }
-    setLoading(false)
-  }
-
-  async function handleStop() {
-    setLoading(true)
-    try {
-      await fetch("/api/admin/v2/scrape/stop", { method: "POST" })
-      await fetchState()
-    } catch { /* ignore */ }
-    setLoading(false)
-  }
-
-  async function handleResume() {
-    setLoading(true)
-    setError("")
-    try {
-      const body: Record<string, string> = {}
-      if (source) body.source = source
-      if (source === "rada" && radaCollection) body.rada_collection = radaCollection
-      const res = await fetch("/api/admin/v2/scrape/resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) setError(data.detail || data.error || "Помилка відновлення")
-      else { await fetchState(); pollRef.current = setInterval(fetchState, 3000) }
-    } catch {
-      setError("Помилка з'єднання")
-    }
-    setLoading(false)
-  }
-
-  const stats = state?.resume_progress?.stats ?? {}
-  const statSources = Object.keys(stats)
+  }, [anyRunning, fetchStatus])
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Controls */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-[#E0E6ED]">Скрапер v2</h2>
-          <RunningBadge running={state?.running ?? false} paused={state?.pause_requested ?? false} />
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 uppercase tracking-wider">Джерело</label>
-            <select
-              value={source}
-              onChange={e => setSource(e.target.value)}
-              disabled={state?.running}
-              className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] disabled:opacity-50"
-            >
-              <option value="">Усі джерела</option>
-              {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-
-          {source === "rada" && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500 uppercase tracking-wider">Блок Ради</label>
-              <select
-                value={radaCollection}
-                onChange={e => setRadaCollection(e.target.value)}
-                disabled={state?.running}
-                className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] disabled:opacity-50"
-              >
-                <option value="">Усі блоки Ради</option>
-                {RADA_COLLECTIONS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {error && (
-          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-            {error}
-          </div>
-        )}
-
-        <div className="flex gap-3 flex-wrap">
-          {!state?.running && (
-            <button
-              onClick={handleStart}
-              disabled={loading}
-              className="px-4 py-2 rounded-lg bg-[#C9A84C] text-[#0A0E1A] font-bold text-sm hover:bg-[#d4b460] disabled:opacity-50 transition-colors"
-            >
-              Запустити
-            </button>
-          )}
-          {state?.running && !state.pause_requested && (
-            <button
-              onClick={handleStop}
-              disabled={loading}
-              className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold text-sm hover:bg-red-700 disabled:opacity-50 transition-colors"
-            >
-              Зупинити
-            </button>
-          )}
-          {state?.can_resume && !state?.running && (
-            <button
-              onClick={handleResume}
-              disabled={loading}
-              className="px-4 py-2 rounded-lg bg-emerald-700 text-white font-bold text-sm hover:bg-emerald-800 disabled:opacity-50 transition-colors"
-            >
-              Продовжити
-            </button>
-          )}
-          <button
-            onClick={fetchState}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-sm hover:bg-[#1e293b] disabled:opacity-50 transition-colors"
-          >
-            Оновити
-          </button>
-        </div>
+    <div className="space-y-3 sm:space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-bold text-[#E0E6ED]">Скрапер v2 — паралельний запуск</h2>
+        <button onClick={fetchStatus}
+          className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs hover:bg-[#1e293b] transition-colors">
+          Оновити
+        </button>
       </div>
-
-      {/* Resume progress */}
-      {state?.resume_progress && (
-        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-3">
-          <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Прогрес</h3>
-          <div className="flex gap-4 text-sm text-gray-400">
-            <span>Джерело: <b className="text-[#E0E6ED]">{state.resume_progress.source_idx}</b></span>
-            <span>Позиція: <b className="text-[#E0E6ED]">{state.resume_progress.inner_idx}</b></span>
-          </div>
-          {statSources.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
-                    <th className="pb-2 pr-4">Джерело</th>
-                    <th className="pb-2 pr-4 text-emerald-400">OK</th>
-                    <th className="pb-2 pr-4 text-amber-400">Порожній</th>
-                    <th className="pb-2 pr-4 text-blue-400">Обмежено</th>
-                    <th className="pb-2 pr-4 text-red-400">Помилка</th>
-                    <th className="pb-2 text-gray-400">Пропущено</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#C9A84C]/5">
-                  {statSources.map(src => {
-                    const s = stats[src] ?? {}
-                    return (
-                      <tr key={src} className="text-[#E0E6ED]">
-                        <td className="py-1.5 pr-4 font-mono">{src}</td>
-                        <td className="py-1.5 pr-4 text-emerald-400">{s.ok ?? 0}</td>
-                        <td className="py-1.5 pr-4 text-amber-400">{s.empty ?? 0}</td>
-                        <td className="py-1.5 pr-4 text-blue-400">{s.restricted ?? 0}</td>
-                        <td className="py-1.5 pr-4 text-red-400">{s.error ?? 0}</td>
-                        <td className="py-1.5 text-gray-400">{s.skipped ?? 0}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Logs */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-3">
-        <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Логи</h3>
-        <LogPanel logs={state?.live_logs ?? []} />
-      </div>
+      {SOURCES.map(src => (
+        <SourcePanel
+          key={src}
+          source={src}
+          state={allStatus[src] ?? DEFAULT_SOURCE_STATE}
+          onRefresh={fetchStatus}
+        />
+      ))}
     </div>
   )
 }

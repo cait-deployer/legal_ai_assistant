@@ -27,32 +27,42 @@ from pathlib import Path
 # ── Config ─────────────────────────────────────────────────────────────────────
 RAW_DIR     = os.environ.get("LAWS_RAW_DIR", "/root/laws_raw")
 STATUS_FILE = os.path.join(RAW_DIR, "scrape_status.json")
-STATE_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scrape_all_v2_state.json")
-CACHE_TTL   = 48 * 3600   # 48h — кеш списку ID
+BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+CACHE_TTL   = 7 * 24 * 3600   # 7 днів — кеш списку ID
 WORKERS     = 4            # паралельні воркери для HTTP (Rada, KMU)
 BATCH_SIZE  = 100          # скільки документів на батч ThreadPoolExecutor
 SAVE_EVERY  = 50           # зберігати стан кожні N документів
 
 SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki"]
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
 
-# ── Shared state ───────────────────────────────────────────────────────────────
-_stop        = threading.Event()
-_log_cb      = None   # set by run_scrape_all()
+# ── Per-source state (supports parallel runs) ──────────────────────────────────
+_tls        = threading.local()                         # _tls.source = поточне джерело в цьому треді
+_log_cbs:   dict[str, object]           = {}            # source → log callback
+_stop_evts: dict[str, threading.Event]  = {}            # source → stop event
 _print_lock  = threading.Lock()
 _status_lock = threading.Lock()
 
-# Reverse mapping: collection → list of category codes (for Rada block filtering)
-_COLLECTION_TO_CATEGORIES: dict[str, list[str]] = {}
+
+def _state_file(source: str) -> str:
+    return os.path.join(BASE_DIR, f"scrape_v2_{source}_state.json")
 
 
 def _log(msg: str, level: str = "info") -> None:
-    if _log_cb:
-        _log_cb(msg, level)
+    src = getattr(_tls, "source", None)
+    cb  = _log_cbs.get(src) if src else None
+    if cb:
+        cb(msg, level)
     else:
         with _print_lock:
             print(msg, flush=True)
+
+
+def _should_stop() -> bool:
+    src = getattr(_tls, "source", None)
+    evt = _stop_evts.get(src)
+    return evt is not None and evt.is_set()
 
 
 def _now() -> str:
@@ -60,17 +70,18 @@ def _now() -> str:
 
 
 # ── State / Status persistence ────────────────────────────────────────────────
-def _load_state() -> dict:
-    if os.path.exists(STATE_FILE):
+def _load_state(source: str) -> dict:
+    sf = _state_file(source)
+    if os.path.exists(sf):
         try:
-            return json.loads(Path(STATE_FILE).read_text("utf-8"))
+            return json.loads(Path(sf).read_text("utf-8"))
         except Exception:
             pass
     return {}
 
 
-def _save_state(state: dict) -> None:
-    Path(STATE_FILE).write_text(json.dumps(state, ensure_ascii=False, indent=2), "utf-8")
+def _save_state(state: dict, source: str) -> None:
+    Path(_state_file(source)).write_text(json.dumps(state, ensure_ascii=False, indent=2), "utf-8")
 
 
 def _load_status() -> dict:
@@ -368,9 +379,15 @@ def _process_one(source: str, doc: dict, status: dict) -> str:
     return st
 
 
+# ── Worker wrapper — sets TLS so _log() routes to correct callback ──────────────
+def _process_one_ctx(source: str, doc: dict, status: dict) -> str:
+    _tls.source = source
+    return _process_one(source, doc, status)
+
+
 # ── Process one source ─────────────────────────────────────────────────────────
 def _process_source(source: str, items: list, start_idx: int, state: dict, status: dict) -> None:
-    stats = state["stats"][source]
+    stats = state["stats"]
     total = len(items)
     processed = 0
 
@@ -380,12 +397,12 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
 
     if use_threads:
         i = start_idx
-        while i < total and not _stop.is_set():
+        while i < total and not _should_stop():
             batch_end = min(i + BATCH_SIZE, total)
             batch     = list(enumerate(items[i:batch_end], start=i))
 
             with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-                futs = {ex.submit(_process_one, source, doc, status): (j, doc) for j, doc in batch}
+                futs = {ex.submit(_process_one_ctx, source, doc, status): (j, doc) for j, doc in batch}
                 for fut in as_completed(futs):
                     j, doc = futs[fut]
                     law_id = _law_id_for(source, doc)
@@ -402,7 +419,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
 
             i = batch_end
             state["inner_idx"] = i
-            _save_state(state)
+            _save_state(state, source)
             _save_status(status)
             _log(
                 f"\n  📊 [{source}] {i}/{total} — "
@@ -411,7 +428,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
             )
     else:
         for j in range(start_idx, total):
-            if _stop.is_set():
+            if _should_stop():
                 break
             doc    = items[j]
             law_id = _law_id_for(source, doc)
@@ -424,7 +441,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
             _log(f"  {icon} [{j+1}/{total}] {law_id} — {st}" + (f" | {title}" if title else ""))
 
             if processed % SAVE_EVERY == 0 or j + 1 >= total:
-                _save_state(state)
+                _save_state(state, source)
                 _save_status(status)
                 _log(
                     f"\n  📊 [{source}] {j+1}/{total} — "
@@ -433,7 +450,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
                 )
 
     state["inner_idx"] = total
-    _save_state(state)
+    _save_state(state, source)
     _save_status(status)
     _log(
         f"\n✅ [{source}] ЗАВЕРШЕНО: "
@@ -442,91 +459,68 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
     )
 
 
-# ── Internal run logic ────────────────────────────────────────────────────────
-def _run_main(source: str | None = None, rada_collection: str | None = None) -> None:
+# ── Internal run logic (always single source) ─────────────────────────────────
+def _run_main(source: str, rada_collection: str | None = None) -> None:
+    _tls.source = source
     os.makedirs(RAW_DIR, exist_ok=True)
 
-    state = _load_state()
+    state = _load_state(source)
     if not state:
         state = {
-            "source_idx": 0,
-            "inner_idx":  0,
-            "stats": {s: {"ok": 0, "empty": 0, "restricted": 0, "error": 0, "skipped": 0} for s in SOURCES},
+            "inner_idx": 0,
+            "stats": {"ok": 0, "empty": 0, "restricted": 0, "error": 0, "skipped": 0},
         }
 
     status = _load_status()
 
-    sources_to_run = [source] if source else SOURCES
+    _log(f"\n{'='*60}")
+    _log(f"ДЖЕРЕЛО: {source.upper()}")
+    _log(f"{'='*60}")
 
-    for si, src in enumerate(SOURCES):
-        if src not in sources_to_run:
-            continue
-        if not source and si < state.get("source_idx", 0):
-            _log(f"⏭ Пропускаємо {src} (вже завершено)")
-            continue
+    items = _get_ids(source)
+    _log(f"  Всього: {len(items)} документів")
 
-        _log(f"\n{'='*60}")
-        _log(f"ДЖЕРЕЛО: {src.upper()}")
-        _log(f"{'='*60}")
+    if source == "rada" and rada_collection is not None:
+        try:
+            from qdrant_storage import CATEGORY_TO_COLLECTION
+            cats  = [c for c, col in CATEGORY_TO_COLLECTION.items() if col == rada_collection]
+            items = [it for it in items if it.get("category") in cats]
+            _log(f"  Фільтр Рада: {rada_collection} ({len(cats)} категорій, {len(items)} документів)")
+        except Exception as ex:
+            _log(f"  ⚠️ Не вдалося застосувати фільтр Рада: {ex}", "warning")
 
-        state["source_idx"] = si
+    start_idx = state.get("inner_idx", 0)
+    if start_idx > 0:
+        _log(f"  Відновлення з позиції {start_idx}/{len(items)}")
 
-        items = _get_ids(src)
-        _log(f"  Всього: {len(items)} документів")
+    _process_source(source, items, start_idx, state, status)
 
-        # Rada block filtering
-        if src == "rada" and rada_collection is not None:
-            try:
-                from qdrant_storage import CATEGORY_TO_COLLECTION
-                cats = [c for c, col in CATEGORY_TO_COLLECTION.items() if col == rada_collection]
-                items = [it for it in items if it.get("category") in cats]
-                _log(f"  Фільтр Рада: {rada_collection} ({len(cats)} категорій, {len(items)} документів)")
-            except Exception as ex:
-                _log(f"  ⚠️ Не вдалося застосувати фільтр Рада: {ex}", "warning")
+    if _should_stop():
+        _log("\n⏸ Зупинено. Запусти знову для продовження.")
+        return
 
-        start_idx = 0
-        if not source and si == state.get("source_idx", 0):
-            start_idx = state.get("inner_idx", 0)
-            if start_idx > 0:
-                _log(f"  Відновлення з позиції {start_idx}/{len(items)}")
-
-        _process_source(src, items, start_idx, state, status)
-
-        if _stop.is_set():
-            _log("\n⏸ Зупинено. Запусти знову для продовження.")
-            break
-
-        state["source_idx"] = si + 1
-        state["inner_idx"]  = 0
-        _save_state(state)
-
-    if not _stop.is_set():
-        _log("\n" + "=" * 60)
-        _log("🎉 СКРАПІНГ ЗАВЕРШЕНО!")
-        for s in SOURCES:
-            st = state["stats"].get(s, {})
-            _log(
-                f"  {s:8s}: ok={st.get('ok',0):>6} skip={st.get('skipped',0):>6} "
-                f"empty={st.get('empty',0):>5} restr={st.get('restricted',0):>4} err={st.get('error',0):>4}"
-            )
-        if os.path.exists(STATE_FILE):
-            os.unlink(STATE_FILE)
+    _log("\n🎉 СКРАПІНГ ЗАВЕРШЕНО!")
+    sf = _state_file(source)
+    if os.path.exists(sf):
+        os.unlink(sf)
 
 
 def run_scrape_all(
-    source: str | None = None,
+    source: str,
     rada_collection: str | None = None,
     log_callback=None,
     stop_event: threading.Event | None = None,
 ) -> None:
-    """Called from server.py. Runs in a daemon thread."""
-    global _stop, _log_cb
-    _stop   = stop_event if stop_event is not None else threading.Event()
-    _log_cb = log_callback
+    """Called from server.py for a SINGLE source. Runs in a daemon thread."""
+    evt = stop_event if stop_event is not None else threading.Event()
+    _log_cbs[source]   = log_callback
+    _stop_evts[source] = evt
+    _tls.source = source
     try:
         _run_main(source=source, rada_collection=rada_collection)
     finally:
-        _log_cb = None
+        _log_cbs.pop(source, None)
+        _stop_evts.pop(source, None)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -537,18 +531,30 @@ def main() -> None:
     parser.add_argument("--reset", action="store_true", help="Скинути стан і почати заново")
     args = parser.parse_args()
 
-    if args.reset and os.path.exists(STATE_FILE):
-        os.unlink(STATE_FILE)
-        _log("🔄 Стан скинуто.")
+    sources_to_run = [args.source] if args.source else SOURCES
+
+    if args.reset:
+        for src in sources_to_run:
+            sf = _state_file(src)
+            if os.path.exists(sf):
+                os.unlink(sf)
+                print(f"🔄 Стан скинуто для {src}.")
+
+    _stop_main = threading.Event()
 
     def _on_signal(sig, frame):
-        _log("\n⏸ Зупинка... (зберігаємо стан)")
-        _stop.set()
+        print("\n⏸ Зупинка... (зберігаємо стан)")
+        for evt in _stop_evts.values():
+            evt.set()
+        _stop_main.set()
 
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
 
-    _run_main(source=args.source)
+    for src in sources_to_run:
+        if _stop_main.is_set():
+            break
+        run_scrape_all(source=src, stop_event=_stop_main)
 
 
 if __name__ == "__main__":

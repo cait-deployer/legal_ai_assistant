@@ -205,7 +205,7 @@ def get_laws_from_section(code: str, label: str, limit: int = None, log=None) ->
                 if limit and len(all_laws) >= limit:
                     break
 
-        _log(f"   📄 Стор. {page}/{total_pages}: зібрано {len(all_laws)}")
+        _log(f"   📄 [{code}] {label[:25]} — Стор. {page}/{total_pages}: зібрано {len(all_laws)}")
         time.sleep(0.3)
 
     _log(f"   ✅ [{code}] готово: {len(all_laws)} законів", "success")
