@@ -106,6 +106,20 @@ for law_id, law_name in TEST_LAWS:
         continue
     print(f"  Довжина: {len(text):,} символів")
 
+    # Діагностика: показуємо контекст навколо "24" для розуміння формату
+    idx24 = text.lower().find("24 календарн")
+    if idx24 == -1:
+        # Спробуємо знайти хоч щось про відпустки
+        for probe in ["двадцять чотири", "щорічна відпустка", "основна відпустка"]:
+            pi = text.lower().find(probe)
+            if pi != -1:
+                print(f"  ℹ «{probe}» знайдено на позиції {pi}: …{text[pi:pi+120]}…")
+                break
+        else:
+            print("  ⚠ «24 календарн» і типові фрази НЕ знайдено — можливо інший формат тексту")
+    else:
+        print(f"  ✓ «24 календарн» знайдено на позиції {idx24}")
+
     for chunk_size in CHUNK_SIZES:
         splitter = MarkdownTextSplitter(chunk_size=chunk_size, chunk_overlap=CHUNK_OVERLAP)
         chunks   = splitter.split_text(text)
