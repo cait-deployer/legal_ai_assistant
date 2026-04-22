@@ -3281,9 +3281,9 @@ async def ask(body: AskRequest):
                         _indices.append(idx)
                 except ValueError:
                     pass
-            if len(_indices) >= 2:
+            if len(_indices) >= 1:
                 reranked = [_candidates[i] for i in _indices[:_rr_slots]]
-                # якщо реранкер вибрав менше мінімуму — доповнюємо семантичними топ-результатами
+                # доповнюємо семантичними топ-результатами якщо реранкер вибрав менше ніж треба
                 if len(reranked) < _rr_slots:
                     _ranked_ids = {(r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) for r in reranked}
                     for _c in _candidates:
@@ -3301,7 +3301,7 @@ async def ask(body: AskRequest):
                 logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
             else:
                 results = results[:body.max_docs]
-                logger.info("RERANKER: fallback (parsed %d indices, raw=%r)", len(_indices), _rr_raw[:80])
+                logger.info("RERANKER: fallback (parsed 0 indices, raw=%r)", _rr_raw[:80])
         except Exception as _rr_err:
             logger.warning("Reranker error: %s", _rr_err)
             results = results[:body.max_docs]
