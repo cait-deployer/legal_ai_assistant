@@ -49,7 +49,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -89,6 +89,8 @@ LPD_STATE_FILE      = BASE_DIR / "lpd_state.json"         # Правові по�
 KMU_STATE_FILE      = BASE_DIR / "kmu_state.json"         # НПА КМУ
 REINDEX_KMU_STATE   = BASE_DIR / "reindex_kmu_full_state.json"   # Переіндекс КМУ
 REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переіндекс Ради
+SCRAPE_V2_STATE     = BASE_DIR / "scrape_all_v2_state.json"       # Скрапер v2
+REINDEX_V2_STATE    = BASE_DIR / "reindex_v2_state.json"          # Реіндекс v2
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -98,7 +100,7 @@ _SB_KEY = (
 )
 
 # ── In-memory стан по кожному джерелу ─────────────────────────────────────────
-_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu", "reindex_kmu", "reindex_rada")
+_SOURCES = ("rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu", "reindex_kmu", "reindex_rada", "scrape_v2", "reindex_v2")
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -111,6 +113,7 @@ _sync: dict[str, dict] = {
 _lock = threading.Lock()
 MAX_LIVE_LOGS = 500
 _reindex_stop = {"kmu": threading.Event(), "rada": threading.Event()}
+_v2_stop = {"scrape": threading.Event(), "reindex": threading.Event()}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1825,6 +1828,233 @@ async def resume_reindex_rada():
     session_id = str(uuid.uuid4())
     _start_sync("reindex_rada", _do_reindex_rada, session_id)
     return {"ok": True, "session_id": session_id}
+
+
+# ── /admin/v2 — Scraper & Reindex v2 (gemini-embedding-001, 3072 dims) ────────
+
+def _do_scrape_v2(session_id: str, source: str | None, rada_collection: str | None) -> None:
+    src = "scrape_v2"
+    log = _make_reindex_log_cb(src)
+    try:
+        from scrape_all_v2 import run_scrape_all
+        _v2_stop["scrape"].clear()
+        run_scrape_all(source=source, rada_collection=rada_collection,
+                       log_callback=log, stop_event=_v2_stop["scrape"])
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+def _do_reindex_v2(session_id: str, source: str | None, init_only: bool) -> None:
+    src = "reindex_v2"
+    log = _make_reindex_log_cb(src)
+    try:
+        from reindex_v2 import run_reindex_v2
+        _v2_stop["reindex"].clear()
+        run_reindex_v2(source=source, log_callback=log, stop_event=_v2_stop["reindex"], init_only=init_only)
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+@app.post("/admin/v2/scrape/trigger")
+async def v2_scrape_trigger(body: dict = Body(default={})):
+    source          = body.get("source") or None
+    rada_collection = body.get("rada_collection") or None
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("scrape_v2", _do_scrape_v2, session_id,
+                    source=source, rada_collection=rada_collection)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/v2/scrape/stop")
+async def v2_scrape_stop():
+    with _lock:
+        if not _sync["scrape_v2"]["running"]:
+            raise HTTPException(400, "Скрапер не виконується")
+        _v2_stop["scrape"].set()
+        _sync["scrape_v2"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/v2/scrape/logs")
+async def v2_scrape_logs():
+    with _lock:
+        running   = _sync["scrape_v2"]["running"]
+        pause_req = _sync["scrape_v2"]["pause_requested"]
+        logs      = list(_sync["scrape_v2"]["live_logs"])
+    state = None
+    if SCRAPE_V2_STATE.exists():
+        try:
+            s = json.loads(SCRAPE_V2_STATE.read_text(encoding="utf-8"))
+            state = {
+                "source_idx": s.get("source_idx", 0),
+                "inner_idx":  s.get("inner_idx", 0),
+                "stats":      s.get("stats", {}),
+            }
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+    }
+
+
+@app.post("/admin/v2/scrape/resume")
+async def v2_scrape_resume(body: dict = Body(default={})):
+    if _sync["scrape_v2"]["running"]:
+        raise HTTPException(409, "Скрапер вже виконується")
+    if not SCRAPE_V2_STATE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    source          = body.get("source") or None
+    rada_collection = body.get("rada_collection") or None
+    session_id = str(uuid.uuid4())
+    _start_sync("scrape_v2", _do_scrape_v2, session_id,
+                source=source, rada_collection=rada_collection)
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/v2/reindex/trigger")
+async def v2_reindex_trigger(body: dict = Body(default={})):
+    source    = body.get("source") or None
+    init_only = bool(body.get("init_only", False))
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("reindex_v2", _do_reindex_v2, session_id,
+                    source=source, init_only=init_only)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/v2/reindex/stop")
+async def v2_reindex_stop():
+    with _lock:
+        if not _sync["reindex_v2"]["running"]:
+            raise HTTPException(400, "Реіндекс не виконується")
+        _v2_stop["reindex"].set()
+        _sync["reindex_v2"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/v2/reindex/logs")
+async def v2_reindex_logs():
+    with _lock:
+        running   = _sync["reindex_v2"]["running"]
+        pause_req = _sync["reindex_v2"]["pause_requested"]
+        logs      = list(_sync["reindex_v2"]["live_logs"])
+    state = None
+    if REINDEX_V2_STATE.exists():
+        try:
+            s = json.loads(REINDEX_V2_STATE.read_text(encoding="utf-8"))
+            state = {
+                "file_idx": s.get("file_idx", 0),
+                "stats":    s.get("stats", {}),
+            }
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "can_resume":      state is not None and not running,
+        "resume_progress": state,
+    }
+
+
+@app.post("/admin/v2/reindex/resume")
+async def v2_reindex_resume(body: dict = Body(default={})):
+    if _sync["reindex_v2"]["running"]:
+        raise HTTPException(409, "Реіндекс вже виконується")
+    if not REINDEX_V2_STATE.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+    source    = body.get("source") or None
+    init_only = bool(body.get("init_only", False))
+    session_id = str(uuid.uuid4())
+    _start_sync("reindex_v2", _do_reindex_v2, session_id,
+                source=source, init_only=init_only)
+    return {"ok": True, "session_id": session_id}
+
+
+@app.get("/admin/v2/analytics")
+async def v2_analytics(
+    status:  str | None = None,
+    source:  str | None = None,
+    limit:   int = 100,
+    offset:  int = 0,
+):
+    """Аналітика скрапінгу v2: статистика по джерелах, стан колекцій Qdrant."""
+    STATUS_FILE_SERVER = Path("/root/laws_raw/scrape_status.json")
+    STATUS_FILE_LOCAL  = BASE_DIR.parent / "laws_raw" / "scrape_status.json"
+
+    raw_status: dict = {}
+    for sp in [STATUS_FILE_SERVER, STATUS_FILE_LOCAL]:
+        if sp.exists():
+            try:
+                raw_status = json.loads(sp.read_text("utf-8"))
+                break
+            except Exception:
+                pass
+
+    # Summary stats
+    by_source: dict = {}
+    all_statuses = ["ok", "empty", "restricted", "error"]
+    for entry in raw_status.values():
+        src = entry.get("source", "unknown")
+        st  = entry.get("status", "error")
+        if src not in by_source:
+            by_source[src] = {s: 0 for s in all_statuses}
+        by_source[src][st] = by_source[src].get(st, 0) + 1
+
+    summary = {s: 0 for s in all_statuses}
+    summary["total"] = len(raw_status)
+    for counts in by_source.values():
+        for s in all_statuses:
+            summary[s] = summary.get(s, 0) + counts.get(s, 0)
+
+    # Filtered law list
+    filtered = [
+        {"law_id": k, **{kk: vv for kk, vv in v.items()}}
+        for k, v in raw_status.items()
+        if (status is None or v.get("status") == status)
+        and (source is None or v.get("source") == source)
+    ]
+    filtered.sort(key=lambda x: x.get("scraped_at", ""), reverse=True)
+    total_filtered = len(filtered)
+    page = filtered[offset : offset + limit]
+
+    # Qdrant v2 stats
+    qdrant_v2: dict = {}
+    try:
+        from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient
+        qc = _qclient()
+        for col in ALL_V2_COLLECTIONS:
+            try:
+                qdrant_v2[col] = qc.get_collection(col).points_count or 0
+            except Exception:
+                qdrant_v2[col] = -1
+    except Exception:
+        pass
+
+    return {
+        "summary":        summary,
+        "by_source":      by_source,
+        "qdrant_v2":      qdrant_v2,
+        "laws":           page,
+        "total_filtered": total_filtered,
+    }
 
 
 # ── /admin/logs (unified history across all sources) ─────────────────────────

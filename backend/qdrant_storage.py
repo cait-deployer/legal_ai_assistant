@@ -84,6 +84,23 @@ RADA_COLLECTIONS: list[str] = [
 # Всі колекції системи
 ALL_COLLECTIONS: list[str] = RADA_COLLECTIONS + ["laws_supreme", "laws_wiki", "laws_ccu", "laws_positions", "laws_kmu"]
 
+# ── V2 колекції (gemini-embedding-001, 3072 dims) ──────────────────────────────
+RADA_V2_COLLECTIONS: list[str] = [f"{c}_v2" for c in RADA_COLLECTIONS]
+
+OTHER_V2_COLLECTIONS: list[str] = [
+    "laws_supreme_v2",
+    "laws_wiki_v2",
+    "laws_ccu_v2",
+    "laws_positions_v2",
+    "laws_kmu_v2",
+]
+
+ALL_V2_COLLECTIONS: list[str] = RADA_V2_COLLECTIONS + OTHER_V2_COLLECTIONS
+
+CATEGORY_TO_V2_COLLECTION: dict[str, str] = {
+    k: f"{v}_v2" for k, v in CATEGORY_TO_COLLECTION.items()
+}
+
 _client: QdrantClient | None = None
 
 
@@ -102,6 +119,11 @@ def get_collection_for_category(category_code: str) -> str:
     return CATEGORY_TO_COLLECTION.get(category_code, "rada_other")
 
 
+def get_v2_collection_for_category(category_code: str) -> str:
+    """Повертає назву v2-колекції для РАДА-категорії. Fallback → rada_other_v2."""
+    return CATEGORY_TO_V2_COLLECTION.get(category_code, "rada_other_v2")
+
+
 # ── ІНІЦІАЛІЗАЦІЯ ──────────────────────────────────────────────────────────────
 
 def init_all_collections(vector_size: int = 768, force_recreate: bool = False) -> None:
@@ -110,6 +132,26 @@ def init_all_collections(vector_size: int = 768, force_recreate: bool = False) -
     existing = {c.name for c in client.get_collections().collections}
 
     for name in ALL_COLLECTIONS:
+        if name in existing:
+            if not force_recreate:
+                print(f"✅ '{name}' вже існує — пропускаємо.")
+                continue
+            client.delete_collection(name)
+            print(f"🗑️  Видалено '{name}'.")
+
+        client.create_collection(
+            collection_name=name,
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+        )
+        print(f"✅ Колекцію '{name}' створено (size={vector_size}).")
+
+
+def init_v2_collections(vector_size: int = 3072, force_recreate: bool = False) -> None:
+    """Створює всі _v2 колекції (gemini-embedding-001, 3072 dims) якщо їх немає."""
+    client = get_client()
+    existing = {c.name for c in client.get_collections().collections}
+
+    for name in ALL_V2_COLLECTIONS:
         if name in existing:
             if not force_recreate:
                 print(f"✅ '{name}' вже існує — пропускаємо.")

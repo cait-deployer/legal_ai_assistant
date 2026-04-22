@@ -25,6 +25,9 @@ npm run build && systemctl restart frontend.service && systemctl restart backend
 - `backend/reindex_rada_full.py` — Full reindex of all 12 rada_* collections
 - `backend/reindex_kmu_full.py` — Full reindex of laws_kmu collection
 - `backend/repair_missing.py` — Targeted repair: re-indexes only laws missing from Qdrant
+- `backend/embed_v2.py` — Embedding module v2: `gemini-embedding-001` (3072 dims), lazy init, thread-safe
+- `backend/scrape_all_v2.py` — "Last scraper ever": saves all raw texts to `/root/laws_raw/` (all 5 sources), pause/resume
+- `backend/reindex_v2.py` — Reads from disk, chunks, embeds with embed_v2, uploads to `*_v2` Qdrant collections
 
 ## Admin panel pages (app/admin/)
 Every admin page must stay accurate. When you add/change backend functionality, update the matching admin page:
@@ -36,15 +39,18 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 
 ## Key patterns
 - Settings (AI model, thresholds) — Supabase `app_settings` table, read via `settings_cache`
-- All Qdrant collections: `RADA_COLLECTIONS` (12) + `laws_supreme`, `laws_wiki`, `laws_ccu`, `laws_kmu`
+- All Qdrant collections: `RADA_COLLECTIONS` (13) + `laws_supreme`, `laws_wiki`, `laws_ccu`, `laws_positions`, `laws_kmu` (v1, 768 dims)
+- V2 Qdrant collections: same names with `_v2` suffix (17 collections, 3072 dims) — shadow, not yet live in production
 - `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini
 - Scraper pause/resume: JSON state files in `backend/` (`sync_state.json`, `wiki_state.json`, `ccu_state.json`)
-- Reindex pause/resume: JSON state files (`reindex_kmu_full_state.json`, `reindex_rada_full_state.json`)
-- IDs cache: `reindex_kmu_ids_cache.json`, `reindex_rada_ids_cache.json` (TTL 48h)
+- Reindex pause/resume: JSON state files (`reindex_kmu_full_state.json`, `reindex_rada_full_state.json`, `reindex_v2_state.json`, `scrape_all_v2_state.json`)
+- IDs cache: `reindex_kmu_ids_cache.json`, `reindex_rada_ids_cache.json`, `scrape_{source}_ids_cache.json` (TTL 48h)
+- Raw law texts (v2): `/root/laws_raw/{source}/{law_id}.txt` + `{law_id}.meta.json`; status: `/root/laws_raw/scrape_status.json`
 - Vertex AI initialized ONCE at startup via `_init_vertex_ai()` — do not call `vertexai.init()` per request
-- Embeddings: Vertex AI `text-embedding-004`, max ~20000 tokens per batch call
-- Chunk sizes: Rada 3000 chars / overlap 300, KMU 4000 chars / overlap 400
-- Chunk truncation: always slice `[:8000]` (Rada) or `[:15000]` (KMU) after title-prefix
+- Embeddings v1: Vertex AI `text-embedding-004` (768 dims), max ~20000 tokens per batch call
+- Embeddings v2: `gemini-embedding-001` (3072 dims), new SDK `google.genai.Client`, batch=1, SLEEP_SEC=0.1
+- Chunk sizes: Rada 3000/300, KMU 4000/400, CCU/Supreme 3000/300, Wiki 2000/200
+- Chunk truncation: always slice `[:8000]` (Rada, Wiki) or `[:15000]` (KMU, CCU, Supreme) after title-prefix
 - `upload_to_qdrant()` returns `bool` — always check return value for accurate success counting
 - `delete_law_chunks()` retries 3× with exponential backoff — don't call unless certain
 
