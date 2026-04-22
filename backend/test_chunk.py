@@ -12,6 +12,29 @@ SDK:
 
 import os, sys, math, time
 
+# Підтягуємо service account з .env якщо ще не задано
+_sa = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+if not _sa:
+    _dotenv = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(_dotenv):
+        for _line in open(_dotenv):
+            _line = _line.strip()
+            if _line.startswith("GOOGLE_APPLICATION_CREDENTIALS="):
+                _sa = _line.split("=", 1)[1].strip().strip('"').strip("'")
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _sa
+                break
+    if not _sa:
+        # fallback — стандартне розташування на сервері
+        _sa_default = os.path.join(os.path.dirname(__file__), "service-account.json")
+        if os.path.exists(_sa_default):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _sa_default
+            _sa = _sa_default
+
+if _sa:
+    print(f"Credentials: {_sa}")
+else:
+    print("⚠  GOOGLE_APPLICATION_CREDENTIALS не знайдено!")
+
 # ── Налаштування ──────────────────────────────────────────────────────────────
 TEST_LAWS = [
     ("2011-12", "Закон про відпустки"),
