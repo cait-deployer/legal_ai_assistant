@@ -3250,7 +3250,9 @@ async def ask(body: AskRequest):
     # Причина: реранкер оптимізує "лінгвістичну очевидність", а КМУ/позиції мають сухий табличний текст
     _protected_colls = {"laws_kmu", "laws_positions"}
     _rr_protected = [r for r in results
-                     if r.get("_collection") in _protected_colls and r.get("_title_match")][:2]
+                     if r.get("_collection") in _protected_colls
+                     and r.get("_title_match")
+                     and r["out_metadata"].get("law_id") in _seen_laws_in_semantic][:2]
     _rr_protected_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
