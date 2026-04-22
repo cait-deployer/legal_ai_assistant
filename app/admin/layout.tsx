@@ -18,7 +18,7 @@ import {
   LayoutDashboard, Menu, X, LogOut, ChevronLeft,
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
   Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck, Gavel, BookMarked,
-  RefreshCw, Database, ChevronDown, LayoutGrid, Building2, HardDriveDownload,
+  RefreshCw, Database, ChevronDown, LayoutGrid, Building2, HardDriveDownload, Sparkles,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
@@ -42,6 +42,7 @@ const navigation: NavItem[] = [
       { name: "Позиції ВС",    href: "/admin/lpd",      icon: BookMarked  },
       { name: "КМУ",           href: "/admin/kmu",      icon: Building2          },
       { name: "Переіндекс",   href: "/admin/reindex",  icon: HardDriveDownload  },
+      { name: "V2 Міграція",  href: "/admin/v2",       icon: Sparkles           },
     ],
   },
   { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck },
@@ -50,7 +51,7 @@ const navigation: NavItem[] = [
   { name: "База знань",    href: "/admin/base",          icon: BookOpen    },
 ]
 
-const SYNC_HREFS = ["/admin/sync", "/admin/settings", "/admin/supreme", "/admin/ccu", "/admin/lpd", "/admin/kmu", "/admin/reindex"]
+const SYNC_HREFS = ["/admin/sync", "/admin/settings", "/admin/supreme", "/admin/ccu", "/admin/lpd", "/admin/kmu", "/admin/reindex", "/admin/v2"]
 const COLLAPSED_KEY    = "admin_sidebar_collapsed"
 const SYNC_OPEN_KEY    = "admin_sync_open"
 
