@@ -2770,75 +2770,67 @@ def _route_collections(
 
 # ── Intent classifier → вибір колекцій ───────────────────────────────────────
 
-# Маппінг галузі → колекції Qdrant
-_INTENT_MAP: dict[str, list[str]] = {
-    "трудове":           ["rada_labor", "laws_kmu", "laws_positions", "laws_supreme"],
-    "податкове":         ["rada_finance", "laws_kmu", "laws_positions", "laws_supreme"],
-    "фінансове":         ["rada_finance", "laws_kmu", "laws_positions", "laws_supreme"],
-    "цивільне":          ["rada_civil", "laws_kmu", "laws_positions", "laws_supreme"],
-    "кримінальне":       ["rada_criminal", "laws_kmu", "laws_positions", "laws_supreme", "laws_ccu"],
-    "адміністративне":   ["rada_admin", "rada_state", "laws_kmu", "laws_positions", "laws_supreme"],
-    "земельне":          ["rada_land", "laws_kmu", "laws_positions"],
-    "житлове":           ["rada_housing", "laws_kmu", "laws_positions"],
-    "корпоративне":      ["rada_civil", "rada_finance", "laws_positions", "laws_supreme"],
-    "міжнародне":        ["rada_intl", "laws_positions", "laws_supreme"],
-    "кадрове":           ["rada_personnel", "rada_labor", "laws_kmu", "laws_positions"],
-    "судове":            ["laws_positions", "laws_supreme", "laws_ccu", "rada_court"],
-    "інше":              None,  # fallback → всі колекції
+# Описи колекцій: LLM бачить що реально є в кожній і вибирає напряму
+_COLLECTION_DESCRIPTIONS: dict[str, str] = {
+    "rada_civil":     "Цивільний кодекс, договори, власність, нерухомість, купівля-продаж, зобов'язання, нотаріат, сімейне право",
+    "rada_labor":     "КЗпП, трудові відносини, звільнення, відпустки, зарплата, соціальне страхування, охорона праці",
+    "rada_criminal":  "Кримінальний кодекс, КПК, злочини, покарання, кримінальна відповідальність",
+    "rada_finance":   "Податки, ПДВ, бюджет, банки, кредити, митниця, ЗЕД, цінні папери, бухоблік",
+    "rada_admin":     "Адміністративна відповідальність, штрафи, ліцензування, дозволи, регулювання",
+    "rada_housing":   "Житловий кодекс, ЖКГ, оренда житла, комунальні послуги, будівництво, приватизація",
+    "rada_land":      "Земельний кодекс, землекористування, оренда землі, сільське господарство",
+    "rada_court":     "ГПК, ЦПК, КАС, судові процедури, прокуратура, юстиція",
+    "rada_state":     "Конституція, держустрій, громадянство, паспорти, вибори",
+    "rada_personnel": "Держслужба, кадрове діловодство, нагороди, звання",
+    "rada_industry":  "Транспорт, зв'язок, промисловість, енергетика, підприємства, інвестиції",
+    "rada_intl":      "Міжнародні договори, міжнародне право",
+    "rada_other":     "Освіта, наука, культура, оборона, торгівля, регіональне",
+    "laws_kmu":       "Постанови КМУ: добові, норми витрат, ліцензійні умови, держрегулювання",
+    "laws_positions": "Правові позиції Верховного суду: ключові висновки по спорах",
+    "laws_supreme":   "Рішення Верховного суду",
+    "laws_ccu":       "Рішення Конституційного суду",
+    "laws_wiki":      "Правові статті та роз'яснення",
 }
 
 async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "") -> list[str]:
-    """Класифікує галузь права через Gemini → повертає список колекцій для пошуку.
-    Запитує до 2 галузей, щоб покрити міждисциплінарні питання."""
+    """Класифікує питання через Gemini → повертає список колекцій.
+    LLM бачить реальні описи колекцій і вибирає назви напряму — без hardcoded маппінгу."""
     import asyncio as _asyncio
     try:
         from vertexai.generative_models import GenerativeModel, GenerationConfig
         _mn = settings_cache.get("intent_model", "gemini-2.5-flash")
         _m = GenerativeModel(_mn)
+
+        _available = {k: v for k, v in _COLLECTION_DESCRIPTIONS.items() if k in all_cols}
+        _cols_text = "\n".join(f"- {k}: {v}" for k, v in _available.items())
+
         prompt = (
-            "Визнач галузь(і) права для цього юридичного питання.\n"
-            "Відповідь — одне або два слова зі списку нижче, через кому, найрелевантніші першими.\n"
-            "Якщо питання стосується лише однієї галузі — одне слово.\n"
-            "Слова зі списку: трудове, податкове, фінансове, цивільне, кримінальне, "
-            "адміністративне, земельне, житлове, корпоративне, міжнародне, кадрове, судове, інше\n\n"
-            f"Питання: {question}\n\nГалузь:"
+            "Для юридичного питання нижче вибери 3-5 найрелевантніших колекцій з бази знань.\n"
+            "Відповідь — ТІЛЬКИ назви колекцій через кому, без пояснень.\n"
+            "Якщо питання міждисциплінарне — вибирай з усіх відповідних колекцій.\n\n"
+            f"Доступні колекції:\n{_cols_text}\n\n"
+            f"Питання: {question}\n\nКолекції:"
         )
         resp = await _asyncio.to_thread(
             _m.generate_content, prompt,
-            generation_config=GenerationConfig(temperature=0.0, max_output_tokens=50),
+            generation_config=GenerationConfig(temperature=0.0, max_output_tokens=100),
         )
-        raw_text = resp.text.strip().lower().rstrip(".") if resp.text.strip() else ""
-        # Парсимо до 2 галузей, розділених комою/пробілом
-        raw_labels = [t.strip() for t in re.split(r"[,\s]+", raw_text) if t.strip()][:2]
+        raw_text = resp.text.strip().lower() if resp.text.strip() else ""
+        # Залишаємо тільки [a-z_] в кожному токені — захист від крапок, лапок, дефісів
+        chosen = [re.sub(r"[^a-z_]", "", t) for t in re.split(r"[,\s\n]+", raw_text)]
+        result = [c for c in chosen if c in all_cols][:6]
 
-        def _resolve(label: str) -> str | None:
-            if label in _INTENT_MAP:
-                return label
-            for k in _INTENT_MAP:
-                if k.startswith(label) or label.startswith(k):
-                    return k
-            return None
-
-        intents = [r for label in raw_labels if (r := _resolve(label))]
-        if not intents:
+        if not result:
             logger.info("INTENT raw=%r → fallback all collections", raw_text)
             return all_cols
 
-        # Об'єднуємо колекції обох галузей (порядок: першої галузі → унікальні другої)
-        merged: list[str] = []
-        seen: set[str] = set()
-        for intent in intents:
-            cols = _INTENT_MAP.get(intent)
-            if cols is None:  # "інше" → all_cols
-                return all_cols
-            for c in cols:
-                if c not in seen:
-                    merged.append(c)
-                    seen.add(c)
+        # laws_kmu і laws_positions майже завжди корисні — додаємо якщо LLM пропустив
+        for _always in ["laws_kmu", "laws_positions"]:
+            if _always in all_cols and _always not in result:
+                result.append(_always)
 
-        result = [c for c in merged if c in all_cols]
-        logger.info("INTENT %s (raw=%r) → collections: %s", intents, raw_text, result)
-        return result if result else all_cols
+        logger.info("INTENT (raw=%r) → collections: %s", raw_text, result)
+        return result
     except Exception as e:
         _safe_default = ["rada_labor", "rada_civil", "laws_kmu", "rada_finance", "laws_positions"]
         result = [c for c in _safe_default if c in all_cols] or all_cols
