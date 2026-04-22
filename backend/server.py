@@ -2775,7 +2775,7 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
     Кожна колекція отримує probe limit=1 — відбираємо ті де vector score > порогу.
     Нульовий hardcoding: сам вектор вирішує які колекції релевантні."""
     import asyncio as _asyncio
-    from qdrant_storage import get_client as _get_qdrant
+    from qdrant_storage import _search_single as _qdrant_search_single
 
     if query_vector is None:
         logger.info("ROUTING: no vector → all collections")
@@ -2783,20 +2783,20 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
 
     _probe_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.4) - 0.10)
     _always_include = {"laws_kmu", "laws_positions"}
-    _client = _get_qdrant()
 
     async def _probe(col: str) -> tuple[str, float]:
         try:
             hits = await _asyncio.to_thread(
-                _client.search,
-                collection_name=col,
-                query_vector=query_vector,
-                limit=1,
-                score_threshold=0.0,
-                with_payload=False,
+                _qdrant_search_single,
+                col,
+                query_vector,
+                1,    # top_k=1
+                0.0,  # threshold=0.0 — хочемо будь-який результат
             )
-            return col, (hits[0].score if hits else 0.0)
-        except Exception:
+            score = hits[0]["similarity"] if hits else 0.0
+            return col, score
+        except Exception as e:
+            logger.warning("PROBE %s failed: %s", col, e)
             return col, 0.0
 
     probes: list[tuple[str, float]] = await _asyncio.gather(*[_probe(c) for c in all_cols])
