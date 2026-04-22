@@ -51,7 +51,13 @@ except Exception:
 _credentials = None
 if _sa_json_str:
     try:
+        import tempfile
         _sa_info = json.loads(_sa_json_str)
+        # Пишемо у тимчасовий файл — старий SDK читає тільки через GOOGLE_APPLICATION_CREDENTIALS
+        _tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        _tmp.write(_sa_json_str)
+        _tmp.close()
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _tmp.name
         _credentials = service_account.Credentials.from_service_account_info(
             _sa_info,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -60,7 +66,8 @@ if _sa_json_str:
     except Exception as _e:
         print(f"⚠  Не вдалося розпарсити service_account_json: {_e}")
 else:
-    print("⚠  service_account_json не знайдено в Supabase — спробуємо ADC")
+    print("⚠  service_account_json не знайдено в Supabase!")
+    print("   Запускай так: set -a && source /home/devops/app/.env && set +a && python3 test_chunk.py")
 
 print(f"Vertex AI project={_project}  location={_location}")
 
