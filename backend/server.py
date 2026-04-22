@@ -2770,72 +2770,50 @@ def _route_collections(
 
 # ── Intent classifier → вибір колекцій ───────────────────────────────────────
 
-# Описи колекцій: LLM бачить що реально є в кожній і вибирає напряму
-_COLLECTION_DESCRIPTIONS: dict[str, str] = {
-    "rada_civil":     "Цивільний кодекс, договори, власність, нерухомість, купівля-продаж, зобов'язання, нотаріат, сімейне право",
-    "rada_labor":     "КЗпП, трудові відносини, звільнення, відпустки, зарплата, соціальне страхування, охорона праці",
-    "rada_criminal":  "Кримінальний кодекс, КПК, злочини, покарання, кримінальна відповідальність",
-    "rada_finance":   "Податки, ПДВ, бюджет, банки, кредити, митниця, ЗЕД, цінні папери, бухоблік",
-    "rada_admin":     "Адміністративна відповідальність, штрафи, ліцензування, дозволи, регулювання",
-    "rada_housing":   "Житловий кодекс, ЖКГ, оренда житла, комунальні послуги, будівництво, приватизація",
-    "rada_land":      "Земельний кодекс, землекористування, оренда землі, сільське господарство",
-    "rada_court":     "ГПК, ЦПК, КАС, судові процедури, прокуратура, юстиція",
-    "rada_state":     "Конституція, держустрій, громадянство, паспорти, вибори",
-    "rada_personnel": "Держслужба, кадрове діловодство, нагороди, звання",
-    "rada_industry":  "Транспорт, зв'язок, промисловість, енергетика, підприємства, інвестиції",
-    "rada_intl":      "Міжнародні договори, міжнародне право",
-    "rada_other":     "Освіта, наука, культура, оборона, торгівля, регіональне",
-    "laws_kmu":       "Постанови КМУ: добові, норми витрат, ліцензійні умови, держрегулювання",
-    "laws_positions": "Правові позиції Верховного суду: ключові висновки по спорах",
-    "laws_supreme":   "Рішення Верховного суду",
-    "laws_ccu":       "Рішення Конституційного суду",
-    "laws_wiki":      "Правові статті та роз'яснення",
-}
-
-async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "") -> list[str]:
-    """Класифікує питання через Gemini → повертає список колекцій.
-    LLM бачить реальні описи колекцій і вибирає назви напряму — без hardcoded маппінгу."""
+async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "", query_vector: list | None = None) -> list[str]:
+    """Динамічний роутинг: паралельний vector pre-scan по всіх колекціях.
+    Кожна колекція отримує probe limit=1 — відбираємо ті де vector score > порогу.
+    Нульовий hardcoding: сам вектор вирішує які колекції релевантні."""
     import asyncio as _asyncio
-    try:
-        from vertexai.generative_models import GenerativeModel, GenerationConfig
-        _mn = settings_cache.get("intent_model", "gemini-2.5-flash")
-        _m = GenerativeModel(_mn)
+    from qdrant_storage import get_client as _get_qdrant
 
-        _available = {k: v for k, v in _COLLECTION_DESCRIPTIONS.items() if k in all_cols}
-        _cols_text = "\n".join(f"- {k}: {v}" for k, v in _available.items())
+    if query_vector is None:
+        logger.info("ROUTING: no vector → all collections")
+        return all_cols
 
-        prompt = (
-            "Для юридичного питання нижче вибери 3-5 найрелевантніших колекцій з бази знань.\n"
-            "Відповідь — ТІЛЬКИ назви колекцій через кому, без пояснень.\n"
-            "Якщо питання міждисциплінарне — вибирай з усіх відповідних колекцій.\n\n"
-            f"Доступні колекції:\n{_cols_text}\n\n"
-            f"Питання: {question}\n\nКолекції:"
-        )
-        resp = await _asyncio.to_thread(
-            _m.generate_content, prompt,
-            generation_config=GenerationConfig(temperature=0.0, max_output_tokens=100),
-        )
-        raw_text = resp.text.strip().lower() if resp.text.strip() else ""
-        # Залишаємо тільки [a-z_] в кожному токені — захист від крапок, лапок, дефісів
-        chosen = [re.sub(r"[^a-z_]", "", t) for t in re.split(r"[,\s\n]+", raw_text)]
-        result = [c for c in chosen if c in all_cols][:6]
+    _probe_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.4) - 0.10)
+    _always_include = {"laws_kmu", "laws_positions"}
+    _client = _get_qdrant()
 
-        if not result:
-            logger.info("INTENT raw=%r → fallback all collections", raw_text)
-            return all_cols
+    async def _probe(col: str) -> tuple[str, float]:
+        try:
+            hits = await _asyncio.to_thread(
+                _client.search,
+                collection_name=col,
+                query_vector=query_vector,
+                limit=1,
+                score_threshold=0.0,
+                with_payload=False,
+            )
+            return col, (hits[0].score if hits else 0.0)
+        except Exception:
+            return col, 0.0
 
-        # laws_kmu і laws_positions майже завжди корисні — додаємо якщо LLM пропустив
-        for _always in ["laws_kmu", "laws_positions"]:
-            if _always in all_cols and _always not in result:
-                result.append(_always)
+    probes: list[tuple[str, float]] = await _asyncio.gather(*[_probe(c) for c in all_cols])
+    probes.sort(key=lambda x: x[1], reverse=True)
+    logger.info("PROBE: %s", [(c, round(s, 3)) for c, s in probes])
 
-        logger.info("INTENT (raw=%r) → collections: %s", raw_text, result)
-        return result
-    except Exception as e:
-        _safe_default = ["rada_labor", "rada_civil", "laws_kmu", "rada_finance", "laws_positions"]
-        result = [c for c in _safe_default if c in all_cols] or all_cols
-        logger.info("INTENT classifier failed (%s) → safe default: %s", e, result)
-        return result
+    chosen = [col for col, score in probes if score >= _probe_threshold]
+    if len(chosen) < 3:
+        chosen = [col for col, _ in probes[:3]]
+    chosen = chosen[:7]
+
+    for _always in _always_include:
+        if _always in all_cols and _always not in chosen:
+            chosen.append(_always)
+
+    logger.info("ROUTING → %s", chosen)
+    return chosen
 
 
 # ── /ask — основний чат-ендпоінт ──────────────────────────────────────────────
@@ -2997,8 +2975,8 @@ async def ask(body: AskRequest):
     else:
         plan_collections = ALL_COLLECTIONS
 
-    # Крок 2: intent classifier звужує до релевантних в межах дозволених тарифом
-    target_collections = await _classify_and_route(search_question, plan_collections, _model_name)
+    # Крок 2: vector pre-scan звужує до релевантних колекцій в межах дозволених тарифом
+    target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.33))
