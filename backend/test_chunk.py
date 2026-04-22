@@ -12,6 +12,18 @@ SDK:
 
 import os, sys, math, time, json
 
+# Завантажуємо .env (так само як це робить server.py через python-dotenv)
+try:
+    from dotenv import load_dotenv
+    _env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+        print(f".env завантажено: {os.path.abspath(_env_path)}")
+    else:
+        load_dotenv()  # шукає .env в поточній директорії
+except ImportError:
+    print("⚠  python-dotenv не встановлено: pip install python-dotenv")
+
 # ── Налаштування ──────────────────────────────────────────────────────────────
 TEST_LAWS = [
     ("2011-12", "Закон про відпустки"),
