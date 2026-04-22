@@ -50,11 +50,14 @@ from rada_scanner import get_law_text
 from google.oauth2 import service_account
 
 try:
-    from settings_cache import settings_cache
+    import settings_cache as _sc_module
+    _sc_module.load()   # треба викликати явно (в server.py це робить lifespan)
+    settings_cache = _sc_module
     _project  = settings_cache.get("vertex_project_id", "") or settings_cache.get("vertex_project", "") or os.getenv("VERTEX_PROJECT", "urai-492512")
     _location = settings_cache.get("vertex_location", "us-central1") or "us-central1"
     _sa_json_str = settings_cache.get("service_account_json", "")
-except Exception:
+except Exception as _e:
+    print(f"⚠  settings_cache error: {_e}")
     _project     = os.getenv("VERTEX_PROJECT", "urai-492512")
     _location    = os.getenv("VERTEX_LOCATION", "us-central1")
     _sa_json_str = ""
