@@ -276,6 +276,7 @@ def _run_main(source: str | None = None, init_only: bool = False) -> None:
 
             for fut in as_completed(futs):
                 if _should_stop():
+                    _log(f"⏸ Отримано сигнал зупинки — завершуємо поточний батч...", "warning")
                     break
 
                 file_i, src, lid = futs[fut]
@@ -307,9 +308,9 @@ def _run_main(source: str | None = None, init_only: bool = False) -> None:
                     _save_state(state)
                     total_up = sum(s["uploaded"] for s in state["stats"].values())
                     _log(
-                        f"\n  📊 [{src}] {file_i+1}/{total} | "
+                        f"  📊 [{src}] {file_i+1}/{total} | "
                         f"uploaded={total_up} | "
-                        f"laws={st['laws']} chunks={st['chunks']} err={st['errors']}\n"
+                        f"laws={st['laws']} chunks={st['chunks']} err={st['errors']}"
                     )
 
             i += BATCH
@@ -317,7 +318,10 @@ def _run_main(source: str | None = None, init_only: bool = False) -> None:
     _save_state(state)
 
     if _should_stop():
-        _log("\n⏸ Зупинено. Запусти знову для продовження.")
+        idx_saved = state.get("file_idx", start_idx)
+        total_up  = sum(s.get("uploaded", 0) for s in state["stats"].values())
+        _log(f"💾 Стан збережено: позиція {idx_saved}/{total}, всього завантажено {total_up} чанків.", "warning")
+        _log(f"⏸ ЗУПИНЕНО о {datetime.now().strftime('%H:%M:%S')} — продовжити можна натиснувши «Продовжити».", "warning")
         return
 
     _log("\n" + "=" * 60)

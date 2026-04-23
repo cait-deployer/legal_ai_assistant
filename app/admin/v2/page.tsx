@@ -130,7 +130,7 @@ const STATUS_BADGE: Record<string, string> = {
 
 function levelColor(level: string): string {
   if (level === "error") return "text-red-400"
-  if (level === "warning") return "text-amber-400"
+  if (level === "warning") return "text-amber-300 font-semibold"
   if (level === "success") return "text-emerald-400"
   return "text-gray-400"
 }
@@ -386,12 +386,24 @@ function ReindexTab() {
   const [error, setError] = useState("")
   const [collectionsReady, setCollectionsReady] = useState<boolean | null>(null)
   const [initDone, setInitDone] = useState(false)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [stoppedAt, setStoppedAt] = useState<string | null>(null)
+  const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
+  const afterStopRef  = useRef(0)   // countdown of extra polls after stopped
 
   const fetchState = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/v2/reindex/logs")
-      if (res.ok) setState(await res.json())
+      if (res.ok) {
+        const data: ReindexPanelState = await res.json()
+        setState(prev => {
+          // detect running → stopped transition
+          if (prev?.running && !data.running && !data.pause_requested) {
+            setStoppedAt(new Date().toLocaleTimeString("uk-UA"))
+            afterStopRef.current = 4   // poll 4 more times to confirm
+          }
+          return data
+        })
+      }
     } catch { /* ignore */ }
   }, [])
 
@@ -412,14 +424,31 @@ function ReindexTab() {
     checkCollections()
   }, [fetchState, checkCollections])
 
+  // Adaptive polling: 1.5s while stopping, 3s while running, brief tail after stopped
   useEffect(() => {
-    if (state?.running) {
+    if (pollRef.current) clearInterval(pollRef.current)
+
+    const isStopping = state?.running && state?.pause_requested
+    const isRunning  = state?.running && !state?.pause_requested
+
+    if (isStopping) {
+      pollRef.current = setInterval(fetchState, 1500)
+    } else if (isRunning) {
       pollRef.current = setInterval(fetchState, 3000)
-    } else {
-      if (pollRef.current) clearInterval(pollRef.current)
+    } else if (afterStopRef.current > 0) {
+      pollRef.current = setInterval(() => {
+        afterStopRef.current -= 1
+        fetchState()
+        if (afterStopRef.current <= 0 && pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+        }
+      }, 2000)
     }
+
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [state?.running, fetchState])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.running, state?.pause_requested, fetchState])
 
   async function handleInit() {
     setLoading(true)
@@ -633,6 +662,24 @@ function ReindexTab() {
         </div>
       </div>
 
+      {/* Stopped banner */}
+      {stoppedAt && !state?.running && (
+        <div className="bg-[#111827] rounded-xl border border-red-500/30 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+            <span className="font-bold text-red-300">ЗУПИНЕНО</span>
+            <span className="text-gray-500">о {stoppedAt}</span>
+            {state?.can_resume && (
+              <span className="text-amber-400 text-xs">— прогрес збережено, можна продовжити</span>
+            )}
+          </div>
+          <button
+            onClick={() => setStoppedAt(null)}
+            className="text-gray-600 hover:text-gray-400 text-sm shrink-0"
+          >✕</button>
+        </div>
+      )}
+
       {/* Progress stats */}
       {statSources.length > 0 && (
         <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-3">
@@ -671,7 +718,15 @@ function ReindexTab() {
 
       {/* Logs */}
       <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-3">
-        <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Логи</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Логи</h3>
+          {state?.running && state?.pause_requested && (
+            <span className="text-xs text-amber-400 animate-pulse">Зупиняється, чекаємо завершення батчу...</span>
+          )}
+          {state?.running && !state?.pause_requested && (
+            <span className="text-xs text-emerald-400 animate-pulse">Виконується...</span>
+          )}
+        </div>
         <LogPanel logs={state?.live_logs ?? []} />
       </div>
     </div>
