@@ -92,7 +92,7 @@ REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переін�
 REINDEX_V2_STATE    = BASE_DIR / "reindex_v2_state.json"          # Реіндекс v2
 
 # ── V2 scraper sources ─────────────────────────────────────────────────────────
-V2_SCRAPE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki")
+V2_SCRAPE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions")
 
 def _scrape_v2_state_file(source: str) -> Path:
     return BASE_DIR / f"scrape_v2_{source}_state.json"
@@ -108,7 +108,7 @@ _SB_KEY = (
 _SOURCES = (
     "rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu",
     "reindex_kmu", "reindex_rada",
-    "scrape_v2_rada", "scrape_v2_kmu", "scrape_v2_ccu", "scrape_v2_supreme", "scrape_v2_wiki",
+    "scrape_v2_rada", "scrape_v2_kmu", "scrape_v2_ccu", "scrape_v2_supreme", "scrape_v2_wiki", "scrape_v2_positions",
     "reindex_v2",
 )
 _sync: dict[str, dict] = {
@@ -2112,7 +2112,7 @@ async def v2_disk():
     """Статистика диску: кількість файлів і розмір по кожному джерелу."""
     import shutil
     RAW_PATH = Path("/root/laws_raw")
-    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki"]
+    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
     result: dict = {}
     for src in SOURCES_V2:
         src_dir = RAW_PATH / src
@@ -2194,7 +2194,7 @@ async def v2_disk_files(
 ):
     """Пагінований список файлів на диску з пошуком за ID та назвою."""
     RAW_PATH   = Path("/root/laws_raw")
-    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki"]
+    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
     sources    = [source] if source else SOURCES_V2
     search_lc  = search.lower().strip() if search else None
 
