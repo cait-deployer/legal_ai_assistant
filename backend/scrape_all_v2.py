@@ -107,10 +107,11 @@ def _ensure_dir(source: str) -> str:
 
 def _save_law(source: str, law_id: str, text: str, meta: dict) -> None:
     d = _ensure_dir(source)
-    Path(os.path.join(d, f"{law_id}.txt")).write_text(text, "utf-8")
-    Path(os.path.join(d, f"{law_id}.meta.json")).write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), "utf-8"
-    )
+    txt_path  = Path(os.path.join(d, f"{law_id}.txt"))
+    meta_path = Path(os.path.join(d, f"{law_id}.meta.json"))
+    txt_path.parent.mkdir(parents=True, exist_ok=True)
+    txt_path.write_text(text, "utf-8")
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
 
 
 # ── ID list cache ──────────────────────────────────────────────────────────────
@@ -188,34 +189,60 @@ def _get_ids(source: str) -> list[dict]:
 
 # ── Text fetchers (one per source) ────────────────────────────────────────────
 def _fetch_rada(doc: dict) -> tuple[str, str, dict]:
-    from rada_scanner import get_law_text, BASE
+    from rada_scanner import get_law_text, get_law_metadata, detect_text_flags, BASE
+    from concurrent.futures import ThreadPoolExecutor
     law_id = doc["id"]
-    text   = get_law_text(law_id)
-    meta   = {
-        "law_id":   law_id,
-        "title":    doc.get("title", ""),
-        "source":   "rada",
-        "category": doc.get("category", ""),
-        "list_date": doc.get("list_date", ""),
-        "law_url":  f"{BASE}/laws/show/{law_id}",
-        "scraped_at": _now(),
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        ft = ex.submit(get_law_text, law_id)
+        fm = ex.submit(get_law_metadata, law_id)
+        text     = ft.result()
+        law_meta = fm.result()
+    flags = detect_text_flags(text) if text and text != "__RESTRICTED__" else {}
+    meta = {
+        "law_id":        law_id,
+        "title":         doc.get("title", ""),
+        "source":        "rada",
+        "category":      doc.get("category", ""),
+        "effective_date": law_meta.get("effective_date") or doc.get("list_date", ""),
+        "law_url":       f"{BASE}/laws/show/{law_id}",
+        "status":        law_meta.get("status", ""),
+        "doc_number":    law_meta.get("doc_number", ""),
+        "doc_type":      law_meta.get("doc_type", ""),
+        "author":        law_meta.get("author", ""),
+        "date_adopted":  law_meta.get("date_adopted", ""),
+        "scraped_at":    _now(),
+        **flags,
     }
     return law_id, text, meta
 
 
 def _fetch_kmu(doc: dict) -> tuple[str, str, dict]:
-    from rada_scanner import get_law_text, BASE
+    from rada_scanner import get_law_text, get_law_metadata, detect_text_flags, BASE
+    from concurrent.futures import ThreadPoolExecutor
     from kmu_scanner import _kmu_doc_type
-    raw_id = doc["id"]
-    law_id = f"kmu_{raw_id}"
-    text   = get_law_text(raw_id)
-    meta   = {
-        "law_id":   law_id,
-        "title":    doc.get("title", ""),
-        "source":   "kmu",
-        "doc_type": _kmu_doc_type(doc.get("title", ""), raw_id),
-        "law_url":  f"{BASE}/laws/show/{raw_id}",
-        "scraped_at": _now(),
+    raw_id   = doc["id"]
+    law_id   = f"kmu_{raw_id}"
+    doc_type = _kmu_doc_type(doc.get("title", ""), raw_id)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        ft = ex.submit(get_law_text, raw_id)
+        fm = ex.submit(get_law_metadata, raw_id)
+        text     = ft.result()
+        law_meta = fm.result()
+    flags = detect_text_flags(text) if text and text != "__RESTRICTED__" else {}
+    meta = {
+        "law_id":        law_id,
+        "title":         doc.get("title", ""),
+        "source":        "kmu",
+        "doc_type":      doc_type,
+        "category":      doc_type,
+        "law_url":       f"{BASE}/laws/show/{raw_id}",
+        "status":        law_meta.get("status", ""),
+        "doc_number":    law_meta.get("doc_number", ""),
+        "author":        law_meta.get("author", ""),
+        "date_adopted":  law_meta.get("date_adopted", ""),
+        "effective_date": law_meta.get("effective_date") or doc.get("list_date", ""),
+        "scraped_at":    _now(),
+        **flags,
     }
     return law_id, text, meta
 
@@ -232,14 +259,14 @@ def _fetch_ccu(doc: dict) -> tuple[str, str, dict]:
     text = _extract_pdf_text(pdf_url) if pdf_url else ""
 
     meta = {
-        "law_id":   law_id,
-        "title":    doc.get("title", ""),
-        "source":   "ccu",
-        "doc_num":  doc_num,
-        "date":     doc.get("date", ""),
-        "pdf_url":  pdf_url or "",
-        "doc_url":  doc.get("doc_url", ""),
-        "scraped_at": _now(),
+        "law_id":        law_id,
+        "title":         doc.get("title", ""),
+        "source":        "ccu",
+        "doc_number":    doc_num,
+        "effective_date": doc.get("date", ""),
+        "pdf_url":       pdf_url or "",
+        "doc_url":       doc.get("doc_url", ""),
+        "scraped_at":    _now(),
     }
     return law_id, text, meta
 
@@ -294,7 +321,11 @@ def _fetch_wiki(doc: dict) -> tuple[str, str, dict]:
     import httpx
     from bs4 import BeautifulSoup
     title  = doc["title"]
-    law_id = f"wiki_{re.sub(r'[^\\w]', '_', title)}"
+    # Truncate slug so filename stays < 255 bytes on ext4 (Cyrillic = 2 bytes/char)
+    slug = re.sub(r'[^\w]', '_', title)
+    while len(f"wiki_{slug}.meta.json".encode('utf-8')) > 250:
+        slug = slug[:-1].rstrip('_')
+    law_id = f"wiki_{slug}"
 
     text = ""
     try:
@@ -335,6 +366,26 @@ _FETCHERS = {
     "wiki":    _fetch_wiki,
 }
 
+# Fields that must be non-empty in meta.json; if any are missing → re-scrape
+_REQUIRED_META: dict[str, list[str]] = {
+    "rada": ["status", "doc_number", "effective_date", "doc_type"],
+}
+
+
+def _meta_incomplete(source: str, law_id: str) -> bool:
+    """True if saved meta.json is missing required fields → need re-scrape."""
+    required = _REQUIRED_META.get(source)
+    if not required:
+        return False
+    meta_path = Path(os.path.join(RAW_DIR, source, f"{law_id}.meta.json"))
+    if not meta_path.exists():
+        return True
+    try:
+        meta = json.loads(meta_path.read_text("utf-8"))
+        return any(not meta.get(f) for f in required)
+    except Exception:
+        return True
+
 
 # ── Process single document ───────────────────────────────────────────────────
 def _process_one(source: str, doc: dict, status: dict) -> str:
@@ -342,7 +393,7 @@ def _process_one(source: str, doc: dict, status: dict) -> str:
     law_id = _law_id_for(source, doc)
 
     with _status_lock:
-        if status.get(law_id, {}).get("status") == "ok":
+        if status.get(law_id, {}).get("status") == "ok" and not _meta_incomplete(source, law_id):
             return "skipped"
 
     try:
@@ -390,10 +441,11 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
     stats = state["stats"]
     total = len(items)
     processed = 0
+    session_error_docs: list[dict] = []  # errors from this run — for retry on stop
 
     use_threads = source in ("rada", "kmu")
-
     _ST_ICON = {"ok": "✅", "empty": "⚠️", "restricted": "🔒", "error": "❌", "skipped": "⏭️"}
+    stopped = False
 
     if use_threads:
         i = start_idx
@@ -411,6 +463,8 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
                     except Exception as ex2:
                         _log(f"  ❌ [{j+1}/{total}] {law_id}: {ex2}", "error")
                         st = "error"
+                    if st == "error":
+                        session_error_docs.append(doc)
                     stats[st] = stats.get(st, 0) + 1
                     processed += 1
                     icon = _ST_ICON.get(st, "?")
@@ -426,13 +480,18 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
                 f"ok={stats.get('ok',0)} skip={stats.get('skipped',0)} "
                 f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}\n"
             )
+
+        stopped = _should_stop() and i < total
     else:
         for j in range(start_idx, total):
             if _should_stop():
+                stopped = True
                 break
             doc    = items[j]
             law_id = _law_id_for(source, doc)
             st = _process_one(source, doc, status)
+            if st == "error":
+                session_error_docs.append(doc)
             stats[st] = stats.get(st, 0) + 1
             processed += 1
             state["inner_idx"] = j + 1
@@ -449,14 +508,38 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
                     f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}\n"
                 )
 
-    state["inner_idx"] = total
-    _save_state(state, source)
-    _save_status(status)
-    _log(
-        f"\n✅ [{source}] ЗАВЕРШЕНО: "
-        f"ok={stats.get('ok',0)} skip={stats.get('skipped',0)} "
-        f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}"
-    )
+    # ── Retry session errors before stopping ────────────────────────────────────
+    if stopped and session_error_docs:
+        _log(
+            f"\n🔄 [{source}] Повторна спроба {len(session_error_docs)} помилок перед зупинкою...",
+            "warning",
+        )
+        stats["error"] = max(0, stats.get("error", 0) - len(session_error_docs))
+        retry_fixed = 0
+        for doc in session_error_docs:
+            law_id = _law_id_for(source, doc)
+            with _status_lock:
+                status.pop(law_id, None)  # clear so _process_one retries
+            st = _process_one(source, doc, status)
+            stats[st] = stats.get(st, 0) + 1
+            icon = _ST_ICON.get(st, "?")
+            _log(f"  {icon} [retry] {law_id} — {st}")
+            if st != "error":
+                retry_fixed += 1
+        _log(f"  🔄 Retry: {retry_fixed}/{len(session_error_docs)} виправлено")
+        _save_state(state, source)
+        _save_status(status)
+
+    # ── Final state ─────────────────────────────────────────────────────────────
+    if not stopped:
+        state["inner_idx"] = total
+        _save_state(state, source)
+        _save_status(status)
+        _log(
+            f"\n✅ [{source}] ЗАВЕРШЕНО: "
+            f"ok={stats.get('ok',0)} skip={stats.get('skipped',0)} "
+            f"empty={stats.get('empty',0)} restr={stats.get('restricted',0)} err={stats.get('error',0)}"
+        )
 
 
 # ── Internal run logic (always single source) ─────────────────────────────────
@@ -534,11 +617,18 @@ def main() -> None:
     sources_to_run = [args.source] if args.source else SOURCES
 
     if args.reset:
+        status = _load_status()
         for src in sources_to_run:
             sf = _state_file(src)
             if os.path.exists(sf):
                 os.unlink(sf)
                 print(f"🔄 Стан скинуто для {src}.")
+            before = len(status)
+            status = {k: v for k, v in status.items() if v.get("source") != src}
+            removed = before - len(status)
+            if removed:
+                print(f"🔄 Видалено {removed} записів з scrape_status.json для {src}.")
+        _save_status(status)
 
     _stop_main = threading.Event()
 

@@ -210,27 +210,36 @@ def get_existing_laws_meta(collection_name: str) -> dict:
     """
     Повертає {law_id: {scraped_at, effective_date}} для однієї колекції.
     Використовує тільки chunk_index=0 щоб не дублювати.
+    Пагінує scroll щоб не обмежуватись 10000 документів.
     """
+    out: dict = {}
     try:
-        result, _ = get_client().scroll(
-            collection_name=collection_name,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
-            ),
-            with_payload=["law_id", "scraped_at", "effective_date"],
-            limit=10000,
+        client = get_client()
+        scroll_filter = Filter(
+            must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
         )
-        return {
-            p.payload["law_id"]: {
-                "scraped_at":     p.payload.get("scraped_at", "1970-01-01T00:00:00"),
-                "effective_date": p.payload.get("effective_date", ""),
-                "collection_name": collection_name,
-            }
-            for p in result if "law_id" in p.payload
-        }
+        offset = None
+        while True:
+            points, next_offset = client.scroll(
+                collection_name=collection_name,
+                scroll_filter=scroll_filter,
+                with_payload=["law_id", "scraped_at", "effective_date"],
+                limit=1000,
+                offset=offset,
+            )
+            for p in points:
+                if "law_id" in p.payload:
+                    out[p.payload["law_id"]] = {
+                        "scraped_at":     p.payload.get("scraped_at", "1970-01-01T00:00:00"),
+                        "effective_date": p.payload.get("effective_date", ""),
+                        "collection_name": collection_name,
+                    }
+            if next_offset is None:
+                break
+            offset = next_offset
     except Exception as e:
         print(f"⚠️  get_existing_laws_meta [{collection_name}]: {e}")
-        return {}
+    return out
 
 
 def get_all_existing_laws_meta() -> dict:

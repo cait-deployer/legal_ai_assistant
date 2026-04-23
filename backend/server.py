@@ -2119,10 +2119,11 @@ async def v2_disk():
         if not src_dir.exists():
             result[src] = {"files": 0, "size_mb": 0, "recent": []}
             continue
-        txt_files = sorted(src_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+        txt_files = sorted(src_dir.glob("**/*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
         total_size = sum(p.stat().st_size for p in txt_files)
         recent = []
         for p in txt_files[:5]:
+            law_id_str = str(p.relative_to(src_dir))[:-len(".txt")]
             meta_path = p.parent / f"{p.stem}.meta.json"
             title = ""
             if meta_path.exists():
@@ -2131,7 +2132,7 @@ async def v2_disk():
                 except Exception:
                     pass
             recent.append({
-                "law_id":   p.stem,
+                "law_id":   law_id_str,
                 "size_kb":  round(p.stat().st_size / 1024, 1),
                 "title":    title,
                 "mtime":    datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
@@ -2172,13 +2173,9 @@ async def v2_disk_files(
         src_dir = RAW_PATH / src
         if not src_dir.exists():
             continue
-        for txt_path in src_dir.glob("*.txt"):
-            law_id_val = txt_path.stem
-            # Quick ID filter before reading meta
-            if search_lc and search_lc not in law_id_val.lower():
-                # Still need to check title — defer
-                pass
-            meta_path = txt_path.parent / f"{law_id_val}.meta.json"
+        for txt_path in src_dir.glob("**/*.txt"):
+            law_id_val = str(txt_path.relative_to(src_dir))[:-len(".txt")]
+            meta_path = txt_path.parent / f"{txt_path.stem}.meta.json"
             title = ""
             if meta_path.exists():
                 try:

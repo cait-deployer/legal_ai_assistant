@@ -108,10 +108,10 @@ def _discover_files(sources: list[str]) -> list[tuple[str, str, str]]:
         src_dir = os.path.join(RAW_DIR, source)
         if not os.path.isdir(src_dir):
             continue
-        for meta_path in sorted(Path(src_dir).glob("*.meta.json")):
-            # "law_id.meta.json" → law_id = name without ".meta.json"
-            law_id   = meta_path.name[: -len(".meta.json")]
-            txt_path = meta_path.parent / f"{law_id}.txt"
+        for meta_path in sorted(Path(src_dir).glob("**/*.meta.json")):
+            # relative path → law_id (supports nested IDs like "1529/2005")
+            law_id   = str(meta_path.relative_to(src_dir))[: -len(".meta.json")]
+            txt_path = meta_path.with_suffix("").with_suffix(".txt")
             if txt_path.exists():
                 result.append((source, law_id, str(meta_path)))
     return result
@@ -137,16 +137,24 @@ def _build_payload(meta: dict, chunk_text: str, chunk_idx: int, collection: str)
         or ""
     )
     return {
-        "source":         f"{prefix}{title}",
-        "law_id":         meta["law_id"],
-        "law_url":        law_url,
-        "law_domain":     collection,
-        "category":       meta.get("category", ""),
-        "doc_type":       meta.get("doc_type", ""),
-        "effective_date": meta.get("effective_date", ""),
-        "scraped_at":     meta.get("scraped_at", ""),
-        "chunk_index":    chunk_idx,
-        "content":        chunk_text,
+        "source":            f"{prefix}{title}",
+        "law_id":            meta["law_id"],
+        "law_url":           law_url,
+        "law_domain":        collection,
+        "category":          meta.get("category", ""),
+        "doc_type":          meta.get("doc_type", ""),
+        "status":            meta.get("status", ""),
+        "doc_number":        meta.get("doc_number", ""),
+        "author":            meta.get("author", ""),
+        "date_adopted":      meta.get("date_adopted", ""),
+        "effective_date":    meta.get("effective_date", ""),
+        "is_retroactive":    meta.get("is_retroactive", False),
+        "wartime_only":      meta.get("wartime_only", False),
+        "is_suspended":      meta.get("is_suspended", False),
+        "has_transitional":  meta.get("has_transitional", False),
+        "scraped_at":        meta.get("scraped_at", ""),
+        "chunk_index":       chunk_idx,
+        "content":           chunk_text,
     }
 
 
@@ -167,7 +175,7 @@ def _process_law(source: str, law_id: str, meta_path: str) -> dict:
         stats["errors"] = 1
         return stats
 
-    txt_path = Path(meta_path).parent / f"{law_id}.txt"
+    txt_path = Path(meta_path).with_suffix("").with_suffix(".txt")
     if not txt_path.exists():
         _log(f"  ⚠️ .txt відсутній: {law_id}")
         stats["errors"] = 1

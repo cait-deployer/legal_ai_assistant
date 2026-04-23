@@ -94,7 +94,7 @@ type DiskState = {
 type LawPreview = {
   law_id: string
   source: string
-  meta: Record<string, string>
+  meta: Record<string, unknown>
   text: string
   size_kb: number
   chars: number
@@ -136,14 +136,27 @@ function levelColor(level: string): string {
 }
 
 function LogPanel({ logs }: { logs: LogEntry[] }) {
-  const endRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const userScrolledUp = useRef(false)
+
+  function handleScroll() {
+    const el = containerRef.current
+    if (!el) return
+    userScrolledUp.current = el.scrollHeight - el.scrollTop - el.clientHeight > 40
+  }
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = containerRef.current
+    if (!el || userScrolledUp.current) return
+    el.scrollTop = el.scrollHeight
   }, [logs])
 
   return (
-    <div className="font-mono text-[11px] h-[400px] overflow-y-auto bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 p-3 space-y-0.5">
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="font-mono text-[11px] h-[400px] overflow-y-auto bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 p-3 space-y-0.5"
+    >
       {logs.length === 0 && (
         <span className="text-gray-600">Очікування запуску...</span>
       )}
@@ -155,7 +168,6 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
           <span className={levelColor(l.level)}>{l.message}</span>
         </div>
       ))}
-      <div ref={endRef} />
     </div>
   )
 }
@@ -1210,24 +1222,50 @@ function DiskTab() {
 
           {preview && (
             <div className="space-y-3">
-              <div className="bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4 space-y-2">
+              <div className="bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4 space-y-3">
+                {/* Title row */}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
                   <span className="font-mono font-bold text-[#C9A84C]">{preview.law_id}</span>
                   <span>·</span><span>{preview.source}</span>
                   <span>·</span><span>{preview.size_kb} KB</span>
                   <span>·</span><span>{preview.chars.toLocaleString()} символів</span>
-                  {preview.meta.effective_date && <><span>·</span><span>{preview.meta.effective_date}</span></>}
-                  {preview.meta.category && <><span>·</span><span>{preview.meta.category}</span></>}
                   {preview.meta.law_url && (
                     <><span>·</span>
-                    <a href={preview.meta.law_url} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
+                    <a href={String(preview.meta.law_url)} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
                       Відкрити на сайті →
                     </a></>
                   )}
                 </div>
                 {preview.meta.title && (
-                  <div className="text-sm font-semibold text-[#E0E6ED]">{preview.meta.title}</div>
+                  <div className="text-sm font-semibold text-[#E0E6ED]">{String(preview.meta.title)}</div>
                 )}
+                {/* Metadata grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs">
+                  {[
+                    ["Статус",        preview.meta.status],
+                    ["Тип документа", preview.meta.doc_type],
+                    ["Номер",         preview.meta.doc_number],
+                    ["Автор",         preview.meta.author],
+                    ["Дата прийняття",preview.meta.date_adopted],
+                    ["Набр. чинності",preview.meta.effective_date],
+                    ["Категорія",     preview.meta.category],
+                    ["Scraped at",    preview.meta.scraped_at],
+                  ].map(([label, val]) => val ? (
+                    <div key={String(label)} className="flex gap-1">
+                      <span className="text-gray-600 shrink-0">{label}:</span>
+                      <span className={`truncate ${label === "Статус" && String(val).includes("Чинний") ? "text-emerald-400" : label === "Статус" ? "text-amber-400" : "text-gray-300"}`}>
+                        {String(val)}
+                      </span>
+                    </div>
+                  ) : null)}
+                </div>
+                {/* Boolean flags */}
+                <div className="flex flex-wrap gap-1.5">
+                  {preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
+                  {preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
+                  {preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
+                  {preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
+                </div>
               </div>
               <pre className="font-mono text-[11px] text-gray-300 whitespace-pre-wrap break-words max-h-[600px] overflow-y-auto leading-relaxed bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4">
                 {preview.text}
