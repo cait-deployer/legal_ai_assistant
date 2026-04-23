@@ -75,7 +75,7 @@ function StatusBadge({ status }: { status?: string }) {
             isActive ? 'bg-[#0A0E1A] text-emerald-400' : 'bg-[#0A0E1A] text-red-400'
         }`}>
             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-emerald-400' : 'bg-red-400'}`} />
-            {status}
+            <span className="whitespace-nowrap mt-0.5">{status}</span>
         </span>
     );
 }
