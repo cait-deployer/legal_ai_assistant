@@ -102,7 +102,7 @@ type LawPreview = {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki"]
+const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
 
 const RADA_COLLECTIONS = [
   "rada_finance", "rada_state", "rada_personnel", "rada_court",
@@ -200,11 +200,12 @@ function RunningBadge({ running, paused }: { running: boolean; paused: boolean }
 // ── Source labels ───────────────────────────────────────────────────────────────
 
 const SOURCE_LABELS: Record<string, string> = {
-  rada:    "Верховна Рада (~15 500 законів)",
-  kmu:     "Кабінет Міністрів",
-  ccu:     "Конституційний суд",
-  supreme: "Верховний суд",
-  wiki:    "Вікіпедія (юридичні терміни)",
+  rada:      "Верховна Рада (~15 500 законів)",
+  kmu:       "Кабінет Міністрів",
+  ccu:       "Конституційний суд",
+  supreme:   "Верховний суд",
+  wiki:      "Вікіпедія (юридичні терміни)",
+  positions: "Правові позиції ВС (~12 800 позицій)",
 }
 
 const DEFAULT_SOURCE_STATE: SourceState = {

@@ -28,33 +28,36 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reindex_v
 WORKERS    = 4     # паралельні воркери (1 закон = усі його чанки = 1 завдання)
 SAVE_EVERY = 20    # зберігати стан кожні N законів
 
-SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki"]
+SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
 
 SOURCE_TO_V2_COLLECTION = {
-    "kmu":     "laws_kmu_v2",
-    "ccu":     "laws_ccu_v2",
-    "supreme": "laws_supreme_v2",
-    "wiki":    "laws_wiki_v2",
+    "kmu":       "laws_kmu_v2",
+    "ccu":       "laws_ccu_v2",
+    "supreme":   "laws_supreme_v2",
+    "wiki":      "laws_wiki_v2",
+    "positions": "laws_positions_v2",
 }
 
 SPLITTERS = {
-    "rada":    MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300),
-    "kmu":     MarkdownTextSplitter(chunk_size=4000, chunk_overlap=400),
-    "ccu":     RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
-    "supreme": RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
-    "wiki":    RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
+    "rada":      MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300),
+    "kmu":       MarkdownTextSplitter(chunk_size=4000, chunk_overlap=400),
+    "ccu":       RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
+    "supreme":   RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
+    "wiki":      RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
+    "positions": RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
 }
 
 TRUNCATE = {
-    "rada": 8000, "kmu": 15000, "ccu": 15000, "supreme": 15000, "wiki": 8000,
+    "rada": 8000, "kmu": 15000, "ccu": 15000, "supreme": 15000, "wiki": 8000, "positions": 8000,
 }
 
 SOURCE_PREFIX = {
-    "rada":    "",
-    "kmu":     "КМУ: ",
-    "ccu":     "КСУ: ",
-    "supreme": "ВС: ",
-    "wiki":    "Wiki: ",
+    "rada":      "",
+    "kmu":       "КМУ: ",
+    "ccu":       "КСУ: ",
+    "supreme":   "ВС: ",
+    "wiki":      "Wiki: ",
+    "positions": "Позиція ВС: ",
 }
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

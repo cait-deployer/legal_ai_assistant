@@ -33,7 +33,7 @@ WORKERS     = 4            # паралельні воркери для HTTP (Ra
 BATCH_SIZE  = 100          # скільки документів на батч ThreadPoolExecutor
 SAVE_EVERY  = 50           # зберігати стан кожні N документів
 
-SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki"]
+SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
 
 sys.path.insert(0, BASE_DIR)
 
@@ -173,6 +173,8 @@ def _law_id_for(source: str, doc: dict) -> str:
         return f"sc_{safe}"
     if source == "wiki":
         return f"wiki_{_wiki_slug(doc.get('title', ''))}"
+    if source == "positions":
+        return f"lpd_{doc.get('id', 'unknown')}"
     return "unknown"
 
 
@@ -200,6 +202,9 @@ def _get_ids(source: str) -> list[dict]:
     elif source == "wiki":
         from wiki_scanner import get_all_wiki_articles
         items = get_all_wiki_articles()
+    elif source == "positions":
+        from lpd_scanner import fetch_all_positions
+        items = fetch_all_positions(log=_log)
     else:
         items = []
 
@@ -408,20 +413,63 @@ def _fetch_wiki(doc: dict) -> tuple[str, str, dict]:
     return law_id, text, meta
 
 
+def _fetch_positions(doc: dict) -> tuple[str, str, dict]:
+    from lpd_scanner import strip_html, COURT_TAG_MAP
+    pos_id = doc.get("id")
+    law_id = f"lpd_{pos_id}"
+
+    text  = strip_html(doc.get("text") or "")
+    title = (doc.get("title") or "").strip()
+
+    tag        = doc.get("tag") or {}
+    court_tag  = tag.get("title", "")
+    court_abbr = COURT_TAG_MAP.get(court_tag, court_tag or "ВС")
+
+    cats             = doc.get("categories") or []
+    category_titles  = [c.get("title", "") for c in cats if c.get("title")]
+    primary_category = category_titles[0] if category_titles else "Правові позиції ВС"
+
+    documents    = doc.get("documents") or []
+    case_numbers = [d.get("caseNumber", "") for d in documents if d.get("caseNumber")]
+
+    approved_at = doc.get("approvedAt", "")
+
+    meta = {
+        "law_id":         law_id,
+        "title":          title,
+        "source":         "positions",
+        "doc_type":       "Правова позиція",
+        "category":       primary_category,
+        "author":         court_abbr,
+        "law_url":        f"https://lpd.court.gov.ua/legal-position/{pos_id}",
+        "doc_number":     "",
+        "date_adopted":   approved_at,
+        "effective_date": approved_at,
+        "status":         "",
+        "case_numbers":   ", ".join(case_numbers[:5]),
+        "court_tag":      court_tag,
+        "court_abbr":     court_abbr,
+        "scraped_at":     _now(),
+    }
+    return law_id, text, meta
+
+
 _FETCHERS = {
-    "rada":    _fetch_rada,
-    "kmu":     _fetch_kmu,
-    "ccu":     _fetch_ccu,
-    "supreme": _fetch_supreme,
-    "wiki":    _fetch_wiki,
+    "rada":      _fetch_rada,
+    "kmu":       _fetch_kmu,
+    "ccu":       _fetch_ccu,
+    "supreme":   _fetch_supreme,
+    "wiki":      _fetch_wiki,
+    "positions": _fetch_positions,
 }
 
 # Fields that must be non-empty in meta.json; if any are missing → re-scrape
 _REQUIRED_META: dict[str, list[str]] = {
-    "rada":    ["status", "doc_number", "effective_date", "doc_type"],
-    "kmu":     ["status", "doc_number", "doc_type"],
-    "ccu":     ["doc_type", "category"],
-    "supreme": ["category", "doc_type"],
+    "rada":      ["status", "doc_number", "effective_date", "doc_type"],
+    "kmu":       ["status", "doc_number", "doc_type"],
+    "ccu":       ["doc_type", "category"],
+    "supreme":   ["category", "doc_type"],
+    "positions": ["doc_type", "category", "law_url"],
 }
 
 
