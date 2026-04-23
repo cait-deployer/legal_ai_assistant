@@ -166,7 +166,7 @@ def _law_id_for(source: str, doc: dict) -> str:
     if source == "kmu":
         return f"kmu_{doc['id']}"
     if source == "ccu":
-        return f"ccu_{re.sub(r'[^\\w]', '_', doc.get('doc_num', ''))}"
+        return f"ccu_{re.sub(r'[^\w]', '_', doc.get('doc_num', ''))}"
     if source == "supreme":
         filename = doc["url"].rstrip("/").split("/")[-1]
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in os.path.splitext(filename)[0])[:60]
@@ -272,7 +272,7 @@ def _fetch_ccu(doc: dict) -> tuple[str, str, dict]:
     from ccu_scanner import _extract_pdf_text, _get_pdf_url_from_doc_page
     from rada_scanner import detect_text_flags
     doc_num  = doc.get("doc_num", "")
-    law_id   = f"ccu_{re.sub(r'[^\\w]', '_', doc_num)}"
+    law_id   = f"ccu_{re.sub(r'[^\w]', '_', doc_num)}"
     doc_type = _ccu_doc_type(doc_num)
 
     pdf_url = doc.get("pdf_url")

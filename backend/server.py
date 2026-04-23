@@ -2153,6 +2153,36 @@ async def v2_disk():
     return {"sources": result, "total_mb": total_mb}
 
 
+@app.get("/admin/v2/disk/by-collection")
+async def v2_disk_by_collection():
+    """Статистика диску Ради по v2-колекціях (розбивка за категоріями)."""
+    from qdrant_storage import get_v2_collection_for_category, RADA_V2_COLLECTIONS
+    RAW_PATH = Path("/root/laws_raw") / "rada"
+    if not RAW_PATH.exists():
+        return {"collections": {}}
+
+    counts: dict[str, int] = {}
+    errors = 0
+    for meta_path in RAW_PATH.glob("**/*.meta.json"):
+        try:
+            meta = json.loads(meta_path.read_text("utf-8"))
+            col = get_v2_collection_for_category(meta.get("category", ""))
+            counts[col] = counts.get(col, 0) + 1
+        except Exception:
+            errors += 1
+
+    for col in RADA_V2_COLLECTIONS:
+        if col not in counts:
+            counts[col] = 0
+
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "errors": errors,
+        "collections": dict(sorted(counts.items(), key=lambda x: -x[1])),
+    }
+
+
 @app.get("/admin/v2/disk/files")
 async def v2_disk_files(
     source:  str | None = None,

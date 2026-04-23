@@ -691,6 +691,8 @@ function AnalyticsTab() {
   const [filterSource, setFilterSource] = useState("")
   const [offset, setOffset] = useState(0)
   const [qdrantOpen, setQdrantOpen] = useState(false)
+  const [colStats, setColStats] = useState<{ total: number; collections: Record<string, number> } | null>(null)
+  const [colOpen, setColOpen] = useState(true)
   const lawsRef = useRef<HTMLDivElement>(null)
   const PAGE_SIZE = 50
 
@@ -708,6 +710,10 @@ function AnalyticsTab() {
 
   useEffect(() => {
     fetchData(0)
+    fetch("/api/admin/v2/disk/by-collection")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setColStats(d))
+      .catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -837,6 +843,48 @@ function AnalyticsTab() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Rada disk breakdown by collection */}
+      {colStats && (
+        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 overflow-hidden">
+          <button
+            onClick={() => setColOpen(o => !o)}
+            className="w-full flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-[#C9A84C]/5 transition-colors"
+          >
+            <div>
+              <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider text-left">Рада — файли по колекціях</h3>
+              <p className="text-xs text-gray-500 mt-0.5 text-left">Всього на диску: {colStats.total.toLocaleString()} файлів</p>
+            </div>
+            <span className="text-gray-500 text-lg leading-none">{colOpen ? "▲" : "▼"}</span>
+          </button>
+          {colOpen && (
+            <div className="px-4 sm:px-6 pb-4 space-y-2">
+              {Object.entries(colStats.collections).map(([col, count]) => {
+                const max = Math.max(...Object.values(colStats.collections))
+                const pct = max > 0 ? Math.round((count / max) * 100) : 0
+                const isEmpty = count === 0
+                const shortName = col.replace("_v2", "").replace("laws_", "").replace("rada_", "")
+                return (
+                  <div key={col} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className={`font-mono ${isEmpty ? "text-red-400" : "text-[#E0E6ED]"}`}>{shortName}</span>
+                      <span className={`font-bold tabular-nums ${isEmpty ? "text-red-400" : "text-[#C9A84C]"}`}>
+                        {isEmpty ? "ПОРОЖНЬО" : count.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-[#C9A84C]/10 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${isEmpty ? "bg-red-500/50" : "bg-[#C9A84C]"}`}
+                        style={{ width: `${Math.max(pct, isEmpty ? 2 : 0)}%` }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
