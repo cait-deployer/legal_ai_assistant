@@ -71,9 +71,10 @@ function StatusBadge({ status }: { status?: string }) {
     if (!status || status === 'Невідомо') return null;
     const isActive = status.toLowerCase().includes('чинний') && !status.toLowerCase().includes('втратив');
     return (
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider mt-2 ${isActive ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
-            }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-red-500'}`} />
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest mt-2 ${
+            isActive ? 'bg-[#0A0E1A] text-emerald-400' : 'bg-[#0A0E1A] text-red-400'
+        }`}>
+            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-emerald-400' : 'bg-red-400'}`} />
             {status}
         </span>
     );
@@ -528,23 +529,23 @@ function ChatPage() {
 
             {/* Citation Dialog */}
             <Dialog open={!!activeCitation} onOpenChange={o => !o && setActiveCitation(null)}>
-                <DialogContent className="max-w-2xl bg-[#0d1120] rounded-[2rem] border border-[#C9A84C]/40 shadow-2xl p-0 overflow-hidden text-[#E0E6ED]">
-                    <div className="bg-[#C9A84C] p-8 text-[#0A0E1A]">
-                        <div className="flex items-start gap-5">
-                            <div className="bg-[#0A0E1A] p-3 rounded-2xl shadow-xl shrink-0">
-                                <BookOpenText className="h-6 w-6 text-[#C9A84C]" />
+                <DialogContent className="w-[calc(100vw-2rem)] max-w-xl sm:max-w-2xl bg-[#0d1120] rounded-xl border border-[#C9A84C]/40 shadow-2xl p-0 overflow-hidden text-[#E0E6ED]">
+                    <div className="bg-[#C9A84C] p-5 sm:p-7 text-[#0A0E1A]">
+                        <div className="flex items-start gap-4">
+                            <div className="bg-[#0A0E1A] p-2.5 rounded-lg shadow-lg shrink-0 mt-0.5">
+                                <BookOpenText className="h-5 w-5 text-[#C9A84C]" />
                             </div>
                             <div className="min-w-0">
-                                <span className="text-[10px] font-black text-[#0A0E1A]/60 uppercase tracking-[0.2em] block mb-1">Джерело №{activeCitation?.num}</span>
-                                <DialogTitle className="font-serif font-bold text-xl leading-tight">{activeCitation?.source_title}</DialogTitle>
+                                <span className="text-[9px] font-black text-[#0A0E1A]/50 uppercase tracking-[0.2em] block mb-1">Джерело №{activeCitation?.num}</span>
+                                <DialogTitle className="font-serif font-bold text-base sm:text-lg leading-snug">{activeCitation?.source_title}</DialogTitle>
                                 <StatusBadge status={activeCitation?.status} />
                             </div>
                         </div>
                     </div>
-                    <ScrollArea className="max-h-[380px] bg-[#0A0E1A]/40">
-                        <div className="p-8">
-                            <div className="relative pl-5 border-l-2 border-[#C9A84C]/50">
-                                <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest mb-3">
+                    <ScrollArea className="max-h-[40vh] sm:max-h-[360px] bg-[#0A0E1A]/40">
+                        <div className="p-5 sm:p-7">
+                            <div className="relative pl-4 border-l-2 border-[#C9A84C]/50">
+                                <p className="text-[9px] font-black text-[#C9A84C]/50 uppercase tracking-widest mb-2.5">
                                     Уривок #{activeCitation?.num}
                                     {activeCitation?.chunk_index !== undefined ? ` · фрагмент ${activeCitation.chunk_index + 1}` : ""}
                                 </p>
@@ -555,9 +556,9 @@ function ChatPage() {
                         </div>
                     </ScrollArea>
                     {activeCitation?.law_url && (
-                        <div className="px-10 py-6 border-t border-[#C9A84C]/10 bg-[#0d1120]">
-                            <a href={activeCitation.law_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2.5 text-xs font-black text-[#C9A84C] hover:text-[#E2C47A] transition-all uppercase tracking-widest group">
-                                <ExternalLink className="h-4 w-4 group-hover:scale-110 transition-transform" /> Читати повний текст
+                        <div className="px-5 sm:px-7 py-4 border-t border-[#C9A84C]/10 bg-[#0d1120]">
+                            <a href={activeCitation.law_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-black text-[#C9A84C] hover:text-[#E2C47A] transition-all uppercase tracking-widest group">
+                                <ExternalLink className="h-3.5 w-3.5 group-hover:scale-110 transition-transform" /> Читати повний текст
                             </a>
                         </div>
                     )}
