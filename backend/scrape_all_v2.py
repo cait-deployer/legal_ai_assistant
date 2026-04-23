@@ -391,10 +391,18 @@ def _fetch_wiki(doc: dict) -> tuple[str, str, dict]:
         _log(f"  ⚠️ Wiki fetch {law_id}: {ex}")
 
     meta = {
-        "law_id": law_id,
-        "title":  title,
-        "source": "wiki",
-        "url":    doc.get("url", ""),
+        "law_id":   law_id,
+        "title":    title,
+        "source":   "wiki",
+        "url":      doc.get("url", ""),
+        "law_url":  doc.get("url", ""),
+        "category": "Роз'яснення та шаблони",
+        "doc_type": "Стаття Wiki",
+        "author":   "legalaid.wiki",
+        "status":   "",
+        "doc_number":    "",
+        "date_adopted":  "",
+        "effective_date": "",
         "scraped_at": _now(),
     }
     return law_id, text, meta
