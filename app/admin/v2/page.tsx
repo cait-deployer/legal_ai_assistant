@@ -1241,7 +1241,7 @@ function DiskTab() {
                 )}
                 {/* Metadata grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs">
-                  {[
+                  {(([
                     ["Статус",        preview.meta.status],
                     ["Тип документа", preview.meta.doc_type],
                     ["Номер",         preview.meta.doc_number],
@@ -1250,14 +1250,14 @@ function DiskTab() {
                     ["Набр. чинності",preview.meta.effective_date],
                     ["Категорія",     preview.meta.category],
                     ["Scraped at",    preview.meta.scraped_at],
-                  ].map(([label, val]) => val ? (
-                    <div key={String(label)} className="flex gap-1">
+                  ] as [string, unknown][]).map(([label, val]) => val ? (
+                    <div key={label} className="flex gap-1">
                       <span className="text-gray-600 shrink-0">{label}:</span>
                       <span className={`truncate ${label === "Статус" && String(val).includes("Чинний") ? "text-emerald-400" : label === "Статус" ? "text-amber-400" : "text-gray-300"}`}>
                         {String(val)}
                       </span>
                     </div>
-                  ) : null)}
+                  ) : null))}
                 </div>
                 {/* Boolean flags */}
                 <div className="flex flex-wrap gap-1.5">
