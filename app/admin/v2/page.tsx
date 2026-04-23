@@ -1229,14 +1229,14 @@ function DiskTab() {
                   <span>·</span><span>{preview.source}</span>
                   <span>·</span><span>{preview.size_kb} KB</span>
                   <span>·</span><span>{preview.chars.toLocaleString()} символів</span>
-                  {preview.meta.law_url && (
+                  {!!preview.meta.law_url && (
                     <><span>·</span>
                     <a href={String(preview.meta.law_url)} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
                       Відкрити на сайті →
                     </a></>
                   )}
                 </div>
-                {preview.meta.title && (
+                {!!preview.meta.title && (
                   <div className="text-sm font-semibold text-[#E0E6ED]">{String(preview.meta.title)}</div>
                 )}
                 {/* Metadata grid */}
@@ -1250,7 +1250,7 @@ function DiskTab() {
                     ["Набр. чинності",preview.meta.effective_date],
                     ["Категорія",     preview.meta.category],
                     ["Scraped at",    preview.meta.scraped_at],
-                  ] as [string, unknown][]).map(([label, val]) => val ? (
+                  ] as [string, unknown][]).map(([label, val]) => !!val ? (
                     <div key={label} className="flex gap-1">
                       <span className="text-gray-600 shrink-0">{label}:</span>
                       <span className={`truncate ${label === "Статус" && String(val).includes("Чинний") ? "text-emerald-400" : label === "Статус" ? "text-amber-400" : "text-gray-300"}`}>
@@ -1261,10 +1261,10 @@ function DiskTab() {
                 </div>
                 {/* Boolean flags */}
                 <div className="flex flex-wrap gap-1.5">
-                  {preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
-                  {preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
-                  {preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
-                  {preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
+                  {!!preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
+                  {!!preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
+                  {!!preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
+                  {!!preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
                 </div>
               </div>
               <pre className="font-mono text-[11px] text-gray-300 whitespace-pre-wrap break-words max-h-[600px] overflow-y-auto leading-relaxed bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4">
