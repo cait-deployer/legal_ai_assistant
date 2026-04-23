@@ -139,6 +139,27 @@ def _save_cache(source: str, items: list) -> None:
 
 
 # ── law_id computation (no HTTP) ──────────────────────────────────────────────
+def _wiki_slug(title: str) -> str:
+    """
+    Short unique slug for wiki law_id. Uses MD5 hash of full title so:
+    - always fits in any filename limit
+    - guaranteed unique (no collisions between different articles)
+    - full title is stored separately in meta["title"]
+    """
+    import hashlib
+    h = hashlib.md5(title.encode("utf-8")).hexdigest()[:16]
+    return h
+
+
+def _ccu_doc_type(doc_num: str) -> str:
+    dn = doc_num.strip()
+    if re.search(r'-р$', dn, re.IGNORECASE):
+        return "Рішення"
+    if re.search(r'-в$', dn, re.IGNORECASE):
+        return "Висновок"
+    return "Інше"
+
+
 def _law_id_for(source: str, doc: dict) -> str:
     if source == "rada":
         return doc["id"]
@@ -151,7 +172,7 @@ def _law_id_for(source: str, doc: dict) -> str:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in os.path.splitext(filename)[0])[:60]
         return f"sc_{safe}"
     if source == "wiki":
-        return f"wiki_{re.sub(r'[^\\w]', '_', doc.get('title', ''))}"
+        return f"wiki_{_wiki_slug(doc.get('title', ''))}"
     return "unknown"
 
 
@@ -240,7 +261,7 @@ def _fetch_kmu(doc: dict) -> tuple[str, str, dict]:
         "doc_number":    law_meta.get("doc_number", ""),
         "author":        law_meta.get("author", ""),
         "date_adopted":  law_meta.get("date_adopted", ""),
-        "effective_date": law_meta.get("effective_date") or doc.get("list_date", ""),
+        "effective_date": law_meta.get("effective_date", ""),
         "scraped_at":    _now(),
         **flags,
     }
@@ -249,30 +270,44 @@ def _fetch_kmu(doc: dict) -> tuple[str, str, dict]:
 
 def _fetch_ccu(doc: dict) -> tuple[str, str, dict]:
     from ccu_scanner import _extract_pdf_text, _get_pdf_url_from_doc_page
-    doc_num = doc.get("doc_num", "")
-    law_id  = f"ccu_{re.sub(r'[^\\w]', '_', doc_num)}"
+    from rada_scanner import detect_text_flags
+    doc_num  = doc.get("doc_num", "")
+    law_id   = f"ccu_{re.sub(r'[^\\w]', '_', doc_num)}"
+    doc_type = _ccu_doc_type(doc_num)
 
     pdf_url = doc.get("pdf_url")
     if not pdf_url and doc.get("doc_url"):
         pdf_url = _get_pdf_url_from_doc_page(doc["doc_url"])
 
-    text = _extract_pdf_text(pdf_url) if pdf_url else ""
+    text  = _extract_pdf_text(pdf_url) if pdf_url else ""
+    flags = detect_text_flags(text) if text else {}
+
+    doc_url  = doc.get("doc_url", "")
+    law_url  = doc_url or pdf_url or ""
+    date_val = doc.get("date", "")
 
     meta = {
         "law_id":        law_id,
         "title":         doc.get("title", ""),
         "source":        "ccu",
         "doc_number":    doc_num,
-        "effective_date": doc.get("date", ""),
+        "doc_type":      doc_type,
+        "category":      "Конституційний суд України",
+        "author":        doc.get("author", ""),
+        "date_adopted":  date_val,
+        "effective_date": date_val,
+        "law_url":       law_url,
         "pdf_url":       pdf_url or "",
-        "doc_url":       doc.get("doc_url", ""),
+        "status":        "",
         "scraped_at":    _now(),
+        **flags,
     }
     return law_id, text, meta
 
 
 def _fetch_supreme(doc: dict) -> tuple[str, str, dict]:
     import httpx
+    from rada_scanner import detect_text_flags
     url      = doc["url"]
     filename = url.rstrip("/").split("/")[-1]
     safe     = "".join(c if c.isalnum() or c in "-_" else "_" for c in os.path.splitext(filename)[0])[:60]
@@ -307,12 +342,23 @@ def _fetch_supreme(doc: dict) -> tuple[str, str, dict]:
     except Exception as ex:
         _log(f"  ❌ Supreme fetch {law_id}: {ex}")
 
+    flags = detect_text_flags(text) if text else {}
+
     meta = {
-        "law_id":  law_id,
-        "title":   doc.get("title", ""),
-        "source":  "supreme",
-        "pdf_url": url,
-        "scraped_at": _now(),
+        "law_id":        law_id,
+        "title":         doc.get("title", ""),
+        "source":        "supreme",
+        "doc_type":      "Огляд судової практики",
+        "category":      "Судова практика",
+        "author":        "Верховний Суд",
+        "law_url":       url,
+        "pdf_url":       url,
+        "doc_number":    "",
+        "date_adopted":  "",
+        "effective_date": "",
+        "status":        "",
+        "scraped_at":    _now(),
+        **flags,
     }
     return law_id, text, meta
 
@@ -321,11 +367,7 @@ def _fetch_wiki(doc: dict) -> tuple[str, str, dict]:
     import httpx
     from bs4 import BeautifulSoup
     title  = doc["title"]
-    # Truncate slug so filename stays < 255 bytes on ext4 (Cyrillic = 2 bytes/char)
-    slug = re.sub(r'[^\w]', '_', title)
-    while len(f"wiki_{slug}.meta.json".encode('utf-8')) > 250:
-        slug = slug[:-1].rstrip('_')
-    law_id = f"wiki_{slug}"
+    law_id = f"wiki_{_wiki_slug(title)}"
 
     text = ""
     try:
@@ -368,7 +410,10 @@ _FETCHERS = {
 
 # Fields that must be non-empty in meta.json; if any are missing → re-scrape
 _REQUIRED_META: dict[str, list[str]] = {
-    "rada": ["status", "doc_number", "effective_date", "doc_type"],
+    "rada":    ["status", "doc_number", "effective_date", "doc_type"],
+    "kmu":     ["status", "doc_number", "doc_type"],
+    "ccu":     ["doc_type", "category"],
+    "supreme": ["category", "doc_type"],
 }
 
 
