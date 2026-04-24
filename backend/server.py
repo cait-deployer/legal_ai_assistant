@@ -2909,8 +2909,7 @@ async def get_rada_coverage(refresh: bool = False):
     # ── 1. Qdrant: збираємо chunk_index=0 по всіх РАДА-колекціях ──
     client = get_client()
     qdrant_filter = Filter(must=[
-        FieldCondition(key="chunk_index",   match=MatchValue(value=0)),
-        FieldCondition(key="source_domain", match=MatchValue(value="zakon.rada.gov.ua")),
+        FieldCondition(key="chunk_index", match=MatchValue(value=0)),
     ])
 
     all_points: list = []
