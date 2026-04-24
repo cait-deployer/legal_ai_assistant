@@ -32,9 +32,14 @@ def _get_client():
         if _client is not None:
             return _client
         from google import genai
+        try:
+            import settings_cache
+            creds = settings_cache.get_credentials()
+        except Exception:
+            creds = None
         project  = _cfg("vertex_project_id") or _cfg("vertex_project") or os.getenv("VERTEX_PROJECT", "urai-492512")
         location = _cfg("vertex_location") or os.getenv("VERTEX_LOCATION", "us-central1")
-        _client  = genai.Client(vertexai=True, project=project, location=location)
+        _client  = genai.Client(vertexai=True, project=project, location=location, credentials=creds)
         return _client
 
 
