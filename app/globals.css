@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@source not "../backend/";
+@source not "../proj/";
 
 /* iOS safe area support */
 .safe-area-pb {
