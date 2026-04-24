@@ -2190,7 +2190,7 @@ async def v2_disk():
     """Статистика диску: кількість файлів і розмір по кожному джерелу."""
     import shutil
     RAW_PATH = Path("/root/laws_raw")
-    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
+    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"]
     result: dict = {}
     for src in SOURCES_V2:
         src_dir = RAW_PATH / src
@@ -2272,7 +2272,7 @@ async def v2_disk_files(
 ):
     """Пагінований список файлів на диску з пошуком за ID та назвою."""
     RAW_PATH   = Path("/root/laws_raw")
-    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
+    SOURCES_V2 = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"]
     sources    = [source] if source else SOURCES_V2
     search_lc  = search.lower().strip() if search else None
 
