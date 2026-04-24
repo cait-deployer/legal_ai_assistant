@@ -50,61 +50,82 @@ HEADERS = {
 # requests+POST бачить тільки 20 підказок (suggestion mode).
 # Playwright клікає Знайти → чекає JS → збирає всі посилання + пагінація.
 
+def _parse_quesids(html: str, items: list, seen_ids: set) -> int:
+    """Витягує quesid з HTML, додає нові в items. Повертає кількість нових."""
+    soup = BeautifulSoup(html, "html.parser")
+    new_count = 0
+    for row in soup.find_all(lambda t: t.name and t.get("quesid")):
+        quesid = row.get("quesid")
+        if not quesid or quesid in seen_ids:
+            continue
+        seen_ids.add(quesid)
+        link = row.find("a")
+        title = link.get_text(strip=True)[:200] if link else ""
+        items.append({"id": quesid, "title": title, "category": ""})
+        new_count += 1
+    return new_count
+
+
 def _fetch_ids_via_requests(log=print) -> list[dict]:
     """
-    Requests-based: POST пагінація через API ЗІР.
-    Кожен запит повертає порцію результатів з посиланнями id=XXXXX.
+    Requests з сесією:
+      1. GET сторінки (сесійні куки)
+      2. POST getResultList → перші 20
+      3. POST addToResultList → наступні 20, 40, ...
     """
-    items = []
-    seen_ids: set[str] = set()
-    start = 0
-    PAGE_SIZE = 20
-    empty_pages = 0
+    session = requests.Session()
+    session.headers.update(HEADERS)
 
-    log("  📡 Requests: пагінація через API ЗІР...")
+    log("  📡 Requests (session): отримуємо список ЗІР...")
+    try:
+        session.get(SEARCH_URL, timeout=30)
+    except Exception as ex:
+        log(f"  ⚠️ GET сторінки: {ex}")
+        return []
+
+    # Крок 1: перші результати
+    payload_search = {
+        "t": "getResultList", "wordsVal": "", "srcVal": "ques",
+        "themeVal": "all", "checkedValue": "", "catVal": "0",
+        "hrenVal": "all", "contVal": "cont-no",
+        "statusVal": "1", "statusFOP": "all", "dateS": "", "dateE": "",
+    }
+    try:
+        r = session.post(RESULTS_URL, data=payload_search, timeout=60)
+        r.raise_for_status()
+    except Exception as ex:
+        log(f"  ⚠️ getResultList: {ex}")
+        return []
+
+    items: list[dict] = []
+    seen_ids: set[str] = set()
+    n = _parse_quesids(r.text, items, seen_ids)
+    log(f"  📄 getResultList: +{n} (всього {len(items)})")
+
+    if n == 0:
+        return []
+
+    # Крок 2: addToResultList — showMore() AJAX
+    empty = 0
     while True:
-        payload = {
-            "t": "getResultList", "wordsVal": "", "srcVal": "ques",
-            "themeVal": "all", "checkedValue": "", "catVal": "0",
-            "hrenVal": "all", "contVal": "cont-no",
-            "statusVal": "1", "statusFOP": "all", "dateS": "", "dateE": "",
-        }
-        if start > 0:
-            payload["start"] = start
+        payload_more = {"t": "addToResultList", "srchWords": ""}
         try:
-            r = requests.post(RESULTS_URL, data=payload, headers=HEADERS, timeout=60)
+            r = session.post(RESULTS_URL, data=payload_more, timeout=60)
             r.raise_for_status()
         except Exception as ex:
-            log(f"  ⚠️ POST start={start}: {ex}")
+            log(f"  ⚠️ addToResultList: {ex}")
             break
 
-        soup = BeautifulSoup(r.text, "html.parser")
+        new = _parse_quesids(r.text, items, seen_ids)
+        log(f"  📄 addToResultList: +{new} (всього {len(items)})")
 
-        new_count = 0
-        # Результати в <div quesid="XXXXX"> (не в <a href>!)
-        for row in soup.find_all(lambda t: t.name and t.get("quesid")):
-            quesid = row.get("quesid")
-            if not quesid or quesid in seen_ids:
-                continue
-            seen_ids.add(quesid)
-            link = row.find("a")
-            title = link.get_text(strip=True)[:200] if link else ""
-            cat_el = row.find(class_=re.compile(r"categ|theme|category", re.I))
-            category = cat_el.get_text(strip=True)[:100] if cat_el else ""
-            items.append({"id": quesid, "title": title, "category": category})
-            new_count += 1
-
-        log(f"  📄 start={start}: +{new_count} нових (всього {len(items)})")
-
-        if new_count == 0:
-            empty_pages += 1
-            if empty_pages >= 2:
+        if new == 0:
+            empty += 1
+            if empty >= 2:
                 break
         else:
-            empty_pages = 0
-
-        start += PAGE_SIZE
-        time.sleep(0.2)
+            empty = 0
+        time.sleep(0.3)
 
     return items
 
@@ -170,20 +191,11 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
                 pass
             time.sleep(3)
 
-        # Логуємо пагінаційний блок для діагностики
-        try:
-            panel_html = page.evaluate(
-                "document.querySelector('#bzeditMenuPanel1')?.innerHTML || '(порожній)'"
-            )
-            log(f"  📋 bzeditMenuPanel1: {panel_html[:400]}")
-        except Exception:
-            pass
-
-        # Збираємо результати: div[quesid]
+        # Пагінація через "Показати ще..." (div.show_more → showMore())
         seen_ids_pw: set[str] = set()
-        pw_start = 0
-        PW_PAGE = 20
+        batch = 0
         while True:
+            # Збираємо всі нові quesid з DOM (showMore додає в кінець)
             rows = page.query_selector_all("div[quesid]")
             found = 0
             for row in rows:
@@ -199,55 +211,29 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
                 items.append({"id": quesid, "title": title, "category": ""})
                 found += 1
 
-            log(f"  📄 Playwright start={pw_start}: +{found} нових (всього {len(items)})")
-            if found == 0:
-                break
+            log(f"  📄 batch {batch}: +{found} нових (всього {len(items)})")
 
-            pw_start += PW_PAGE
-            next_ok = False
-
-            # Стратегія 1: клік по елементу пагінації у #bzeditMenuPanel1
-            for sel in [
-                "#bzeditMenuPanel1 a:last-child",
-                "#bzeditMenuPanel1 a[onclick*='next']",
-                "#bzeditMenuPanel1 a[onclick*='search']",
-                "a[title*='аступн']", "a[title*='Next']",
-                "a:has-text('»')", "a:has-text('>')",
-                ".pagination a:last-child",
-            ]:
+            # Шукаємо кнопку "Показати ще..."
+            show_more = None
+            for sel in ["div.show_more", "[onclick*='showMore']", ".show_more"]:
                 try:
                     el = page.query_selector(sel)
                     if el and el.is_visible():
-                        el.click()
-                        time.sleep(2)
-                        next_ok = True
-                        log(f"  ➡️  Next via click: {sel}")
+                        show_more = el
                         break
                 except Exception:
                     pass
 
-            # Стратегія 2: window.iStart / window.curStart + searchInBZ()
-            if not next_ok:
-                try:
-                    page.evaluate(f"window.iStart = {pw_start}; searchInBZ();")
-                    time.sleep(2)
-                    next_ok = True
-                    log(f"  ➡️  Next via iStart={pw_start}")
-                except Exception:
-                    pass
+            if not show_more:
+                log("  ✅ Кнопку 'Показати ще' не знайдено — всі результати зібрано")
+                break
 
-            # Стратегія 3: searchInBZ з параметром start
-            if not next_ok:
-                try:
-                    page.evaluate(f"searchInBZ(0, {pw_start})")
-                    time.sleep(2)
-                    next_ok = True
-                    log(f"  ➡️  Next via searchInBZ(0, {pw_start})")
-                except Exception:
-                    pass
-
-            if not next_ok:
-                log("  ⚠️  Не знайдено механізм пагінації")
+            try:
+                show_more.click()
+                time.sleep(2)
+                batch += 1
+            except Exception as ex:
+                log(f"  ⚠️ showMore click: {ex}")
                 break
 
         browser.close()
