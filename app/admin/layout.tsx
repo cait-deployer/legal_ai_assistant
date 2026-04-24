@@ -19,6 +19,7 @@ import {
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
   Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck, Gavel, BookMarked,
   RefreshCw, Database, ChevronDown, LayoutGrid, Building2, HardDriveDownload, Sparkles,
+  Download, HardDrive,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
@@ -35,14 +36,13 @@ const navigation: NavItem[] = [
     href: "/admin/sync",
     icon: RefreshCw,
     children: [
-      { name: "Зведення",      href: "/admin/sync",     icon: LayoutGrid  },
-      { name: "Рада",          href: "/admin/settings", icon: Database    },
-      { name: "Верховний Суд", href: "/admin/supreme",  icon: Scale       },
-      { name: "КСУ",           href: "/admin/ccu",      icon: Gavel       },
-      { name: "Позиції ВС",    href: "/admin/lpd",      icon: BookMarked  },
-      { name: "КМУ",           href: "/admin/kmu",      icon: Building2          },
-      { name: "Переіндекс",   href: "/admin/reindex",  icon: HardDriveDownload  },
-      { name: "V2 Міграція",  href: "/admin/v2",       icon: Sparkles           },
+      { name: "Зведення",        href: "/admin/sync",     icon: LayoutGrid        },
+      { name: "Скрапер",         href: "/admin/scraper",  icon: Download          },
+      { name: "Реіндекс",        href: "/admin/reindex",  icon: HardDriveDownload },
+      { name: "Аналітика даних", href: "/admin/data",     icon: BarChart2         },
+      { name: "Диск",            href: "/admin/disk",     icon: HardDrive         },
+      { name: "Джерела",         href: "/admin/sources",  icon: BookOpen          },
+      { name: "V2 Панель",       href: "/admin/v2",       icon: Sparkles          },
     ],
   },
   { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck },
@@ -51,7 +51,7 @@ const navigation: NavItem[] = [
   { name: "База знань",    href: "/admin/base",          icon: BookOpen    },
 ]
 
-const SYNC_HREFS = ["/admin/sync", "/admin/settings", "/admin/supreme", "/admin/ccu", "/admin/lpd", "/admin/kmu", "/admin/reindex", "/admin/v2"]
+const SYNC_HREFS = ["/admin/sync", "/admin/scraper", "/admin/reindex", "/admin/data", "/admin/disk", "/admin/sources", "/admin/v2"]
 const COLLAPSED_KEY    = "admin_sidebar_collapsed"
 const SYNC_OPEN_KEY    = "admin_sync_open"
 

@@ -2,419 +2,374 @@
 
 import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  RefreshCw, Database, Scale, Gavel, BookMarked,
-  CheckCircle, XCircle, Loader2, Play, ExternalLink,
-  AlertCircle, Clock, Globe, Building2, Cpu,
-} from "lucide-react"
+import { RefreshCw, Download, HardDriveDownload, Cpu, RotateCcw, AlertCircle } from "lucide-react"
 
-type SourceStatus = {
-  key: string
-  name: string
-  href: string | null
-  icon: React.ElementType
-  color: string
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type SourceState = {
   running: boolean
-  lastSync: string | null
-  lastStatus: "success" | "error" | "running" | null
-  docsProcessed: number | null
-  errorMessage?: string
-}
-
-const SOURCES = [
-  { key: "rada",    name: "Рада",          href: "/admin/settings", icon: Database,   color: "blue",   apiLogs: "/api/admin/rada/logs",     apiTrigger: "/api/admin/rada/trigger" },
-  { key: "supreme", name: "Верховний Суд", href: "/admin/supreme",  icon: Scale,      color: "purple", apiLogs: "/api/admin/supreme/logs",  apiTrigger: "/api/admin/supreme/trigger" },
-  { key: "wiki",    name: "Wiki",          href: null,              icon: Globe,      color: "teal",   apiLogs: "/api/admin/wiki/logs",     apiTrigger: "/api/admin/wiki/trigger" },
-  { key: "ccu",     name: "КСУ",           href: "/admin/ccu",      icon: Gavel,      color: "red",    apiLogs: "/api/admin/ccu/logs",      apiTrigger: "/api/admin/ccu/trigger" },
-  { key: "lpd",     name: "Позиції ВС",    href: "/admin/lpd",      icon: BookMarked, color: "amber",  apiLogs: "/api/admin/lpd/logs",      apiTrigger: "/api/admin/lpd/trigger" },
-  { key: "kmu",     name: "КМУ",           href: "/admin/kmu",      icon: Building2,  color: "orange", apiLogs: "/api/admin/kmu/logs",      apiTrigger: "/api/admin/kmu/trigger" },
-] as const
-
-const colorMap: Record<string, string> = {
-  blue:   "from-blue-500/10 to-blue-500/5 border-blue-500/20",
-  purple: "from-purple-500/10 to-purple-500/5 border-purple-500/20",
-  teal:   "from-teal-500/10 to-teal-500/5 border-teal-500/20",
-  red:    "from-red-500/10 to-red-500/5 border-red-500/20",
-  amber:  "from-amber-500/10 to-amber-500/5 border-amber-500/20",
-  orange: "from-orange-500/10 to-orange-500/5 border-orange-500/20",
-}
-
-const iconColorMap: Record<string, string> = {
-  blue:   "text-blue-400",
-  purple: "text-purple-400",
-  teal:   "text-teal-400",
-  red:    "text-red-400",
-  amber:  "text-amber-400",
-  orange: "text-orange-400",
-}
-
-function StatusBadge({ status }: { status: SourceStatus["lastStatus"] | "idle" }) {
-  if (status === "running")
-    return (
-      <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30 bg-amber-500/10 text-xs">
-        <Loader2 className="w-3 h-3 animate-spin" /> Виконується
-      </Badge>
-    )
-  if (status === "success")
-    return (
-      <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/30 bg-emerald-500/10 text-xs">
-        <CheckCircle className="w-3 h-3" /> Успішно
-      </Badge>
-    )
-  if (status === "error")
-    return (
-      <Badge variant="outline" className="gap-1 text-red-400 border-red-400/30 bg-red-500/10 text-xs">
-        <XCircle className="w-3 h-3" /> Помилка
-      </Badge>
-    )
-  return (
-    <Badge variant="outline" className="gap-1 text-[#E0E6ED]/40 border-[#E0E6ED]/10 text-xs">
-      <Clock className="w-3 h-3" /> Очікування
-    </Badge>
-  )
+  pause_requested: boolean
+  can_resume: boolean
 }
 
 type CentroidStatus = {
+  building: boolean
   ready: boolean
-  building?: boolean
-  built_at?: string
-  sample_size?: number
-  total_collections?: number
-  collections?: Record<string, number>
-  error?: string
+  built_at: string | null
+  total_collections: number
+  collections: Record<string, number>
 }
 
-export default function SyncOverviewPage() {
-  const [statuses, setStatuses]   = useState<Record<string, SourceStatus>>({})
-  const [loading,  setLoading]    = useState(true)
-  const [triggering, setTriggering] = useState<Record<string, boolean>>({})
-  const [centroid, setCentroid]   = useState<CentroidStatus | null>(null)
-  const [rebuilding, setRebuilding] = useState(false)
+type DiskSource = { files: number; size_mb: number }
 
-  const fetchCentroid = useCallback(async () => {
-    try {
-      const r = await fetch("/api/admin/centroid/status")
-      if (r.ok) setCentroid(await r.json())
-    } catch {}
-  }, [])
+// ── Constants ──────────────────────────────────────────────────────────────────
 
-  // Poll while building
-  useEffect(() => {
-    if (!centroid?.building) return
-    const interval = setInterval(fetchCentroid, 3000)
-    return () => clearInterval(interval)
-  }, [centroid?.building, fetchCentroid])
+const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"] as const
+type Source = typeof SOURCES[number]
 
-  const handleRebuild = async () => {
-    setRebuilding(true)
-    try {
-      await fetch("/api/admin/centroid/rebuild", { method: "POST" })
-      // backend responds immediately; poll status to track progress
-      await fetchCentroid()
-    } catch {
-      // ignore
-    } finally {
-      setRebuilding(false)
-    }
+const SOURCE_META: Record<Source, { label: string; expected: string; color: string }> = {
+  rada:      { label: "Верховна Рада",        expected: "~15 500", color: "blue"    },
+  kmu:       { label: "Кабінет Міністрів",    expected: "~10 000", color: "amber"   },
+  ccu:       { label: "Конституційний суд",   expected: "~500",    color: "purple"  },
+  supreme:   { label: "Верховний суд",        expected: "~1 000",  color: "emerald" },
+  wiki:      { label: "Legal Aid Wiki",       expected: "~кілька тис.", color: "gray" },
+  positions: { label: "Правові позиції ВС",  expected: "~12 800", color: "gold"    },
+  mod:       { label: "Міністерство оборони", expected: "~210",    color: "red"     },
+  zir:       { label: "ЗІР ДПС",             expected: "~5 900",  color: "teal"    },
+}
+
+const SOURCE_TO_COLS: Record<Source, string[]> = {
+  rada:      ["rada_finance_v2","rada_state_v2","rada_personnel_v2","rada_court_v2","rada_intl_v2","rada_labor_v2","rada_civil_v2","rada_criminal_v2","rada_admin_v2","rada_housing_v2","rada_land_v2","rada_industry_v2","rada_other_v2"],
+  kmu:       ["laws_kmu_v2"],
+  ccu:       ["laws_ccu_v2"],
+  supreme:   ["laws_supreme_v2"],
+  wiki:      ["laws_wiki_v2"],
+  positions: ["laws_positions_v2"],
+  mod:       ["laws_mod_v2"],
+  zir:       ["laws_zir_v2"],
+}
+
+const COLOR_CLASSES: Record<string, { border: string; badge: string; dot: string }> = {
+  blue:    { border: "border-blue-500/20",    badge: "bg-blue-500/10 text-blue-300",    dot: "bg-blue-400"    },
+  amber:   { border: "border-amber-500/20",   badge: "bg-amber-500/10 text-amber-300",  dot: "bg-amber-400"   },
+  purple:  { border: "border-purple-500/20",  badge: "bg-purple-500/10 text-purple-300",dot: "bg-purple-400"  },
+  emerald: { border: "border-emerald-500/20", badge: "bg-emerald-500/10 text-emerald-300", dot: "bg-emerald-400" },
+  gray:    { border: "border-gray-500/20",    badge: "bg-gray-500/10 text-gray-300",    dot: "bg-gray-400"    },
+  gold:    { border: "border-[#C9A84C]/30",   badge: "bg-[#C9A84C]/10 text-[#C9A84C]", dot: "bg-[#C9A84C]"   },
+  red:     { border: "border-red-500/20",     badge: "bg-red-500/10 text-red-300",      dot: "bg-red-400"     },
+  teal:    { border: "border-teal-500/20",    badge: "bg-teal-500/10 text-teal-300",    dot: "bg-teal-400"    },
+}
+
+// ── Source card ────────────────────────────────────────────────────────────────
+
+function SourceCard({
+  src,
+  scraperState,
+  diskFiles,
+  qdrantVectors,
+}: {
+  src: Source
+  scraperState: SourceState | null
+  diskFiles: number
+  qdrantVectors: number
+}) {
+  const meta   = SOURCE_META[src]
+  const colors = COLOR_CLASSES[meta.color]
+
+  const scraperStatus = scraperState?.running
+    ? (scraperState.pause_requested ? "stopping" : "running")
+    : scraperState?.can_resume
+    ? "paused"
+    : "idle"
+
+  const scraperBadge: Record<string, string> = {
+    running:  "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+    stopping: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
+    paused:   "bg-blue-500/20 text-blue-300 border border-blue-500/30",
+    idle:     "bg-gray-500/20 text-gray-400 border border-gray-500/20",
   }
 
-  const fetchAll = useCallback(async () => {
-    const results = await Promise.allSettled(
-      SOURCES.map(async (src) => {
-        try {
-          const r = await fetch(src.apiLogs)
-          if (!r.ok) return null
-          const d = await r.json()
-          const history: any[] = d.history ?? []
-          const last = history[0]
-          return {
-            key:           src.key,
-            name:          src.name,
-            href:          src.href,
-            icon:          src.icon,
-            color:         src.color,
-            running:       d.running ?? false,
-            lastSync:      last?.finished_at ?? last?.started_at ?? null,
-            lastStatus:    d.running ? "running" : (last?.status ?? null),
-            docsProcessed: last?.laws_processed ?? null,
-            errorMessage:  last?.error_message,
-          } as SourceStatus
-        } catch {
-          return null
-        }
-      })
-    )
-
-    const map: Record<string, SourceStatus> = {}
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled" && r.value) {
-        map[SOURCES[i].key] = r.value
-      } else {
-        // fallback placeholder
-        map[SOURCES[i].key] = {
-          key:           SOURCES[i].key,
-          name:          SOURCES[i].name,
-          href:          SOURCES[i].href,
-          icon:          SOURCES[i].icon,
-          color:         SOURCES[i].color,
-          running:       false,
-          lastSync:      null,
-          lastStatus:    null,
-          docsProcessed: null,
-        }
-      }
-    })
-    setStatuses(map)
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    fetchAll()
-    fetchCentroid()
-    const interval = setInterval(fetchAll, 10000)
-    return () => clearInterval(interval)
-  }, [fetchAll, fetchCentroid])
-
-  const handleTrigger = async (src: typeof SOURCES[number]) => {
-    setTriggering(p => ({ ...p, [src.key]: true }))
-    try {
-      await fetch(src.apiTrigger, { method: "POST" })
-      await fetchAll()
-    } finally {
-      setTriggering(p => ({ ...p, [src.key]: false }))
-    }
+  const scraperLabel: Record<string, string> = {
+    running:  "Виконується",
+    stopping: "Зупиняється",
+    paused:   "Призупинено",
+    idle:     "Очікування",
   }
 
-  const anyRunning = Object.values(statuses).some(s => s.running)
+  const qdrantOk = qdrantVectors > 0
+  const diskOk   = diskFiles > 0
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={`bg-[#111827] rounded-2xl border ${colors.border} p-4 space-y-3 flex flex-col`}>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b-2 border-[#C9A84C]/20 shrink-0">
-        <div className="flex items-start gap-4">
-          <div className="p-3 bg-[#C9A84C]/10 rounded-xl shrink-0">
-            <RefreshCw className="w-10 h-10 text-[#C9A84C]" />
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${scraperState?.running ? `${colors.dot} animate-pulse` : colors.dot} opacity-60`} />
+            <span className="text-xs font-mono text-gray-500">{src}</span>
           </div>
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight text-[#E0E6ED]">Синхронізація</h1>
-            <p className="text-lg text-[#E0E6ED]/50 mt-1">
-              Зведення по всіх джерелах даних
-            </p>
-          </div>
+          <div className="font-bold text-sm text-[#E0E6ED] mt-0.5">{meta.label}</div>
+          <div className="text-[10px] text-gray-600 mt-0.5">Очікується: {meta.expected}</div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          {anyRunning && (
-            <Badge variant="outline" className="gap-1.5 text-amber-500 border-amber-500/30 bg-amber-500/10">
-              <Loader2 className="w-3 h-3 animate-spin" /> Є активні задачі
-            </Badge>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchAll}
-            className="gap-2 border-[#C9A84C]/20 text-[#E0E6ED]/70 hover:text-[#E0E6ED] hover:border-[#C9A84C]/40"
-          >
-            <RefreshCw className="w-4 h-4" /> Оновити
-          </Button>
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${scraperBadge[scraperStatus]}`}>
+          {scraperLabel[scraperStatus]}
+        </span>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`rounded-xl p-2.5 text-center ${diskOk ? "bg-emerald-500/5 border border-emerald-500/10" : "bg-red-500/5 border border-red-500/10"}`}>
+          <div className={`text-lg font-black ${diskOk ? "text-emerald-400" : "text-red-400"}`}>
+            {diskFiles > 0 ? diskFiles.toLocaleString() : "0"}
+          </div>
+          <div className="text-[10px] text-gray-500 mt-0.5">файлів на диску</div>
+        </div>
+        <div className={`rounded-xl p-2.5 text-center ${qdrantOk ? "bg-[#C9A84C]/5 border border-[#C9A84C]/10" : "bg-gray-500/5 border border-gray-500/10"}`}>
+          <div className={`text-lg font-black ${qdrantOk ? "text-[#C9A84C]" : "text-gray-600"}`}>
+            {qdrantVectors > 0 ? qdrantVectors.toLocaleString() : "—"}
+          </div>
+          <div className="text-[10px] text-gray-500 mt-0.5">векторів Qdrant</div>
         </div>
       </div>
 
-      {/* Cards grid */}
-      <div className="flex-1 overflow-y-auto pt-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]/50" />
+      {/* Status bar */}
+      {diskOk && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] text-gray-600">
+            <span>Індексація</span>
+            <span className={qdrantOk ? "text-emerald-400" : "text-red-400"}>
+              {qdrantOk ? "є дані" : "порожньо"}
+            </span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
-            {SOURCES.map((src) => {
-              const s = statuses[src.key]
-              if (!s) return null
-              const Icon = src.icon
-
-              return (
-                <Card
-                  key={src.key}
-                  className={`bg-gradient-to-br ${colorMap[src.color]} border transition-all duration-200 hover:shadow-lg`}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg bg-black/20`}>
-                          <Icon className={`w-5 h-5 ${iconColorMap[src.color]}`} />
-                        </div>
-                        <div>
-                          <CardTitle className="text-base text-[#E0E6ED]">{s.name}</CardTitle>
-                          {s.lastSync && (
-                            <CardDescription className="text-xs mt-0.5">
-                              {new Date(s.lastSync).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" })}
-                            </CardDescription>
-                          )}
-                        </div>
-                      </div>
-                      <StatusBadge status={s.running ? "running" : s.lastStatus} />
-                    </div>
-                  </CardHeader>
-
-                  <CardContent className="pt-0">
-                    {/* Stats row */}
-                    <div className="flex items-center gap-4 mb-4">
-                      {s.docsProcessed != null && (
-                        <div>
-                          <p className="text-2xl font-bold text-[#E0E6ED]">{s.docsProcessed.toLocaleString()}</p>
-                          <p className="text-xs text-[#E0E6ED]/40">оброблено документів</p>
-                        </div>
-                      )}
-                      {s.errorMessage && (
-                        <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-500/10 rounded-lg p-2 flex-1">
-                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                          <span className="truncate">{s.errorMessage}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="gap-1.5 h-8 text-xs bg-white/5 hover:bg-white/10 text-[#E0E6ED] border border-white/10"
-                        onClick={() => handleTrigger(src)}
-                        disabled={s.running || triggering[src.key]}
-                      >
-                        {s.running || triggering[src.key]
-                          ? <><Loader2 className="w-3 h-3 animate-spin" /> Виконується</>
-                          : <><Play className="w-3 h-3" /> Запустити</>}
-                      </Button>
-                      {src.href && (
-                        <Link href={src.href}>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="gap-1.5 h-8 text-xs text-[#E0E6ED]/50 hover:text-[#E0E6ED] hover:bg-white/5"
-                          >
-                            <ExternalLink className="w-3 h-3" /> Детально
-                          </Button>
-                        </Link>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+          <div className="h-1 bg-[#C9A84C]/10 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full ${qdrantOk ? "bg-[#C9A84C]" : "bg-red-500/40"}`}
+              style={{ width: qdrantOk ? "100%" : "0%" }}
+            />
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Centroid router card */}
-        <div className="mt-6">
-          <Card className="bg-gradient-to-br from-violet-500/10 to-violet-500/5 border border-violet-500/20">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-black/20">
-                    <Cpu className="w-5 h-5 text-violet-400" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base text-[#E0E6ED]">Centroid Router</CardTitle>
-                    <CardDescription className="text-xs mt-0.5">
-                      Семантичний routing на основі реальних векторів Qdrant
-                    </CardDescription>
-                  </div>
-                </div>
-                {centroid === null ? (
-                  <Badge variant="outline" className="gap-1 text-[#E0E6ED]/40 border-[#E0E6ED]/10 text-xs">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Завантаження
-                  </Badge>
-                ) : centroid.building ? (
-                  <Badge variant="outline" className="gap-1 text-violet-400 border-violet-400/30 bg-violet-500/10 text-xs">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Будується…
-                  </Badge>
-                ) : centroid.ready ? (
-                  <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/30 bg-emerald-500/10 text-xs">
-                    <CheckCircle className="w-3 h-3" /> Активний
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="gap-1 text-amber-500 border-amber-500/30 bg-amber-500/10 text-xs">
-                    <AlertCircle className="w-3 h-3" /> Не побудований
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
+      {/* Actions */}
+      <div className="flex gap-2 mt-auto pt-1">
+        <Link href="/admin/scraper" className="flex-1">
+          <button className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-[#E0E6ED] text-[11px] font-medium hover:border-[#C9A84C]/30 hover:bg-[#1e293b] transition-colors">
+            <Download className="w-3 h-3" /> Скрапер
+          </button>
+        </Link>
+        <Link href="/admin/reindex" className="flex-1">
+          <button className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-[#E0E6ED] text-[11px] font-medium hover:border-[#C9A84C]/30 hover:bg-[#1e293b] transition-colors">
+            <HardDriveDownload className="w-3 h-3" /> Реіндекс
+          </button>
+        </Link>
+      </div>
+    </div>
+  )
+}
 
-            <CardContent className="pt-0">
-              {centroid?.ready ? (
-                <div className="mb-4 space-y-2">
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <p className="text-2xl font-bold text-[#E0E6ED]">{centroid.total_collections}</p>
-                      <p className="text-xs text-[#E0E6ED]/40">колекцій</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold text-[#E0E6ED]">{centroid.sample_size}</p>
-                      <p className="text-xs text-[#E0E6ED]/40">векторів/колекція</p>
-                    </div>
-                    {centroid.built_at && (
-                      <div>
-                        <p className="text-sm font-medium text-[#E0E6ED]">
-                          {new Date(centroid.built_at).toLocaleString("uk-UA", { dateStyle: "short", timeStyle: "short" })}
-                        </p>
-                        <p className="text-xs text-[#E0E6ED]/40">останнє оновлення</p>
-                      </div>
-                    )}
-                  </div>
+// ── Centroid widget ────────────────────────────────────────────────────────────
 
-                  {centroid.collections && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {Object.entries(centroid.collections).sort(([a],[b]) => a.localeCompare(b)).map(([col, count]) => (
-                        <span
-                          key={col}
-                          className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300"
-                        >
-                          {col} ({count})
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="mb-4 text-sm text-[#E0E6ED]/50">
-                  {centroid?.error
-                    ? `Помилка: ${centroid.error}`
-                    : "Центроїди не знайдено. Натисни «Побудувати» — займе ~10-15 сек, виконується один раз."}
-                </div>
+function CentroidWidget() {
+  const [status, setStatus]     = useState<CentroidStatus | null>(null)
+  const [loading, setLoading]   = useState(false)
+  const [rebuilding, setRebuilding] = useState(false)
+  const [error, setError]       = useState("")
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/centroid/status")
+      if (res.ok) setStatus(await res.json())
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  async function handleRebuild() {
+    setRebuilding(true); setError("")
+    try {
+      const res = await fetch("/api/admin/centroid/rebuild", { method: "POST" })
+      if (!res.ok) { const d = await res.json(); setError(d.detail || "Помилка") }
+      else await fetchStatus()
+    } catch { setError("Помилка з'єднання") }
+    setRebuilding(false)
+  }
+
+  const isReady    = status?.ready && !status?.building
+  const isBuilding = status?.building
+
+  return (
+    <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        {/* Left: icon + info */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center shrink-0">
+            <Cpu className="w-5 h-5 text-[#C9A84C]" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#E0E6ED]">Centroid Router</span>
+              {isBuilding && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Будується
+                </span>
               )}
-
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="gap-1.5 h-8 text-xs bg-white/5 hover:bg-white/10 text-[#E0E6ED] border border-white/10"
-                  onClick={handleRebuild}
-                  disabled={rebuilding || centroid?.building}
-                >
-                  {rebuilding || centroid?.building
-                    ? <><Loader2 className="w-3 h-3 animate-spin" /> Будується…</>
-                    : <><RefreshCw className="w-3 h-3" /> {centroid?.ready ? "Перебудувати" : "Побудувати"}</>}
-                </Button>
-                {anyRunning && !rebuilding && (
-                  <span className="text-xs text-amber-400/70">
-                    Дочекайся завершення синку перед перебудовою
-                  </span>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+              {isReady && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Активний
+                </span>
+              )}
+              {!status && (
+                <span className="text-[10px] text-gray-600">Завантаження...</span>
+              )}
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              Семантичний routing на основі реальних векторів Qdrant
+              {status && (
+                <span className="ml-2 text-gray-600">
+                  · {status.total_collections} колекцій
+                  {status.built_at && ` · ${new Date(status.built_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Info */}
-        <div className="mt-4 p-4 rounded-xl border border-[#C9A84C]/10 bg-[#C9A84C]/5">
-          <p className="text-sm text-[#E0E6ED]/50">
-            Сторінка автоматично оновлюється кожні 10 секунд. Для детального управління кожним джерелом — перейдіть на відповідну підсторінку.
-          </p>
+        {/* Right: actions */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchStatus}
+            className="p-2 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-gray-400 hover:text-[#E0E6ED] hover:border-[#C9A84C]/30 transition-colors"
+            title="Оновити статус"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleRebuild}
+            disabled={rebuilding || isBuilding}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C9A84C]/10 border border-[#C9A84C]/25 text-[#C9A84C] text-xs font-bold hover:bg-[#C9A84C]/20 disabled:opacity-50 transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" />
+            {rebuilding ? "Запуск..." : "Перебудувати"}
+          </button>
         </div>
+      </div>
+
+      {error && (
+        <div className="mt-3 flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
+
+export default function SyncOverviewPage() {
+  const [scraperStatus, setScraperStatus] = useState<Record<string, SourceState>>({})
+  const [diskData, setDiskData]           = useState<Record<string, DiskSource>>({})
+  const [qdrantCounts, setQdrantCounts]   = useState<Record<string, number>>({})
+  const [refreshing, setRefreshing]       = useState(false)
+  const [lastRefresh, setLastRefresh]     = useState<Date | null>(null)
+
+  const fetchAll = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      const [scrapeRes, diskRes, analyticsRes] = await Promise.allSettled([
+        fetch("/api/admin/v2/scrape/status"),
+        fetch("/api/admin/v2/disk"),
+        fetch("/api/admin/v2/analytics?limit=1"),
+      ])
+      if (scrapeRes.status === "fulfilled" && scrapeRes.value.ok) {
+        setScraperStatus(await scrapeRes.value.json())
+      }
+      if (diskRes.status === "fulfilled" && diskRes.value.ok) {
+        const d = await diskRes.value.json()
+        setDiskData(d.sources ?? {})
+      }
+      if (analyticsRes.status === "fulfilled" && analyticsRes.value.ok) {
+        const d = await analyticsRes.value.json()
+        setQdrantCounts(d.qdrant_v2 ?? {})
+      }
+      setLastRefresh(new Date())
+    } catch { /* ignore */ }
+    setRefreshing(false)
+  }, [])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  function getQdrantForSource(src: Source): number {
+    const cols = SOURCE_TO_COLS[src]
+    return cols.reduce((sum, col) => {
+      const v = qdrantCounts[col]
+      return sum + (typeof v === "number" && v > 0 ? v : 0)
+    }, 0)
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0A0E1A] text-[#E0E6ED] px-3 py-4 sm:p-6">
+      <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Зведення</h1>
+            <p className="text-xs sm:text-sm text-gray-500 mt-1">
+              Стан всіх 8 джерел бази знань
+              {lastRefresh && (
+                <span className="ml-2 text-gray-600">
+                  · оновлено {lastRefresh.toLocaleTimeString("uk-UA")}
+                </span>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={fetchAll}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#111827] border border-[#C9A84C]/15 text-[#E0E6ED] text-sm hover:border-[#C9A84C]/30 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            Оновити
+          </button>
+        </div>
+
+        {/* Pipeline steps */}
+        <div className="flex items-center gap-2 bg-[#0d1120] rounded-xl border border-[#C9A84C]/10 px-4 py-3 overflow-x-auto">
+          {[
+            { step: "1", label: "Скрапер", desc: "текст → диск", href: "/admin/scraper", color: "text-blue-400" },
+            { step: "→", label: "", desc: "", href: null, color: "text-gray-700" },
+            { step: "2", label: "Реіндекс", desc: "диск → Qdrant v2", href: "/admin/reindex", color: "text-amber-400" },
+            { step: "→", label: "", desc: "", href: null, color: "text-gray-700" },
+            { step: "3", label: "Покриття", desc: "перевірка", href: "/admin/rada/coverage", color: "text-emerald-400" },
+          ].map(({ step, label, desc, href, color }, i) =>
+            href ? (
+              <Link key={i} href={href} className="flex items-center gap-2 shrink-0 group">
+                <span className={`text-xs font-black ${color}`}>{step}</span>
+                <div>
+                  <div className={`text-xs font-bold ${color} group-hover:underline`}>{label}</div>
+                  <div className="text-[10px] text-gray-600">{desc}</div>
+                </div>
+              </Link>
+            ) : (
+              <span key={i} className={`text-sm font-bold ${color} shrink-0`}>{step}</span>
+            )
+          )}
+        </div>
+
+        {/* Source cards grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {SOURCES.map(src => (
+            <SourceCard
+              key={src}
+              src={src}
+              scraperState={scraperStatus[src] ?? null}
+              diskFiles={diskData[src]?.files ?? 0}
+              qdrantVectors={getQdrantForSource(src)}
+            />
+          ))}
+        </div>
+
+        {/* Centroid Router */}
+        <CentroidWidget />
       </div>
     </div>
   )
