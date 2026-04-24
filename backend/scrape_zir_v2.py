@@ -49,67 +49,154 @@ HEADERS = {
 # requests+POST бачить тільки 20 підказок (suggestion mode).
 # Playwright клікає Знайти → чекає JS → збирає всі посилання + пагінація.
 
-def fetch_all_ids(log=print) -> list[dict]:
+def _fetch_ids_via_requests(log=print) -> list[dict]:
     """
-    Playwright: відкриваємо сторінку, клікаємо Знайти, збираємо всі ID.
-    Потім requests для кожної окремої сторінки — швидко.
+    Requests-based: POST пагінація через API ЗІР.
+    Кожен запит повертає порцію результатів з посиланнями id=XXXXX.
+    """
+    items = []
+    seen_ids: set[str] = set()
+    start = 0
+    PAGE_SIZE = 20
+    empty_pages = 0
+
+    log("  📡 Requests: пагінація через API ЗІР...")
+    while True:
+        payload = {
+            "t": "getResultList", "wordsVal": "", "srcVal": "ques",
+            "themeVal": "all", "checkedValue": "", "catVal": "0",
+            "hrenVal": "all", "contVal": "cont-no",
+            "statusVal": "1", "statusFOP": "all", "dateS": "", "dateE": "",
+            "start": start,
+        }
+        try:
+            r = requests.post(SEARCH_URL, data=payload, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+        except Exception as ex:
+            log(f"  ⚠️ POST start={start}: {ex}")
+            break
+
+        # Шукаємо всі id= в HTML відповіді
+        ids_found = re.findall(r'[?&]id=(\d+)', r.text)
+        # Також шукаємо title у посиланнях
+        soup = BeautifulSoup(r.text, "html.parser")
+        links = soup.find_all("a", href=re.compile(r'id=\d+'))
+
+        new_count = 0
+        for link in links:
+            href = link.get("href", "")
+            m = re.search(r"id=(\d+)", href)
+            if not m:
+                continue
+            item_id = m.group(1)
+            if item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            title = link.get_text(strip=True)[:200]
+            items.append({"id": item_id, "title": title, "category": ""})
+            new_count += 1
+
+        # Якщо не знайшли посилань з href, шукаємо просто ID у тексті
+        if new_count == 0:
+            for item_id in ids_found:
+                if item_id not in seen_ids:
+                    seen_ids.add(item_id)
+                    items.append({"id": item_id, "title": "", "category": ""})
+                    new_count += 1
+
+        log(f"  📄 start={start}: +{new_count} нових (всього {len(items)})")
+
+        if new_count == 0:
+            empty_pages += 1
+            if empty_pages >= 2:
+                break
+        else:
+            empty_pages = 0
+
+        start += PAGE_SIZE
+        time.sleep(0.2)
+
+    return items
+
+
+def _fetch_ids_via_playwright(log=print) -> list[dict]:
+    """
+    Playwright fallback: відкриваємо сторінку, тригеримо пошук кількома способами.
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        log("❌ Playwright не встановлено: pip install playwright && playwright install chromium", "error")
+        log("❌ Playwright не встановлено", "error")
         return []
 
     items = []
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            locale="uk-UA",
-            user_agent=HEADERS["User-Agent"],
-        )
+        ctx = browser.new_context(locale="uk-UA", user_agent=HEADERS["User-Agent"])
         page = ctx.new_page()
 
         log("  🌐 Playwright: відкриваємо ЗІР...")
         page.goto(SEARCH_URL, wait_until="networkidle", timeout=60_000)
+        time.sleep(2)
 
-        # Клікаємо кнопку "Знайти" щоб отримати всі 5954 результати
-        try:
-            btn = page.query_selector("input[value='Знайти'], button:has-text('Знайти')")
-            if btn:
-                btn.click()
+        # Логуємо HTML для діагностики (перші 500 символів)
+        snippet = page.evaluate("document.body.innerText.slice(0,300)")
+        log(f"  📋 Сторінка (фрагмент): {snippet[:200]}")
+
+        # Спроба 1: шукаємо submit-кнопку різними селекторами
+        clicked = False
+        for sel in [
+            "input[type='submit']",
+            "button[type='submit']",
+            "input[value*='айти']",
+            "button",
+            "[onclick*='search']",
+            "[onclick*='find']",
+        ]:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    clicked = True
+                    log(f"  ✅ Clicked: {sel}")
+                    break
+            except Exception:
+                pass
+
+        # Спроба 2: submit форми через JS
+        if not clicked:
+            try:
+                page.evaluate("document.querySelector('form') && document.querySelector('form').submit()")
+                clicked = True
+                log("  ✅ Form submitted via JS")
+            except Exception as ex:
+                log(f"  ⚠️ JS submit: {ex}")
+
+        if clicked:
+            try:
                 page.wait_for_load_state("networkidle", timeout=30_000)
-                time.sleep(1)
-        except Exception as ex:
-            log(f"  ⚠️ Кнопка Знайти: {ex}")
+            except Exception:
+                pass
+            time.sleep(3)
 
+        # Збираємо всі посилання
         page_num = 1
         while True:
-            # Збираємо всі посилання на Q&A
-            links = page.query_selector_all("a[href*='src=ques'][href*='id=']")
+            links = page.query_selector_all("a[href*='id=']")
             found = 0
             for link in links:
                 href = link.get_attribute("href") or ""
+                if "src=ques" not in href and "bz/view" not in href:
+                    continue
                 m = re.search(r"id=(\d+)", href)
                 if m and not any(x["id"] == m.group(1) for x in items):
                     title = link.inner_text().strip()[:200]
-                    # Категорія: шукаємо найближчий заголовок категорії
-                    category = ""
-                    try:
-                        cat_el = link.evaluate(
-                            "el => { const c = el.closest('li,tr,div')?.previousElementSibling; "
-                            "return c ? c.innerText.trim() : ''; }"
-                        )
-                        if cat_el:
-                            category = cat_el[:100]
-                    except Exception:
-                        pass
-                    items.append({"id": m.group(1), "title": title, "category": category})
+                    items.append({"id": m.group(1), "title": title, "category": ""})
                     found += 1
 
-            log(f"  📄 Сторінка {page_num}: +{found} нових (всього {len(items)})")
+            log(f"  📄 Playwright сторінка {page_num}: +{found} нових (всього {len(items)})")
 
-            # Шукаємо кнопку наступної сторінки
             next_btn = None
             for sel in ["a[title*='аступн']", "a:has-text('Наступна')", "a:has-text('»')",
                         f"a[href*='page={page_num + 1}']", ".pagination a:last-child"]:
@@ -131,6 +218,21 @@ def fetch_all_ids(log=print) -> list[dict]:
 
         browser.close()
 
+    return items
+
+
+def fetch_all_ids(log=print) -> list[dict]:
+    """
+    Спочатку пробуємо requests-based пагінацію (надійніше на сервері).
+    Якщо повертає 0 — Playwright fallback.
+    """
+    items = _fetch_ids_via_requests(log)
+    if items:
+        log(f"  ✅ Requests: зібрано {len(items)} питань")
+        return items
+
+    log("  ⚠️ Requests дав 0 — пробуємо Playwright...", "warning")
+    items = _fetch_ids_via_playwright(log)
     log(f"  ✅ Playwright: зібрано {len(items)} питань")
     return items
 
