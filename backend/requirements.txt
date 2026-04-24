@@ -25,6 +25,7 @@ qdrant-client
 
 # File parsers
 pypdf
+pymupdf
 docx2txt
 
 # Google Drive / Auth / Scheduling
