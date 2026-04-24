@@ -381,5 +381,99 @@ def main():
     print(f"   Файли у: {MOD_DIR}")
 
 
+def run_scrape_mod(
+    log_callback=None,
+    stop_event=None,
+) -> None:
+    """Entry point for server.py — runs full scrape (no --test mode)."""
+    import threading
+
+    _log = log_callback or (lambda msg, lvl="info": print(msg))
+    _stop = stop_event or threading.Event()
+
+    _log("🔍 Збираємо список документів МОУ (Playwright)...", "info")
+    _log(f"   Директорія: {MOD_DIR}", "info")
+
+    docs = fetch_docs_playwright(headless=True)
+    if not docs:
+        _log("❌ Документів не знайдено — перевір з'єднання або структуру сайту.", "error")
+        return
+
+    _log(f"✅ Знайдено {len(docs)} документів.", "info")
+
+    ok = skip = err = 0
+    pw_ctx = browser = pw_page = None
+    try:
+        from playwright.sync_api import sync_playwright
+        pw_ctx = sync_playwright().start()
+        browser = pw_ctx.chromium.launch(headless=True)
+        pw_page = browser.new_context(locale="uk-UA").new_page()
+    except Exception as ex:
+        _log(f"❌ Playwright ініціалізація: {ex}", "error")
+        return
+
+    try:
+        for idx, item in enumerate(docs, 1):
+            if _stop.is_set():
+                _log("⏸ Отримано сигнал зупинки.", "warning")
+                break
+
+            meta = normalize_meta(item)
+            slug = meta["law_id"]
+
+            if Path(MOD_DIR, f"{slug}.txt").exists():
+                skip += 1
+                continue
+
+            title_short = (meta["title"] or slug)[:65]
+            _log(f"  ⬇️  [{idx}/{len(docs)}] {title_short}", "info")
+
+            pdf_urls = get_pdf_urls_playwright(pw_page, meta["url"])
+            time.sleep(SLEEP_SEC)
+
+            if not pdf_urls:
+                _log(f"  ⚠️  PDF URL не знайдено: {slug}", "warning")
+                err += 1
+                continue
+
+            _log(f"       🔗 PDF файлів: {len(pdf_urls)}", "info")
+            meta["pdf_urls"] = pdf_urls
+
+            all_text_parts = []
+            for p_url in pdf_urls:
+                if _stop.is_set():
+                    break
+                pdf_bytes = download_pdf(p_url)
+                time.sleep(PDF_SLEEP_SEC)
+                if not pdf_bytes:
+                    continue
+                text_part = extract_pdf_text(pdf_bytes)
+                if text_part.strip():
+                    all_text_parts.append(text_part.strip())
+
+            if not all_text_parts:
+                _log(f"  ⚠️  Порожній текст (можливо скани): {slug}", "warning")
+                err += 1
+                continue
+
+            separator = "\n\n" + "=" * 50 + "\nНАСТУПНИЙ ДОКУМЕНТ / ДОДАТОК\n" + "=" * 50 + "\n\n"
+            final_text = separator.join(all_text_parts)
+            save_doc(slug, final_text, meta)
+            words = len(final_text.split())
+            _log(f"       ✅ Збережено: {words} слів (з {len(all_text_parts)} файлів)", "info")
+            ok += 1
+
+    finally:
+        if browser:
+            try:
+                browser.close()
+                pw_ctx.stop()
+            except Exception:
+                pass
+
+    _log(f"\n{'='*50}", "info")
+    _log(f"📊 МОУ: ✅ {ok} збережено | ⏭ {skip} вже були | ❌ {err} помилок", "info")
+
+
 if __name__ == "__main__":
     main()

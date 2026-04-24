@@ -94,7 +94,7 @@ type LawPreview = {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions"]
+const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod"]
 
 const RADA_COLLECTIONS = [
   "rada_finance", "rada_state", "rada_personnel", "rada_court",
@@ -198,6 +198,7 @@ const SOURCE_LABELS: Record<string, string> = {
   supreme:   "Верховний суд",
   wiki:      "Legal Aid Wiki (юридичні терміни)",
   positions: "Правові позиції ВС (~12 800 позицій)",
+  mod:       "Міністерство оборони (~210 документів)",
 }
 
 const DEFAULT_SOURCE_STATE: SourceState = {
@@ -1474,6 +1475,20 @@ const SOURCES_INFO: SourceInfo[] = [
     collection: "laws_positions_v2",
     color: "border-[#C9A84C]/30 bg-[#C9A84C]/5",
   },
+  {
+    id: "mod",
+    label: "Міністерство оборони",
+    site: "mod.gov.ua",
+    siteUrl: "https://www.mod.gov.ua",
+    volume: "~210 документів",
+    what: "Накази, порядки та методичні матеріали МОУ з кадрової, фінансової та майнової діяльності. Завантажуються у форматі PDF через Playwright (JS-rendered сайт).",
+    why: "Містить покрокові алгоритми дій, специфічні для військової служби: звільнення, грошове забезпечення, оформлення майна. Ексклюзивні дані, яких немає у Раді або КМУ.",
+    chunks: "4 000 символів / 400 overlap",
+    truncate: "15 000 символів",
+    splitter: "RecursiveCharacterTextSplitter",
+    collection: "laws_mod_v2",
+    color: "border-red-500/30 bg-red-500/5",
+  },
 ]
 
 function SourcesTab() {
@@ -1483,13 +1498,13 @@ function SourcesTab() {
       <div className="bg-[#0d1120] rounded-2xl border border-[#C9A84C]/20 p-5 space-y-2">
         <h2 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Що ми скрапимо і навіщо</h2>
         <p className="text-sm text-gray-400">
-          База знань URAI складається з 6 джерел. Кожне джерело — окремий тип юридичної інформації
+          База знань URAI складається з 7 джерел. Кожне джерело — окремий тип юридичної інформації
           з власним скрапером, форматом зберігання і колекцією Qdrant.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-500">
           <div><span className="text-[#C9A84C] font-bold">~40 000+</span> документів загалом</div>
-          <div><span className="text-[#C9A84C] font-bold">6</span> джерел скрапінгу</div>
-          <div><span className="text-[#C9A84C] font-bold">17</span> колекцій Qdrant v2</div>
+          <div><span className="text-[#C9A84C] font-bold">7</span> джерел скрапінгу</div>
+          <div><span className="text-[#C9A84C] font-bold">18</span> колекцій Qdrant v2</div>
         </div>
       </div>
 

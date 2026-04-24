@@ -90,8 +90,8 @@ KMU_STATE_FILE      = BASE_DIR / "kmu_state.json"         # НПА КМУ
 REINDEX_KMU_STATE   = BASE_DIR / "reindex_kmu_full_state.json"   # Переіндекс КМУ
 REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переіндекс Ради
 # ── V2 scraper sources ─────────────────────────────────────────────────────────
-V2_SCRAPE_SOURCES  = ("rada", "kmu", "ccu", "supreme", "wiki", "positions")
-V2_REINDEX_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions")
+V2_SCRAPE_SOURCES  = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod")
+V2_REINDEX_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod")
 
 def _scrape_v2_state_file(source: str) -> Path:
     return BASE_DIR / f"scrape_v2_{source}_state.json"
@@ -111,10 +111,10 @@ _SB_KEY = (
 _SOURCES = (
     "rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu",
     "reindex_kmu", "reindex_rada",
-    "scrape_v2_rada", "scrape_v2_kmu", "scrape_v2_ccu", "scrape_v2_supreme", "scrape_v2_wiki", "scrape_v2_positions",
+    "scrape_v2_rada", "scrape_v2_kmu", "scrape_v2_ccu", "scrape_v2_supreme", "scrape_v2_wiki", "scrape_v2_positions", "scrape_v2_mod",
     "reindex_v2",  # "all sources" fallback
     "reindex_v2_rada", "reindex_v2_kmu", "reindex_v2_ccu",
-    "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions",
+    "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions", "reindex_v2_mod",
 )
 _sync: dict[str, dict] = {
     src: {
@@ -1855,10 +1855,14 @@ def _do_scrape_v2(session_id: str, source: str, rada_collection: str | None) -> 
     slot = f"scrape_v2_{source}"
     log = _make_reindex_log_cb(slot)
     try:
-        from scrape_all_v2 import run_scrape_all
         _v2_scrape_stop[source].clear()
-        run_scrape_all(source=source, rada_collection=rada_collection,
-                       log_callback=log, stop_event=_v2_scrape_stop[source])
+        if source == "mod":
+            from scrape_mod_v2 import run_scrape_mod
+            run_scrape_mod(log_callback=log, stop_event=_v2_scrape_stop[source])
+        else:
+            from scrape_all_v2 import run_scrape_all
+            run_scrape_all(source=source, rada_collection=rada_collection,
+                           log_callback=log, stop_event=_v2_scrape_stop[source])
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:

@@ -93,6 +93,7 @@ OTHER_V2_COLLECTIONS: list[str] = [
     "laws_ccu_v2",
     "laws_positions_v2",
     "laws_kmu_v2",
+    "laws_mod_v2",
 ]
 
 ALL_V2_COLLECTIONS: list[str] = RADA_V2_COLLECTIONS + OTHER_V2_COLLECTIONS
