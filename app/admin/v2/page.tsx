@@ -102,14 +102,6 @@ const RADA_COLLECTIONS = [
   "rada_admin", "rada_housing", "rada_land", "rada_industry", "rada_other",
 ]
 
-const STATUS_COLORS: Record<string, string> = {
-  ok:         "text-emerald-400",
-  empty:      "text-amber-400",
-  restricted: "text-blue-400",
-  error:      "text-red-400",
-  skipped:    "text-gray-400",
-}
-
 const STATUS_BADGE: Record<string, string> = {
   ok:         "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
   empty:      "bg-amber-500/20 text-amber-300 border border-amber-500/30",
@@ -1414,7 +1406,7 @@ const SOURCES_INFO: SourceInfo[] = [
     volume: "~10 000+ документів",
     what: "Постанови КМУ, розпорядження, накази міністерств. Підзаконні акти виконавчої влади: порядки, правила, ліцензійні умови, тарифи, програми.",
     why: "Більшість практичних питань (ліцензії, дозволи, субсидії, соцвиплати) регулюється саме постановами КМУ, а не законами. Критично для практичних відповідей.",
-    chunks: "4 000 символів / 400 overlap",
+    chunks: "3 000 символів / 300 overlap",
     truncate: "15 000 символів",
     splitter: "MarkdownTextSplitter",
     collection: "laws_kmu_v2",
@@ -1484,7 +1476,7 @@ const SOURCES_INFO: SourceInfo[] = [
     volume: "~210 документів",
     what: "Накази, порядки та методичні матеріали МОУ з кадрової, фінансової та майнової діяльності. Завантажуються у форматі PDF через Playwright (JS-rendered сайт).",
     why: "Містить покрокові алгоритми дій, специфічні для військової служби: звільнення, грошове забезпечення, оформлення майна. Ексклюзивні дані, яких немає у Раді або КМУ.",
-    chunks: "4 000 символів / 400 overlap",
+    chunks: "3 000 символів / 300 overlap",
     truncate: "15 000 символів",
     splitter: "RecursiveCharacterTextSplitter",
     collection: "laws_mod_v2",

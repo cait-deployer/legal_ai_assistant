@@ -4,8 +4,9 @@ scrape_zir_v2.py — Scraper for ZIR (zir.tax.gov.ua).
 ~5954 чинних Q&A (Питання-Відповідь) по податковому законодавству.
 
 Pipeline:
-  1. POST /main/bz/search/?src=ques → отримуємо всі ID (JSON або HTML-fallback)
-  2. GET /main/bz/view/?src=ques&id={id} → requests + BeautifulSoup (no Playwright!)
+  1. Playwright: відкрити сторінку → клікнути "Знайти" → зібрати всі ID + пагінація
+     (результати завантажуються через AJAX results.txt — простий POST не дає всі 5954)
+  2. requests + BeautifulSoup: GET кожної сторінки /main/bz/view/?src=ques&id={id}
   3. Зберігаємо: /root/laws_raw/zir/zir_{id}.txt + .meta.json
 
 Запуск:
@@ -43,139 +44,112 @@ HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 
-# Параметри POST-запиту для отримання списку (чинні Q&A, Питання-Відповіді)
-LIST_PAYLOAD = {
-    "t":            "getResultList",
-    "wordsVal":     "",
-    "srcVal":       "ques",
-    "themeVal":     "all",
-    "checkedValue": "",
-    "catVal":       "0",
-    "hrenVal":      "all",
-    "contVal":      "cont-yes",
-    "statusVal":    "1",    # тільки чинні
-    "statusFOP":    "all",
-    "dateS":        "",
-    "dateE":        "",
-}
-
-
-# ── Fetch list of all IDs ───────────────────────────────────────────────────────
-def _fetch_page(session: requests.Session, start: int = 0) -> requests.Response:
-    payload = {**LIST_PAYLOAD, "start": start}
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = session.post(SEARCH_URL, data=payload, timeout=60)
-            r.raise_for_status()
-            return r
-        except Exception as ex:
-            if attempt == MAX_RETRIES - 1:
-                raise
-            time.sleep(2)
-
+# ── Fetch list of all IDs via Playwright ──────────────────────────────────────
+# Сайт завантажує результати через results.txt AJAX після кліку "Знайти".
+# requests+POST бачить тільки 20 підказок (suggestion mode).
+# Playwright клікає Знайти → чекає JS → збирає всі посилання + пагінація.
 
 def fetch_all_ids(log=print) -> list[dict]:
     """
-    Отримати всі ID питань через POST API.
-    Підтримує JSON-відповідь і HTML-fallback (якщо API повертає HTML).
+    Playwright: відкриваємо сторінку, клікаємо Знайти, збираємо всі ID.
+    Потім requests для кожної окремої сторінки — швидко.
     """
-    session = requests.Session()
-    session.headers.update(HEADERS)
-
-    log("  📡 POST → ZIR API (отримуємо список питань)...")
-    r = _fetch_page(session, start=0)
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log("❌ Playwright не встановлено: pip install playwright && playwright install chromium", "error")
+        return []
 
     items = []
 
-    # --- Спроба 1: JSON-відповідь ---
-    try:
-        data = r.json()
-        rows = None
-        if isinstance(data, list):
-            rows = data
-        elif isinstance(data, dict):
-            # різні можливі ключі залежно від версії API
-            for key in ("rows", "items", "data", "results", "list"):
-                if key in data and isinstance(data[key], list):
-                    rows = data[key]
-                    break
-            if rows is None and "id" in data:
-                rows = [data]
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            locale="uk-UA",
+            user_agent=HEADERS["User-Agent"],
+        )
+        page = ctx.new_page()
 
-        if rows is not None:
-            for row in rows:
-                row_id = row.get("id") or row.get("ID") or row.get("bz_id") or row.get("bz_ID")
-                if row_id:
-                    items.append({
-                        "id":       str(row_id),
-                        "title":    row.get("title") or row.get("name") or row.get("question") or "",
-                        "category": row.get("category") or row.get("theme") or row.get("hren") or "",
-                    })
-            if items:
-                log(f"  ✅ JSON: знайдено {len(items)} питань")
-                return items
-    except Exception:
-        pass
+        log("  🌐 Playwright: відкриваємо ЗІР...")
+        page.goto(SEARCH_URL, wait_until="networkidle", timeout=60_000)
 
-    # --- Спроба 2: HTML — витягаємо посилання з відповіді ---
-    soup = BeautifulSoup(r.text, "html.parser")
+        # Клікаємо кнопку "Знайти" щоб отримати всі 5954 результати
+        try:
+            btn = page.query_selector("input[value='Знайти'], button:has-text('Знайти')")
+            if btn:
+                btn.click()
+                page.wait_for_load_state("networkidle", timeout=30_000)
+                time.sleep(1)
+        except Exception as ex:
+            log(f"  ⚠️ Кнопка Знайти: {ex}")
 
-    # Метод A: посилання вигляду href="...src=ques&id=12345"
-    for link in soup.select("a[href*='src=ques'][href*='id=']"):
-        href = link.get("href", "")
-        m = re.search(r"id=(\d+)", href)
-        if m and not any(x["id"] == m.group(1) for x in items):
-            items.append({
-                "id":       m.group(1),
-                "title":    link.get_text(strip=True)[:200],
-                "category": "",
-            })
+        page_num = 1
+        while True:
+            # Збираємо всі посилання на Q&A
+            links = page.query_selector_all("a[href*='src=ques'][href*='id=']")
+            found = 0
+            for link in links:
+                href = link.get_attribute("href") or ""
+                m = re.search(r"id=(\d+)", href)
+                if m and not any(x["id"] == m.group(1) for x in items):
+                    title = link.inner_text().strip()[:200]
+                    # Категорія: шукаємо найближчий заголовок категорії
+                    category = ""
+                    try:
+                        cat_el = link.evaluate(
+                            "el => { const c = el.closest('li,tr,div')?.previousElementSibling; "
+                            "return c ? c.innerText.trim() : ''; }"
+                        )
+                        if cat_el:
+                            category = cat_el[:100]
+                    except Exception:
+                        pass
+                    items.append({"id": m.group(1), "title": title, "category": category})
+                    found += 1
 
-    # Метод B: data-атрибути або js-рядки з ID
-    if not items:
-        for m in re.finditer(r'"id"\s*:\s*"?(\d+)"?', r.text):
-            row_id = m.group(1)
-            if not any(x["id"] == row_id for x in items):
-                items.append({"id": row_id, "title": "", "category": ""})
+            log(f"  📄 Сторінка {page_num}: +{found} нових (всього {len(items)})")
 
-    if items:
-        log(f"  ✅ HTML-fallback: знайдено {len(items)} питань на першій сторінці")
-        # Перевіряємо пагінацію — шукаємо загальну кількість
-        total_match = re.search(r"Рядків знайдено[:\s]+(\d+)", r.text)
-        total = int(total_match.group(1)) if total_match else len(items)
-        page_size = len(items)
-
-        if total > page_size and page_size > 0:
-            log(f"  📄 Пагінація: всього {total}, по {page_size} на сторінку...")
-            start = page_size
-            while start < total:
+            # Шукаємо кнопку наступної сторінки
+            next_btn = None
+            for sel in ["a[title*='аступн']", "a:has-text('Наступна')", "a:has-text('»')",
+                        f"a[href*='page={page_num + 1}']", ".pagination a:last-child"]:
                 try:
-                    r2 = _fetch_page(session, start=start)
-                    soup2 = BeautifulSoup(r2.text, "html.parser")
-                    found = 0
-                    for link in soup2.select("a[href*='src=ques'][href*='id=']"):
-                        href = link.get("href", "")
-                        m2 = re.search(r"id=(\d+)", href)
-                        if m2 and not any(x["id"] == m2.group(1) for x in items):
-                            items.append({
-                                "id":       m2.group(1),
-                                "title":    link.get_text(strip=True)[:200],
-                                "category": "",
-                            })
-                            found += 1
-                    log(f"    start={start}: +{found} (всього {len(items)})")
-                    if found == 0:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible():
+                        next_btn = el
                         break
-                    start += page_size
-                    time.sleep(0.5)
-                except Exception as ex:
-                    log(f"  ⚠️ Пагінація помилка start={start}: {ex}")
-                    break
+                except Exception:
+                    pass
 
-    if not items:
-        log("  ❌ Не вдалося витягти ID — перевір формат відповіді API")
+            if not next_btn or found == 0:
+                break
 
+            next_btn.click()
+            page.wait_for_load_state("networkidle", timeout=30_000)
+            time.sleep(0.5)
+            page_num += 1
+
+        browser.close()
+
+    log(f"  ✅ Playwright: зібрано {len(items)} питань")
     return items
+
+
+# ── UNUSED — залишено для довідки про формат POST ─────────────────────────────
+def _fetch_page_requests_unused(start: int = 0):
+    """
+    Не використовується: POST повертає тільки 20 suggestion-результатів.
+    Залишено як довідка про параметри API.
+    """
+    payload = {
+        "t": "getResultList", "wordsVal": "", "srcVal": "ques",
+        "themeVal": "all", "checkedValue": "", "catVal": "0",
+        "hrenVal": "all", "contVal": "cont-no",  # cont-no = всі результати
+        "statusVal": "1", "statusFOP": "all", "dateS": "", "dateE": "",
+        "start": start,
+    }
+    return requests.post(SEARCH_URL, data=payload, headers=HEADERS, timeout=60)
+
 
 
 # ── Fetch individual Q&A page ──────────────────────────────────────────────────

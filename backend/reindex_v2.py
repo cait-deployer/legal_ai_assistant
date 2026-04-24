@@ -42,12 +42,12 @@ SOURCE_TO_V2_COLLECTION = {
 
 SPLITTERS = {
     "rada":      MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300),
-    "kmu":       MarkdownTextSplitter(chunk_size=4000, chunk_overlap=400),
+    "kmu":       MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300),
     "ccu":       RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
     "supreme":   RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
     "wiki":      RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
     "positions": RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
-    "mod":       RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400),
+    "mod":       RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300),
     "zir":       RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
 }
 

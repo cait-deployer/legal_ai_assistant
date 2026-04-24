@@ -3765,13 +3765,19 @@ async def ask(body: AskRequest):
                 "Пріоритет: закони і кодекси > постанови КМУ > правові позиції ВС > вікі. Правові позиції корисні для тлумачення, але якщо є пряма норма закону — вибирай її першою.\n"
                 f"ОБОВ'ЯЗКОВО вибери рівно {_rr_slots} найкорисніших фрагментів.\n"
                 f"Якщо знайшов хоча б {_rr_slots} підходящих — вибери всі {_rr_slots}.\n"
-                "Відповідь — ТІЛЬКИ числа через пробіл, наприклад: 3 7 1 12 5 9 2 8\n"
-                "НЕ пиши нічого крім чисел.\n\n"
-                f"{_chunks_text}\n\nВибрані номери (рівно {_rr_slots} штук):"
+                "Відповідь має бути СТРОГО у форматі JSON:\n"
+                '{"indices": [3, 7, 1, 12]}\n'
+                f"Індекси — це номери фрагментів (від 1 до {len(_candidates)}).\n\n"
+                f"{_chunks_text}"
+            )
+            _rr_cfg_json = GenerationConfig(
+                temperature=0.0, 
+                max_output_tokens=200, 
+                response_mime_type="application/json"
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
-                generation_config=_rr_cfg,
+                generation_config=_rr_cfg_json,
             )
             _rr_raw = ""
             try:
@@ -3787,10 +3793,19 @@ async def ask(body: AskRequest):
                     )
                 except Exception:
                     pass
+            
+            _raw_indices = []
+            try:
+                import json
+                _parsed = json.loads(_rr_raw)
+                _raw_indices = _parsed.get("indices", [])
+            except Exception as e:
+                logger.warning(f"Reranker JSON parse error: {e} | Raw: {_rr_raw[:100]}")
+
             _indices = []
-            for tok in _rr_raw.split():
+            for num in _raw_indices:
                 try:
-                    idx = int(tok.strip(".,;[]()")) - 1
+                    idx = int(num) - 1
                     if 0 <= idx < len(_candidates) and idx not in _indices:
                         _indices.append(idx)
                 except ValueError:
