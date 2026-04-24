@@ -89,13 +89,16 @@ LPD_STATE_FILE      = BASE_DIR / "lpd_state.json"         # Правові по�
 KMU_STATE_FILE      = BASE_DIR / "kmu_state.json"         # НПА КМУ
 REINDEX_KMU_STATE   = BASE_DIR / "reindex_kmu_full_state.json"   # Переіндекс КМУ
 REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переіндекс Ради
-REINDEX_V2_STATE    = BASE_DIR / "reindex_v2_state.json"          # Реіндекс v2
-
 # ── V2 scraper sources ─────────────────────────────────────────────────────────
-V2_SCRAPE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions")
+V2_SCRAPE_SOURCES  = ("rada", "kmu", "ccu", "supreme", "wiki", "positions")
+V2_REINDEX_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions")
 
 def _scrape_v2_state_file(source: str) -> Path:
     return BASE_DIR / f"scrape_v2_{source}_state.json"
+
+def _reindex_v2_state_file(source: str | None) -> Path:
+    tag = source if source else "all"
+    return BASE_DIR / f"reindex_v2_{tag}_state.json"
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 _SB_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -109,7 +112,9 @@ _SOURCES = (
     "rada", "supreme", "wiki", "templates", "ccu", "lpd", "kmu",
     "reindex_kmu", "reindex_rada",
     "scrape_v2_rada", "scrape_v2_kmu", "scrape_v2_ccu", "scrape_v2_supreme", "scrape_v2_wiki", "scrape_v2_positions",
-    "reindex_v2",
+    "reindex_v2",  # "all sources" fallback
+    "reindex_v2_rada", "reindex_v2_kmu", "reindex_v2_ccu",
+    "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions",
 )
 _sync: dict[str, dict] = {
     src: {
@@ -123,7 +128,10 @@ _sync: dict[str, dict] = {
 _lock = threading.Lock()
 MAX_LIVE_LOGS = 500
 _reindex_stop = {"kmu": threading.Event(), "rada": threading.Event()}
-_v2_stop = {"reindex": threading.Event()}
+_v2_stop = {
+    "reindex": threading.Event(),  # "all sources"
+    **{s: threading.Event() for s in V2_REINDEX_SOURCES},
+}
 _v2_scrape_stop = {s: threading.Event() for s in V2_SCRAPE_SOURCES}
 
 
@@ -1859,19 +1867,21 @@ def _do_scrape_v2(session_id: str, source: str, rada_collection: str | None) -> 
             _sync[slot]["pause_requested"] = False
 
 
-def _do_reindex_v2(session_id: str, source: str | None, init_only: bool) -> None:
-    src = "reindex_v2"
-    log = _make_reindex_log_cb(src)
+def _do_reindex_v2(session_id: str, source: str | None, init_only: bool, reset: bool = False) -> None:
+    slot     = f"reindex_v2_{source}" if source else "reindex_v2"
+    stop_key = source if source else "reindex"
+    log = _make_reindex_log_cb(slot)
     try:
         from reindex_v2 import run_reindex_v2
-        _v2_stop["reindex"].clear()
-        run_reindex_v2(source=source, log_callback=log, stop_event=_v2_stop["reindex"], init_only=init_only)
+        _v2_stop[stop_key].clear()
+        run_reindex_v2(source=source, log_callback=log, stop_event=_v2_stop[stop_key],
+                       init_only=init_only, reset=reset)
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:
         with _lock:
-            _sync[src]["running"] = False
-            _sync[src]["pause_requested"] = False
+            _sync[slot]["running"] = False
+            _sync[slot]["pause_requested"] = False
 
 
 @app.get("/admin/v2/scrape/status")
@@ -1976,43 +1986,98 @@ async def v2_scrape_resume(body: dict = Body(default={})):
     return {"ok": True, "session_id": session_id}
 
 
+def _any_reindex_v2_running() -> str | None:
+    """Returns the running source name, or None if none running."""
+    with _lock:
+        for s in V2_REINDEX_SOURCES:
+            if _sync[f"reindex_v2_{s}"]["running"]:
+                return s
+        if _sync["reindex_v2"]["running"]:
+            return "all"
+    return None
+
+
+@app.get("/admin/v2/reindex/status")
+async def v2_reindex_status():
+    """Per-source reindex status: running, resume_progress, live_logs."""
+    result = {}
+    for source in V2_REINDEX_SOURCES:
+        slot = f"reindex_v2_{source}"
+        with _lock:
+            running   = _sync[slot]["running"]
+            pause_req = _sync[slot]["pause_requested"]
+            logs      = list(_sync[slot]["live_logs"])
+        state_file = _reindex_v2_state_file(source)
+        resume_state = None
+        if state_file.exists():
+            try:
+                s = json.loads(state_file.read_text(encoding="utf-8"))
+                resume_state = {"file_idx": s.get("file_idx", 0), "stats": s.get("stats", {})}
+            except Exception:
+                pass
+        result[source] = {
+            "running":         running,
+            "pause_requested": pause_req,
+            "can_resume":      resume_state is not None and not running,
+            "resume_progress": resume_state,
+            "live_logs":       logs,
+        }
+    return result
+
+
 @app.post("/admin/v2/reindex/trigger")
 async def v2_reindex_trigger(body: dict = Body(default={})):
     source    = body.get("source") or None
     init_only = bool(body.get("init_only", False))
+    reset     = bool(body.get("reset", False))
+
+    if source and source not in V2_REINDEX_SOURCES:
+        raise HTTPException(400, f"source має бути одним із {list(V2_REINDEX_SOURCES)}")
+
+    # Enforce single-run across all reindex_v2_* slots
+    running_src = _any_reindex_v2_running()
+    if running_src:
+        raise HTTPException(409, f"Реіндекс '{running_src}' вже виконується — зачекайте завершення")
+
+    slot = f"reindex_v2_{source}" if source else "reindex_v2"
     session_id = str(uuid.uuid4())
     try:
-        _start_sync("reindex_v2", _do_reindex_v2, session_id,
-                    source=source, init_only=init_only)
+        _start_sync(slot, _do_reindex_v2, session_id,
+                    source=source, init_only=init_only, reset=reset)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"ok": True, "session_id": session_id}
 
 
 @app.post("/admin/v2/reindex/stop")
-async def v2_reindex_stop():
+async def v2_reindex_stop(body: dict = Body(default={})):
+    source   = body.get("source") or None
+    stop_key = source if source else "reindex"
+    slot     = f"reindex_v2_{source}" if source else "reindex_v2"
     with _lock:
-        if not _sync["reindex_v2"]["running"]:
+        if not _sync[slot]["running"]:
             raise HTTPException(400, "Реіндекс не виконується")
-        _v2_stop["reindex"].set()
-        _sync["reindex_v2"]["pause_requested"] = True
+        _v2_stop[stop_key].set()
+        _sync[slot]["pause_requested"] = True
     return {"ok": True}
 
 
 @app.get("/admin/v2/reindex/logs")
-async def v2_reindex_logs():
+async def v2_reindex_logs(source: str | None = None):
+    """Logs for a specific source (or 'all' if no source given)."""
+    slot = f"reindex_v2_{source}" if source else "reindex_v2"
+    if slot not in _sync:
+        raise HTTPException(400, f"Невідоме джерело: {source}")
     with _lock:
-        running   = _sync["reindex_v2"]["running"]
-        pause_req = _sync["reindex_v2"]["pause_requested"]
-        logs      = list(_sync["reindex_v2"]["live_logs"])
+        running   = _sync[slot]["running"]
+        pause_req = _sync[slot]["pause_requested"]
+        logs      = list(_sync[slot]["live_logs"])
+    state_file = _reindex_v2_state_file(source)
     state = None
-    if REINDEX_V2_STATE.exists():
+    if state_file.exists():
         try:
-            s = json.loads(REINDEX_V2_STATE.read_text(encoding="utf-8"))
-            state = {
-                "file_idx": s.get("file_idx", 0),
-                "stats":    s.get("stats", {}),
-            }
+            s = json.loads(state_file.read_text(encoding="utf-8"))
+            state = {"file_idx": s.get("file_idx", 0), "stats": s.get("stats", {})}
         except Exception:
             pass
     return {
@@ -2026,15 +2091,21 @@ async def v2_reindex_logs():
 
 @app.post("/admin/v2/reindex/resume")
 async def v2_reindex_resume(body: dict = Body(default={})):
-    if _sync["reindex_v2"]["running"]:
-        raise HTTPException(409, "Реіндекс вже виконується")
-    if not REINDEX_V2_STATE.exists():
-        raise HTTPException(400, "Немає збереженого стану для відновлення")
     source    = body.get("source") or None
     init_only = bool(body.get("init_only", False))
+    slot      = f"reindex_v2_{source}" if source else "reindex_v2"
+
+    running_src = _any_reindex_v2_running()
+    if running_src:
+        raise HTTPException(409, f"Реіндекс '{running_src}' вже виконується")
+
+    state_file = _reindex_v2_state_file(source)
+    if not state_file.exists():
+        raise HTTPException(400, "Немає збереженого стану для відновлення")
+
     session_id = str(uuid.uuid4())
-    _start_sync("reindex_v2", _do_reindex_v2, session_id,
-                source=source, init_only=init_only)
+    _start_sync(slot, _do_reindex_v2, session_id,
+                source=source, init_only=init_only, reset=False)
     return {"ok": True, "session_id": session_id}
 
 

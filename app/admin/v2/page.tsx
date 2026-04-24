@@ -45,14 +45,6 @@ type ReindexResumeProgress = {
   stats: ReindexStats
 }
 
-type ReindexPanelState = {
-  running: boolean
-  pause_requested: boolean
-  live_logs: LogEntry[]
-  can_resume: boolean
-  resume_progress: ReindexResumeProgress | null
-}
-
 type AnalyticsSummary = {
   total: number
   ok: number
@@ -378,33 +370,227 @@ function ScraperTab() {
   )
 }
 
+// ── Reindex types ──────────────────────────────────────────────────────────────
+
+type ReindexSourceState = {
+  running: boolean
+  pause_requested: boolean
+  live_logs: LogEntry[]
+  can_resume: boolean
+  resume_progress: ReindexResumeProgress | null
+}
+
+type AllReindexStatus = Record<string, ReindexSourceState>
+
+const DEFAULT_REINDEX_SOURCE_STATE: ReindexSourceState = {
+  running: false, pause_requested: false, live_logs: [], can_resume: false, resume_progress: null,
+}
+
+// ── ReindexSourcePanel ─────────────────────────────────────────────────────────
+
+function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
+  source: string
+  state: ReindexSourceState
+  collectionsReady: boolean | null
+  onRefresh: () => Promise<void>
+}) {
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState("")
+  const [stoppedAt, setStoppedAt] = useState<string | null>(null)
+  const prevRunning = useRef(state.running)
+
+  // Detect running → stopped transition for banner
+  useEffect(() => {
+    if (prevRunning.current && !state.running) {
+      setStoppedAt(new Date().toLocaleTimeString("uk-UA"))
+    }
+    prevRunning.current = state.running
+  }, [state.running])
+
+  async function doTrigger(reset = false) {
+    setLoading(true); setError(""); setStoppedAt(null)
+    try {
+      const res = await fetch("/api/admin/v2/reindex/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, reset }),
+      })
+      const data = await res.json()
+      if (!res.ok) setError(data.detail || data.error || "Помилка запуску")
+      else { setLogsOpen(true); await onRefresh() }
+    } catch { setError("Помилка з'єднання") }
+    setLoading(false)
+  }
+
+  async function doStop() {
+    setLoading(true)
+    try {
+      await fetch("/api/admin/v2/reindex/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+      })
+      await onRefresh()
+    } catch { /* ignore */ }
+    setLoading(false)
+  }
+
+  async function doResume() {
+    setLoading(true); setError(""); setStoppedAt(null)
+    try {
+      const res = await fetch("/api/admin/v2/reindex/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+      })
+      const data = await res.json()
+      if (!res.ok) setError(data.detail || data.error || "Помилка відновлення")
+      else { setLogsOpen(true); await onRefresh() }
+    } catch { setError("Помилка з'єднання") }
+    setLoading(false)
+  }
+
+  const stats = state.resume_progress?.stats ?? {}
+  const fileIdx = state.resume_progress?.file_idx
+
+  return (
+    <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <span className="text-sm font-bold text-[#E0E6ED] uppercase tracking-wider">{source}</span>
+          <span className="ml-2 text-xs text-gray-500 hidden sm:inline">{SOURCE_LABELS[source]}</span>
+        </div>
+        <RunningBadge running={state.running} paused={state.pause_requested} />
+      </div>
+
+      {/* Progress stats */}
+      {Object.keys(stats).length > 0 && (
+        <div className="space-y-1">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                  <th className="pb-1 pr-3">Законів</th>
+                  <th className="pb-1 pr-3">Чанків</th>
+                  <th className="pb-1 pr-3 text-emerald-400">Завантажено</th>
+                  <th className="pb-1 text-red-400">Помилок</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(stats).map(([src, s]) => (
+                  <tr key={src} className="text-[#E0E6ED]">
+                    <td className="py-1 pr-3">{s.laws ?? 0}</td>
+                    <td className="py-1 pr-3">{s.chunks ?? 0}</td>
+                    <td className="py-1 pr-3 text-emerald-400 font-semibold">{s.uploaded ?? 0}</td>
+                    <td className="py-1 text-red-400">{s.errors ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {fileIdx != null && (
+            <div className="text-xs text-gray-500">Позиція: <b className="text-gray-300">{fileIdx}</b></div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</div>
+      )}
+
+      {/* Stopped banner */}
+      {stoppedAt && !state.running && (
+        <div className="flex items-center justify-between gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+            <span className="font-bold text-red-300">ЗУПИНЕНО о {stoppedAt}</span>
+            {state.can_resume && <span className="text-amber-400">— прогрес збережено</span>}
+          </div>
+          <button onClick={() => setStoppedAt(null)} className="text-gray-600 hover:text-gray-400 text-xs">✕</button>
+        </div>
+      )}
+
+      {/* Buttons */}
+      <div className="flex gap-2 flex-wrap">
+        {!state.running && !state.can_resume && (
+          <button
+            onClick={() => doTrigger(false)}
+            disabled={loading || collectionsReady === false}
+            className="px-3 py-1.5 rounded-lg bg-[#C9A84C] text-[#0A0E1A] font-bold text-xs hover:bg-[#d4b460] disabled:opacity-50 transition-colors"
+          >
+            ▶ Запустити
+          </button>
+        )}
+        {!state.running && state.can_resume && (
+          <>
+            <button
+              onClick={doResume}
+              disabled={loading || collectionsReady === false}
+              className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white font-bold text-xs hover:bg-emerald-800 disabled:opacity-50 transition-colors"
+            >
+              ▶ Продовжити
+            </button>
+            <button
+              onClick={() => doTrigger(true)}
+              disabled={loading || collectionsReady === false}
+              className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs hover:bg-[#1e293b] disabled:opacity-50 transition-colors"
+            >
+              Почати заново
+            </button>
+          </>
+        )}
+        {state.running && !state.pause_requested && (
+          <button
+            onClick={doStop}
+            disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-red-600 text-white font-bold text-xs hover:bg-red-700 disabled:opacity-50 transition-colors"
+          >
+            ⏸ Зупинити
+          </button>
+        )}
+        {state.live_logs.length > 0 && (
+          <button
+            onClick={() => setLogsOpen(o => !o)}
+            className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs hover:bg-[#1e293b] transition-colors"
+          >
+            {logsOpen ? "▲ Сховати логи" : "▼ Логи"}
+          </button>
+        )}
+      </div>
+
+      {/* Logs (collapsible) */}
+      {logsOpen && state.live_logs.length > 0 && (
+        <>
+          <div className="flex items-center gap-2">
+            {state.running && state.pause_requested && (
+              <span className="text-xs text-amber-400 animate-pulse">Зупиняється, чекаємо завершення батчу...</span>
+            )}
+            {state.running && !state.pause_requested && (
+              <span className="text-xs text-emerald-400 animate-pulse">Виконується...</span>
+            )}
+          </div>
+          <LogPanel logs={state.live_logs} />
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Reindex tab ────────────────────────────────────────────────────────────────
 
 function ReindexTab() {
-  const [state, setState] = useState<ReindexPanelState | null>(null)
-  const [source, setSource] = useState<string>("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [allStatus, setAllStatus]           = useState<AllReindexStatus>({})
   const [collectionsReady, setCollectionsReady] = useState<boolean | null>(null)
-  const [initDone, setInitDone] = useState(false)
-  const [stoppedAt, setStoppedAt] = useState<string | null>(null)
-  const pollRef       = useRef<ReturnType<typeof setInterval> | null>(null)
-  const afterStopRef  = useRef(0)   // countdown of extra polls after stopped
+  const [initLoading, setInitLoading]       = useState(false)
+  const [initError, setInitError]           = useState("")
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchState = useCallback(async () => {
+  const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/v2/reindex/logs")
-      if (res.ok) {
-        const data: ReindexPanelState = await res.json()
-        setState(prev => {
-          // detect running → stopped transition
-          if (prev?.running && !data.running && !data.pause_requested) {
-            setStoppedAt(new Date().toLocaleTimeString("uk-UA"))
-            afterStopRef.current = 4   // poll 4 more times to confirm
-          }
-          return data
-        })
-      }
+      const res = await fetch("/api/admin/v2/reindex/status")
+      if (res.ok) setAllStatus(await res.json())
     } catch { /* ignore */ }
   }, [])
 
@@ -414,46 +600,32 @@ function ReindexTab() {
       if (res.ok) {
         const data = await res.json()
         const counts: Record<string, number> = data.qdrant_v2 ?? {}
-        const allExist = Object.keys(counts).length >= 17 && Object.values(counts).every(v => v >= 0)
-        setCollectionsReady(allExist)
+        setCollectionsReady(Object.keys(counts).length >= 17 && Object.values(counts).every(v => v >= 0))
       }
     } catch { /* ignore */ }
   }, [])
 
   useEffect(() => {
-    fetchState()
+    fetchStatus()
     checkCollections()
-  }, [fetchState, checkCollections])
+  }, [fetchStatus, checkCollections])
 
-  // Adaptive polling: 1.5s while stopping, 3s while running, brief tail after stopped
+  const anyRunning = SOURCES.some(s => allStatus[s]?.running)
+  const anyStopping = SOURCES.some(s => allStatus[s]?.running && allStatus[s]?.pause_requested)
+
+  // Adaptive polling
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
-
-    const isStopping = state?.running && state?.pause_requested
-    const isRunning  = state?.running && !state?.pause_requested
-
-    if (isStopping) {
-      pollRef.current = setInterval(fetchState, 1500)
-    } else if (isRunning) {
-      pollRef.current = setInterval(fetchState, 3000)
-    } else if (afterStopRef.current > 0) {
-      pollRef.current = setInterval(() => {
-        afterStopRef.current -= 1
-        fetchState()
-        if (afterStopRef.current <= 0 && pollRef.current) {
-          clearInterval(pollRef.current)
-          pollRef.current = null
-        }
-      }, 2000)
+    if (anyStopping) {
+      pollRef.current = setInterval(fetchStatus, 1500)
+    } else if (anyRunning) {
+      pollRef.current = setInterval(fetchStatus, 3000)
     }
-
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.running, state?.pause_requested, fetchState])
+  }, [anyRunning, anyStopping, fetchStatus])
 
   async function handleInit() {
-    setLoading(true)
-    setError("")
+    setInitLoading(true); setInitError("")
     try {
       const res = await fetch("/api/admin/v2/reindex/trigger", {
         method: "POST",
@@ -462,72 +634,14 @@ function ReindexTab() {
       })
       const data = await res.json()
       if (!res.ok) {
-        setError(data.detail || data.error || "Помилка")
+        setInitError(data.detail || data.error || "Помилка")
       } else {
-        await fetchState()
-        pollRef.current = setInterval(async () => {
-          await fetchState()
-          await checkCollections()
-        }, 3000)
-        setInitDone(true)
+        await fetchStatus()
+        await checkCollections()
       }
-    } catch {
-      setError("Помилка з'єднання")
-    }
-    setLoading(false)
+    } catch { setInitError("Помилка з'єднання") }
+    setInitLoading(false)
   }
-
-  async function handleStart() {
-    setLoading(true)
-    setError("")
-    try {
-      const body: Record<string, unknown> = { init_only: false }
-      if (source) body.source = source
-      const res = await fetch("/api/admin/v2/reindex/trigger", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) setError(data.detail || data.error || "Помилка запуску")
-      else { await fetchState(); pollRef.current = setInterval(fetchState, 3000) }
-    } catch {
-      setError("Помилка з'єднання")
-    }
-    setLoading(false)
-  }
-
-  async function handleStop() {
-    setLoading(true)
-    try {
-      await fetch("/api/admin/v2/reindex/stop", { method: "POST" })
-      await fetchState()
-    } catch { /* ignore */ }
-    setLoading(false)
-  }
-
-  async function handleResume() {
-    setLoading(true)
-    setError("")
-    try {
-      const body: Record<string, unknown> = { init_only: false }
-      if (source) body.source = source
-      const res = await fetch("/api/admin/v2/reindex/resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (!res.ok) setError(data.detail || data.error || "Помилка відновлення")
-      else { await fetchState(); pollRef.current = setInterval(fetchState, 3000) }
-    } catch {
-      setError("Помилка з'єднання")
-    }
-    setLoading(false)
-  }
-
-  const stats = state?.resume_progress?.stats ?? {}
-  const statSources = Object.keys(stats)
 
   return (
     <div className="space-y-6">
@@ -539,7 +653,7 @@ function ReindexTab() {
             <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30"}`}>1</span>
             <div>
               <span className="font-semibold">Ініціалізація колекцій</span>
-              <span className="text-gray-400"> — створює 17 порожніх _v2 колекцій у Qdrant. </span>
+              <span className="text-gray-400"> — створює 17 _v2 колекцій у Qdrant. </span>
               {collectionsReady === true && <span className="text-emerald-400 font-bold">✅ Вже зроблено!</span>}
               {collectionsReady === false && <span className="text-amber-400">Потрібно зробити один раз.</span>}
               {collectionsReady === null && <span className="text-gray-500">Перевірка...</span>}
@@ -548,188 +662,62 @@ function ReindexTab() {
           <div className="flex gap-3">
             <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30" : "bg-gray-700/50 text-gray-500 border border-gray-600/30"}`}>2</span>
             <div>
-              <span className="font-semibold">Реіндекс</span>
-              <span className="text-gray-400"> — читає тексти з диску ({`/root/laws_raw/`}), ділить на чанки, ембедить через gemini-embedding-001, завантажує у Qdrant. Займає ~50-80 годин для всіх джерел. </span>
-              <span className="text-gray-500">Можна зупинити і продовжити в будь-який момент.</span>
+              <span className="font-semibold">Реіндекс по джерелах</span>
+              <span className="text-gray-400"> — обирай кожне джерело окремо. Читає тексти з диску, ділить на чанки, ембедить через gemini-embedding-001, завантажує у Qdrant. </span>
+              <span className="text-amber-400 font-medium">Тільки одне джерело може працювати одночасно.</span>
             </div>
           </div>
         </div>
         <div className="text-xs text-gray-500 border-t border-[#C9A84C]/10 pt-3">
-          ⚠️ Реіндекс запускати тільки після того, як скрапер завантажив файли на диск (вкладка Скрапер)
+          ⚠️ Запускай реіндекс тільки після завершення скрапінгу (вкладка Скрапер)
         </div>
       </div>
 
       {/* Step 1: Init */}
-      {collectionsReady === false && !initDone && (
+      {collectionsReady === false && (
         <div className="bg-[#111827] rounded-2xl border border-amber-500/20 p-5 space-y-3">
           <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">Крок 1 — Ініціалізація колекцій</h3>
-          <p className="text-sm text-gray-400">Колекції ще не створені. Натисни кнопку нижче — займе 5-10 секунд.</p>
+          <p className="text-sm text-gray-400">Колекції ще не створені. Натисни кнопку — займе 5-10 секунд.</p>
+          {initError && (
+            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{initError}</div>
+          )}
           <button
             onClick={handleInit}
-            disabled={loading || (state?.running ?? false)}
+            disabled={initLoading || anyRunning}
             className="px-5 py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? "Створення..." : "🗂️ Створити 17 колекцій Qdrant"}
+            {initLoading ? "Створення..." : "🗂️ Створити 17 колекцій Qdrant"}
           </button>
         </div>
       )}
 
       {collectionsReady === true && (
-        <div className="bg-emerald-500/10 rounded-xl border border-emerald-500/20 px-4 py-3 text-sm text-emerald-300 font-medium">
-          ✅ 17 _v2 колекцій Qdrant існують. Крок 1 виконано.
+        <div className="bg-emerald-500/10 rounded-xl border border-emerald-500/20 px-4 py-3 text-sm text-emerald-300 font-medium flex items-center justify-between">
+          <span>✅ 17 _v2 колекцій Qdrant існують. Крок 1 виконано.</span>
+          <button onClick={fetchStatus} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Оновити</button>
         </div>
       )}
 
-      {/* Step 2: Reindex controls */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Крок 2 — Реіндекс</h3>
-          <RunningBadge running={state?.running ?? false} paused={state?.pause_requested ?? false} />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500 uppercase tracking-wider">Джерело</label>
-          <select
-            value={source}
-            onChange={e => setSource(e.target.value)}
-            disabled={state?.running}
-            className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] disabled:opacity-50 w-48"
-          >
-            <option value="">Усі джерела</option>
-            {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <p className="text-xs text-gray-600 mt-1">
-            Рекомендується: спочатку "Усі джерела". Або вибери конкретне якщо хочеш переіндексувати тільки одне.
-          </p>
-        </div>
-
-        {error && (
-          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-            {error}
-          </div>
-        )}
-
-        {state?.can_resume && !state?.running && (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 text-sm text-amber-300 flex items-center justify-between gap-3">
-            <div>
-              <span className="font-bold">Є збережений прогрес</span>
-              <span className="text-amber-400/70"> — файл {state.resume_progress?.file_idx ?? "?"} з усіх. Натисни «Продовжити» щоб не починати заново.</span>
-            </div>
-            <button
-              onClick={handleResume}
-              disabled={loading}
-              className="shrink-0 px-4 py-2 rounded-lg bg-amber-600 text-white font-bold text-sm hover:bg-amber-700 disabled:opacity-50 transition-colors"
-            >
-              ▶ Продовжити
+      {/* Step 2: Per-source panels */}
+      {collectionsReady !== false && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-[#E0E6ED]">Крок 2 — Реіндекс по джерелах</h3>
+            <button onClick={fetchStatus} className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs hover:bg-[#1e293b] transition-colors">
+              Оновити
             </button>
           </div>
-        )}
-
-        <div className="flex gap-3 flex-wrap">
-          {!state?.running && !state?.can_resume && (
-            <button
-              onClick={handleStart}
-              disabled={loading || collectionsReady === false}
-              className="px-5 py-2.5 rounded-lg bg-[#C9A84C] text-[#0A0E1A] font-bold text-sm hover:bg-[#d4b460] disabled:opacity-50 transition-colors"
-            >
-              ▶ Запустити реіндекс
-            </button>
-          )}
-          {!state?.running && state?.can_resume && (
-            <button
-              onClick={handleStart}
-              disabled={loading || collectionsReady === false}
-              className="px-4 py-2 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-sm hover:bg-[#1e293b] disabled:opacity-50 transition-colors"
-            >
-              Почати заново
-            </button>
-          )}
-          {state?.running && (
-            <button
-              onClick={handleStop}
-              disabled={loading}
-              className="px-5 py-2.5 rounded-lg bg-red-600 text-white font-bold text-sm hover:bg-red-700 disabled:opacity-50 transition-colors"
-            >
-              ⏸ Зупинити (збереже прогрес)
-            </button>
-          )}
-          <button
-            onClick={fetchState}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-sm hover:bg-[#1e293b] disabled:opacity-50 transition-colors"
-          >
-            Оновити
-          </button>
-        </div>
-      </div>
-
-      {/* Stopped banner */}
-      {stoppedAt && !state?.running && (
-        <div className="bg-[#111827] rounded-xl border border-red-500/30 px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-            <span className="font-bold text-red-300">ЗУПИНЕНО</span>
-            <span className="text-gray-500">о {stoppedAt}</span>
-            {state?.can_resume && (
-              <span className="text-amber-400 text-xs">— прогрес збережено, можна продовжити</span>
-            )}
-          </div>
-          <button
-            onClick={() => setStoppedAt(null)}
-            className="text-gray-600 hover:text-gray-400 text-sm shrink-0"
-          >✕</button>
+          {SOURCES.map(src => (
+            <ReindexSourcePanel
+              key={src}
+              source={src}
+              state={allStatus[src] ?? DEFAULT_REINDEX_SOURCE_STATE}
+              collectionsReady={collectionsReady}
+              onRefresh={fetchStatus}
+            />
+          ))}
         </div>
       )}
-
-      {/* Progress stats */}
-      {statSources.length > 0 && (
-        <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-3">
-          <h3 className="text-xs font-bold text-[#C9A84C] uppercase tracking-wider">
-            Статистика {state?.resume_progress?.file_idx != null && `— позиція ${state.resume_progress.file_idx}`}
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
-                  <th className="pb-2 pr-4">Джерело</th>
-                  <th className="pb-2 pr-4">Законів</th>
-                  <th className="pb-2 pr-4">Чанків</th>
-                  <th className="pb-2 pr-4 text-emerald-400">Завантажено</th>
-                  <th className="pb-2 text-red-400">Помилок</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#C9A84C]/5">
-                {statSources.map(src => {
-                  const s = stats[src] ?? {}
-                  return (
-                    <tr key={src} className="text-[#E0E6ED]">
-                      <td className="py-1.5 pr-4 font-mono">{src}</td>
-                      <td className="py-1.5 pr-4">{s.laws ?? 0}</td>
-                      <td className="py-1.5 pr-4">{s.chunks ?? 0}</td>
-                      <td className="py-1.5 pr-4 text-emerald-400">{s.uploaded ?? 0}</td>
-                      <td className="py-1.5 text-red-400">{s.errors ?? 0}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Logs */}
-      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-6 space-y-3">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Логи</h3>
-          {state?.running && state?.pause_requested && (
-            <span className="text-xs text-amber-400 animate-pulse">Зупиняється, чекаємо завершення батчу...</span>
-          )}
-          {state?.running && !state?.pause_requested && (
-            <span className="text-xs text-emerald-400 animate-pulse">Виконується...</span>
-          )}
-        </div>
-        <LogPanel logs={state?.live_logs ?? []} />
-      </div>
     </div>
   )
 }
@@ -1384,13 +1372,209 @@ function DiskTab() {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type Tab = "scraper" | "reindex" | "analytics" | "disk"
+// ── Sources tab ────────────────────────────────────────────────────────────────
+
+type SourceInfo = {
+  id: string
+  label: string
+  site: string
+  siteUrl: string
+  volume: string
+  what: string
+  why: string
+  chunks: string
+  truncate: string
+  splitter: string
+  collection: string
+  color: string
+}
+
+const SOURCES_INFO: SourceInfo[] = [
+  {
+    id: "rada",
+    label: "Верховна Рада",
+    site: "zakon.rada.gov.ua",
+    siteUrl: "https://zakon.rada.gov.ua",
+    volume: "~15 500 документів",
+    what: "Всі закони України, кодекси (ЦК, КК, КЗпП, ГПК тощо), постанови ВР, укази Президента, ратифіковані міжнародні договори. Повне первинне законодавство країни.",
+    why: "Основа бази знань. Без Ради бот не знає що таке закон. Усі 13 колекцій Qdrant — це Рада, розбита по галузях (фінанси, цивільне, кримінальне тощо).",
+    chunks: "3 000 символів / 300 overlap",
+    truncate: "8 000 символів",
+    splitter: "MarkdownTextSplitter",
+    collection: "13 колекцій: rada_finance, rada_civil, rada_criminal ...",
+    color: "border-blue-500/30 bg-blue-500/5",
+  },
+  {
+    id: "kmu",
+    label: "Кабінет Міністрів",
+    site: "kmu.gov.ua",
+    siteUrl: "https://www.kmu.gov.ua",
+    volume: "~10 000+ документів",
+    what: "Постанови КМУ, розпорядження, накази міністерств. Підзаконні акти виконавчої влади: порядки, правила, ліцензійні умови, тарифи, програми.",
+    why: "Більшість практичних питань (ліцензії, дозволи, субсидії, соцвиплати) регулюється саме постановами КМУ, а не законами. Критично для практичних відповідей.",
+    chunks: "4 000 символів / 400 overlap",
+    truncate: "15 000 символів",
+    splitter: "MarkdownTextSplitter",
+    collection: "laws_kmu_v2",
+    color: "border-amber-500/30 bg-amber-500/5",
+  },
+  {
+    id: "ccu",
+    label: "Конституційний суд",
+    site: "ccu.gov.ua",
+    siteUrl: "https://ccu.gov.ua",
+    volume: "~300–500 документів",
+    what: "Рішення і висновки КСУ. Єдиний орган, що тлумачить Конституцію України та скасовує неконституційні норми.",
+    why: "Коли закон чи його норма визнана неконституційною — вона не діє. Без КСУ бот може давати посилання на скасовані норми. Також КСУ дає офіційне тлумачення спірних конституційних питань.",
+    chunks: "3 000 символів / 300 overlap",
+    truncate: "15 000 символів",
+    splitter: "RecursiveCharacterTextSplitter",
+    collection: "laws_ccu_v2",
+    color: "border-purple-500/30 bg-purple-500/5",
+  },
+  {
+    id: "supreme",
+    label: "Верховний суд",
+    site: "reyestr.court.gov.ua",
+    siteUrl: "https://reyestr.court.gov.ua",
+    volume: "~1 000+ документів",
+    what: "Постанови пленуму Верховного суду, узагальнення судової практики, роз'яснення щодо застосування законів.",
+    why: "Показує як закони застосовуються на практиці. Дозволяє боту відповідати не тільки 'що каже закон' а й 'як суди це трактують'. Особливо важливо для спорів.",
+    chunks: "3 000 символів / 300 overlap",
+    truncate: "15 000 символів",
+    splitter: "RecursiveCharacterTextSplitter",
+    collection: "laws_supreme_v2",
+    color: "border-emerald-500/30 bg-emerald-500/5",
+  },
+  {
+    id: "wiki",
+    label: "Вікіпедія (юридична)",
+    site: "uk.wikipedia.org",
+    siteUrl: "https://uk.wikipedia.org",
+    volume: "кілька тисяч статей",
+    what: "Україномовні статті Вікіпедії по юридичній тематиці: терміни, інститути права, визначення понять, порівняльне правознавство.",
+    why: "Допомагає боту пояснювати терміни простою мовою. Коли користувач запитує 'що таке позовна давність?' — вікі дає чітке визначення без законодавчого жаргону.",
+    chunks: "2 000 символів / 200 overlap",
+    truncate: "8 000 символів",
+    splitter: "RecursiveCharacterTextSplitter",
+    collection: "laws_wiki_v2",
+    color: "border-gray-500/30 bg-gray-500/5",
+  },
+  {
+    id: "positions",
+    label: "Правові позиції ВС",
+    site: "lpd.court.gov.ua",
+    siteUrl: "https://lpd.court.gov.ua",
+    volume: "~12 800 позицій",
+    what: "Каталог правових позицій Верховного суду — задокументовані висновки ВС по конкретних категоріях справ. Кожна позиція: формулювання висновку + посилання на справи.",
+    why: "Найточніше джерело для відповідей типу 'яка позиція суду щодо X'. Краще за загальні постанови пленуму, бо прив'язане до конкретних обставин справ. Золото для адвокатів.",
+    chunks: "2 000 символів / 200 overlap",
+    truncate: "8 000 символів",
+    splitter: "RecursiveCharacterTextSplitter",
+    collection: "laws_positions_v2",
+    color: "border-[#C9A84C]/30 bg-[#C9A84C]/5",
+  },
+]
+
+function SourcesTab() {
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-[#0d1120] rounded-2xl border border-[#C9A84C]/20 p-5 space-y-2">
+        <h2 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Що ми скрапимо і навіщо</h2>
+        <p className="text-sm text-gray-400">
+          База знань URAI складається з 6 джерел. Кожне джерело — окремий тип юридичної інформації
+          з власним скрапером, форматом зберігання і колекцією Qdrant.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-500">
+          <div><span className="text-[#C9A84C] font-bold">~40 000+</span> документів загалом</div>
+          <div><span className="text-[#C9A84C] font-bold">6</span> джерел скрапінгу</div>
+          <div><span className="text-[#C9A84C] font-bold">17</span> колекцій Qdrant v2</div>
+        </div>
+      </div>
+
+      {/* Source cards */}
+      <div className="space-y-4">
+        {SOURCES_INFO.map(src => (
+          <div key={src.id} className={`rounded-2xl border p-5 space-y-4 ${src.color}`}>
+            {/* Title row */}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs bg-[#0A0E1A]/60 text-[#C9A84C] px-2 py-0.5 rounded font-bold">{src.id}</span>
+                  <h3 className="text-sm font-bold text-[#E0E6ED]">{src.label}</h3>
+                </div>
+                <a
+                  href={src.siteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors mt-0.5 inline-block"
+                >
+                  {src.site} ↗
+                </a>
+              </div>
+              <span className="shrink-0 text-xs font-bold text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/20 px-2 py-1 rounded-lg">
+                {src.volume}
+              </span>
+            </div>
+
+            {/* What / Why */}
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Що містить</div>
+                <p className="text-xs text-[#E0E6ED]/80 leading-relaxed">{src.what}</p>
+              </div>
+              <div className="space-y-1">
+                <div className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider">Навіщо боту</div>
+                <p className="text-xs text-[#E0E6ED]/80 leading-relaxed">{src.why}</p>
+              </div>
+            </div>
+
+            {/* Technical params */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 border-t border-white/5 pt-3">
+              <span>Чанк: <b className="text-gray-400">{src.chunks}</b></span>
+              <span>Truncate: <b className="text-gray-400">{src.truncate}</b></span>
+              <span>Splitter: <b className="text-gray-400">{src.splitter}</b></span>
+              <span>Колекція: <b className="text-gray-400">{src.collection}</b></span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pipeline reminder */}
+      <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-3">
+        <h3 className="text-xs font-bold text-[#C9A84C] uppercase tracking-wider">Порядок роботи з даними</h3>
+        <div className="space-y-2">
+          {[
+            { step: "1", label: "Скрапінг", desc: "Вкладка Скрапер — завантажує тексти на диск у /root/laws_raw/{source}/", color: "bg-blue-500/20 text-blue-300 border border-blue-500/30" },
+            { step: "2", label: "Реіндекс", desc: "Вкладка Реіндекс — читає з диску, ділить на чанки, ембедить через gemini-embedding-001, завантажує у Qdrant _v2 колекції", color: "bg-amber-500/20 text-amber-300 border border-amber-500/30" },
+            { step: "3", label: "Перевірка", desc: "Вкладка Аналітика — порівнює кількість файлів на диску з кількістю векторів у Qdrant, виявляє прогалини", color: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" },
+          ].map(({ step, label, desc, color }) => (
+            <div key={step} className="flex gap-3 items-start">
+              <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${color}`}>{step}</span>
+              <div>
+                <span className="text-sm font-semibold text-[#E0E6ED]">{label}</span>
+                <span className="text-xs text-gray-400"> — {desc}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="text-xs text-gray-600 border-t border-[#C9A84C]/10 pt-3">
+          Правило: завжди спочатку скрапінг, потім реіндекс. Реіндекс читає файли один раз на старті — нові файли після запуску не підхоплюються.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type Tab = "scraper" | "reindex" | "analytics" | "disk" | "sources"
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "scraper",   label: "Скрапер" },
   { id: "reindex",   label: "Реіндекс" },
   { id: "analytics", label: "Аналітика" },
   { id: "disk",      label: "Диск" },
+  { id: "sources",   label: "Джерела" },
 ]
 
 export default function V2AdminPage() {
@@ -1429,6 +1613,7 @@ export default function V2AdminPage() {
         {tab === "reindex"   && <ReindexTab />}
         {tab === "analytics" && <AnalyticsTab />}
         {tab === "disk"      && <DiskTab />}
+        {tab === "sources"   && <SourcesTab />}
       </div>
     </div>
   )

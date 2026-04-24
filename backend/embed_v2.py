@@ -54,8 +54,7 @@ def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[
                 if attempt < 2:
                     time.sleep(2 ** attempt)
                 else:
-                    print(f"⚠️ embed_v2 #{i}: {ex}")
-                    result.append([0.0] * EMBED_DIMS)
+                    raise RuntimeError(f"embed failed after 3 attempts for chunk #{i}: {ex}") from ex
         time.sleep(SLEEP_SEC)
     return result
 
