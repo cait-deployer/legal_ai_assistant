@@ -30,9 +30,10 @@ RAW_DIR = os.environ.get("LAWS_RAW_DIR", "/root/laws_raw")
 ZIR_DIR = os.path.join(RAW_DIR, "zir")
 os.makedirs(ZIR_DIR, exist_ok=True)
 
-BASE_URL   = "https://zir.tax.gov.ua"
-SEARCH_URL = f"{BASE_URL}/main/bz/search/?src=ques"
-VIEW_URL   = f"{BASE_URL}/main/bz/view/?src=ques&id={{}}"
+BASE_URL    = "https://zir.tax.gov.ua"
+SEARCH_URL  = f"{BASE_URL}/main/bz/search/?src=ques"
+RESULTS_URL = f"{BASE_URL}/bz/view"           # AJAX endpoint для списку результатів
+VIEW_URL    = f"{BASE_URL}/main/bz/view/?src=ques&id={{}}"
 
 SLEEP_SEC   = 0.4   # пауза між запитами
 MAX_RETRIES = 3
@@ -67,10 +68,11 @@ def _fetch_ids_via_requests(log=print) -> list[dict]:
             "themeVal": "all", "checkedValue": "", "catVal": "0",
             "hrenVal": "all", "contVal": "cont-no",
             "statusVal": "1", "statusFOP": "all", "dateS": "", "dateE": "",
-            "start": start,
         }
+        if start > 0:
+            payload["start"] = start
         try:
-            r = requests.post(SEARCH_URL, data=payload, headers=HEADERS, timeout=60)
+            r = requests.post(RESULTS_URL, data=payload, headers=HEADERS, timeout=60)
             r.raise_for_status()
         except Exception as ex:
             log(f"  ⚠️ POST start={start}: {ex}")
