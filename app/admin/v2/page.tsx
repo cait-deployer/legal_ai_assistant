@@ -594,7 +594,7 @@ function ReindexTab() {
       if (res.ok) {
         const data = await res.json()
         const counts: Record<string, number> = data.qdrant_v2 ?? {}
-        setCollectionsReady(Object.keys(counts).length >= 17 && Object.values(counts).every(v => v >= 0))
+        setCollectionsReady(Object.keys(counts).length >= 20 && Object.values(counts).every(v => v >= 0))
       }
     } catch { /* ignore */ }
   }, [])
@@ -647,7 +647,7 @@ function ReindexTab() {
             <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30"}`}>1</span>
             <div>
               <span className="font-semibold">Ініціалізація колекцій</span>
-              <span className="text-gray-400"> — створює 17 _v2 колекцій у Qdrant. </span>
+              <span className="text-gray-400"> — створює 20 _v2 колекцій у Qdrant. </span>
               {collectionsReady === true && <span className="text-emerald-400 font-bold">✅ Вже зроблено!</span>}
               {collectionsReady === false && <span className="text-amber-400">Потрібно зробити один раз.</span>}
               {collectionsReady === null && <span className="text-gray-500">Перевірка...</span>}
@@ -1511,7 +1511,7 @@ function SourcesTab() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-500">
           <div><span className="text-[#C9A84C] font-bold">~40 000+</span> документів загалом</div>
           <div><span className="text-[#C9A84C] font-bold">8</span> джерел скрапінгу</div>
-          <div><span className="text-[#C9A84C] font-bold">19</span> колекцій Qdrant v2</div>
+          <div><span className="text-[#C9A84C] font-bold">20</span> колекцій Qdrant v2</div>
         </div>
       </div>
 
@@ -1609,7 +1609,7 @@ export default function V2AdminPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">V2 Панель</h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            gemini-embedding-001 · 3072 dims · 17 колекцій _v2
+            gemini-embedding-001 · 3072 dims · 20 колекцій _v2
           </p>
         </div>
 

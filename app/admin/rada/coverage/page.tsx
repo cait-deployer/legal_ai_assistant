@@ -42,7 +42,7 @@ type CoverageData = {
   cache_age_sec: number | null
 }
 
-type SourceTab = "rada" | "laws_ccu" | "laws_wiki" | "laws_supreme" | "laws_positions" | "laws_kmu"
+type SourceTab = "rada" | "laws_ccu_v2" | "laws_wiki_v2" | "laws_supreme_v2" | "laws_positions_v2" | "laws_kmu_v2" | "laws_mod_v2" | "laws_zir_v2"
 
 // ── Tab config ───────────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ const SOURCE_TABS: {
     color: "text-[#C9A84C]",
   },
   {
-    id: "laws_ccu",
+    id: "laws_ccu_v2",
     label: "Конституційний суд",
     shortLabel: "КСУ",
     icon: Gavel,
@@ -71,7 +71,7 @@ const SOURCE_TABS: {
     color: "text-violet-400",
   },
   {
-    id: "laws_wiki",
+    id: "laws_wiki_v2",
     label: "Вікіпедія",
     shortLabel: "Вікі",
     icon: BookOpen,
@@ -79,7 +79,7 @@ const SOURCE_TABS: {
     color: "text-sky-400",
   },
   {
-    id: "laws_supreme",
+    id: "laws_supreme_v2",
     label: "Верховний суд",
     shortLabel: "ВСУ",
     icon: Building2,
@@ -87,7 +87,7 @@ const SOURCE_TABS: {
     color: "text-emerald-400",
   },
   {
-    id: "laws_positions",
+    id: "laws_positions_v2",
     label: "Правові позиції ВС",
     shortLabel: "Позиції",
     icon: BookMarked,
@@ -95,12 +95,28 @@ const SOURCE_TABS: {
     color: "text-orange-400",
   },
   {
-    id: "laws_kmu",
+    id: "laws_kmu_v2",
     label: "Кабінет Міністрів",
     shortLabel: "КМУ",
     icon: Landmark,
     description: "Постанови та розпорядження Кабінету Міністрів України",
     color: "text-blue-400",
+  },
+  {
+    id: "laws_mod_v2",
+    label: "Міноборони",
+    shortLabel: "МОД",
+    icon: Database,
+    description: "Накази та нормативні документи Міністерства оборони України",
+    color: "text-red-400",
+  },
+  {
+    id: "laws_zir_v2",
+    label: "Реєстр ДПС",
+    shortLabel: "ЗІР",
+    icon: FileText,
+    description: "Офіційні роз'яснення Державної податкової служби України",
+    color: "text-teal-400",
   },
 ]
 
