@@ -94,7 +94,7 @@ type LawPreview = {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod"]
+const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"]
 
 const RADA_COLLECTIONS = [
   "rada_finance", "rada_state", "rada_personnel", "rada_court",
@@ -199,6 +199,7 @@ const SOURCE_LABELS: Record<string, string> = {
   wiki:      "Legal Aid Wiki (юридичні терміни)",
   positions: "Правові позиції ВС (~12 800 позицій)",
   mod:       "Міністерство оборони (~210 документів)",
+  zir:       "ЗІР ДПС (~5 900 питань-відповідей)",
 }
 
 const DEFAULT_SOURCE_STATE: SourceState = {
@@ -1489,6 +1490,20 @@ const SOURCES_INFO: SourceInfo[] = [
     collection: "laws_mod_v2",
     color: "border-red-500/30 bg-red-500/5",
   },
+  {
+    id: "zir",
+    label: "ЗІР — Держподаткова служба",
+    site: "zir.tax.gov.ua",
+    siteUrl: "https://zir.tax.gov.ua/main/bz/search/?src=ques",
+    volume: "~5 900 питань-відповідей",
+    what: "Офіційні роз'яснення Державної податкової служби у форматі Питання–Відповідь. Чинні публікації по всіх категоріях: ПДВ, ПДФО, єдиний податок, акциз, митниця тощо.",
+    why: "Показує як ДПС офіційно трактує Податковий кодекс на практиці. Текст ПКУ і позиція податкової — часто різні речі. Критично для ФОПів, бухгалтерів, бізнесу.",
+    chunks: "2 000 символів / 200 overlap",
+    truncate: "8 000 символів",
+    splitter: "RecursiveCharacterTextSplitter",
+    collection: "laws_zir_v2",
+    color: "border-teal-500/30 bg-teal-500/5",
+  },
 ]
 
 function SourcesTab() {
@@ -1498,13 +1513,13 @@ function SourcesTab() {
       <div className="bg-[#0d1120] rounded-2xl border border-[#C9A84C]/20 p-5 space-y-2">
         <h2 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Що ми скрапимо і навіщо</h2>
         <p className="text-sm text-gray-400">
-          База знань URAI складається з 7 джерел. Кожне джерело — окремий тип юридичної інформації
+          База знань URAI складається з 8 джерел. Кожне джерело — окремий тип юридичної інформації
           з власним скрапером, форматом зберігання і колекцією Qdrant.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-500">
           <div><span className="text-[#C9A84C] font-bold">~40 000+</span> документів загалом</div>
-          <div><span className="text-[#C9A84C] font-bold">7</span> джерел скрапінгу</div>
-          <div><span className="text-[#C9A84C] font-bold">18</span> колекцій Qdrant v2</div>
+          <div><span className="text-[#C9A84C] font-bold">8</span> джерел скрапінгу</div>
+          <div><span className="text-[#C9A84C] font-bold">19</span> колекцій Qdrant v2</div>
         </div>
       </div>
 

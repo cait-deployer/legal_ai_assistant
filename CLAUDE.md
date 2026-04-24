@@ -16,7 +16,7 @@ npm run build && systemctl restart frontend.service && systemctl restart backend
 - `app/` — Next.js frontend (pages, API routes)
 - `app/api/` — Next.js API routes (proxy to Python backend)
 - `backend/server.py` — FastAPI backend, main entry point
-- `backend/qdrant_storage.py` — Qdrant vector DB interface (18 v2 collections + 15 v1 collections)
+- `backend/qdrant_storage.py` — Qdrant vector DB interface (19 v2 collections + 15 v1 collections)
 - `backend/rada_scanner.py` — Rada law scraper + `get_all_legal_ids()`, `get_law_text()`, `get_law_metadata()`
 - `backend/kmu_scanner.py` — KMU law scraper + `get_all_kmu_docs()`
 - `backend/ccu_scanner.py` — Constitutional Court scraper
@@ -29,9 +29,10 @@ npm run build && systemctl restart frontend.service && systemctl restart backend
 - `backend/embed_v2.py` — Embedding module v2: `gemini-embedding-001` (3072 dims), lazy init, thread-safe. Raises on 3rd failure — never stores zero vectors.
 - `backend/scrape_all_v2.py` — "Last scraper ever": saves all raw texts to `/root/laws_raw/` (all 6 sources), pause/resume per source
 - `backend/scrape_mod_v2.py` — MOD scraper: Playwright-based PDF downloader for mod.gov.ua. OCR fallback via Tesseract (ukr+rus+eng) for scanned PDFs. Entry point: `run_scrape_mod(log_callback, stop_event)`
+- `backend/scrape_zir_v2.py` — ZIR scraper: POST API для отримання ID + requests+BeautifulSoup для індивідуальних сторінок. ~5900 Q&A. Entry point: `run_scrape_zir(log_callback, stop_event)`
 - `backend/reindex_v2.py` — Reads from disk, chunks, embeds with embed_v2, uploads to `*_v2` Qdrant collections. Safe order: embed first → delete old → upload. Per-source state files.
 
-## Data Sources (7 sources scraped to /root/laws_raw/)
+## Data Sources (8 sources scraped to /root/laws_raw/)
 
 | Source | Site | Що містить | Розмір | Навіщо |
 |--------|------|-----------|--------|--------|
@@ -42,6 +43,7 @@ npm run build && systemctl restart frontend.service && systemctl restart backend
 | `wiki` | https://legalaid.wiki | Юридичні терміни, визначення правових понять | ~кілька тис. | Пояснення термінів для бота |
 | `positions` | lpd.court.gov.ua | Правові позиції Верховного суду по категоріях справ | ~12 800 doc | Конкретні позиції ВС — найточніші відповіді |
 | `mod` | mod.gov.ua | Накази, порядки, методичні матеріали МОУ (PDF) | ~210 doc | Кадрова/фінансова/майнова діяльність військових |
+| `zir` | zir.tax.gov.ua | Q&A ДПС: офіційні роз'яснення по податковому законодавству | ~5 900 doc | Практична позиція ДПС (ПДВ, ФОП, акциз, ПДФО) |
 
 ### Формат зберігання на диску
 ```

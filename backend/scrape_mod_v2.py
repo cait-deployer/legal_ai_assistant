@@ -81,7 +81,7 @@ def _extract_text_layer(pdf_bytes: bytes) -> str:
         pages = [_clean_page(p.get_text("text")) for p in doc]
         doc.close()
         return "\n\n".join(p for p in pages if p.strip())
-    except ImportError:
+    except Exception:
         pass
     try:
         import io
@@ -447,7 +447,11 @@ def run_scrape_mod(
                 time.sleep(PDF_SLEEP_SEC)
                 if not pdf_bytes:
                     continue
-                text_part = extract_pdf_text(pdf_bytes)
+                try:
+                    text_part = extract_pdf_text(pdf_bytes)
+                except Exception as ex:
+                    _log(f"  ⚠️  PDF parse error (пропускаємо): {ex}", "warning")
+                    continue
                 if text_part.strip():
                     all_text_parts.append(text_part.strip())
 

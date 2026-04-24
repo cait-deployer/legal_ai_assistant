@@ -28,7 +28,7 @@ STATE_DIR  = os.path.dirname(os.path.abspath(__file__))
 WORKERS    = 4     # паралельні воркери (1 закон = усі його чанки = 1 завдання)
 SAVE_EVERY = 20    # зберігати стан кожні N законів
 
-SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod"]
+SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"]
 
 SOURCE_TO_V2_COLLECTION = {
     "kmu":       "laws_kmu_v2",
@@ -37,6 +37,7 @@ SOURCE_TO_V2_COLLECTION = {
     "wiki":      "laws_wiki_v2",
     "positions": "laws_positions_v2",
     "mod":       "laws_mod_v2",
+    "zir":       "laws_zir_v2",
 }
 
 SPLITTERS = {
@@ -47,11 +48,12 @@ SPLITTERS = {
     "wiki":      RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
     "positions": RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
     "mod":       RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400),
+    "zir":       RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200),
 }
 
 TRUNCATE = {
     "rada": 8000, "kmu": 15000, "ccu": 15000, "supreme": 15000,
-    "wiki": 8000, "positions": 8000, "mod": 15000,
+    "wiki": 8000, "positions": 8000, "mod": 15000, "zir": 8000,
 }
 
 SOURCE_PREFIX = {
@@ -62,6 +64,7 @@ SOURCE_PREFIX = {
     "wiki":      "Wiki: ",
     "positions": "Позиція ВС: ",
     "mod":       "МОУ: ",
+    "zir":       "ЗІР ДПС: ",
 }
 
 sys.path.insert(0, STATE_DIR)
