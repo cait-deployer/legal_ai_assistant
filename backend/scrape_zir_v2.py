@@ -128,7 +128,7 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        log("❌ Playwright не встановлено", "error")
+        log("❌ Playwright не встановлено")
         return []
 
     items = []
@@ -233,7 +233,7 @@ def fetch_all_ids(log=print) -> list[dict]:
         log(f"  ✅ Requests: зібрано {len(items)} питань")
         return items
 
-    log("  ⚠️ Requests дав 0 — пробуємо Playwright...", "warning")
+    log("  ⚠️ Requests дав 0 — пробуємо Playwright...")
     items = _fetch_ids_via_playwright(log)
     log(f"  ✅ Playwright: зібрано {len(items)} питань")
     return items
