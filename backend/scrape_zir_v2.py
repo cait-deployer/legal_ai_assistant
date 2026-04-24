@@ -78,33 +78,21 @@ def _fetch_ids_via_requests(log=print) -> list[dict]:
             log(f"  ⚠️ POST start={start}: {ex}")
             break
 
-        # Шукаємо всі id= в HTML відповіді
-        ids_found = re.findall(r'[?&]id=(\d+)', r.text)
-        # Також шукаємо title у посиланнях
         soup = BeautifulSoup(r.text, "html.parser")
-        links = soup.find_all("a", href=re.compile(r'id=\d+'))
 
         new_count = 0
-        for link in links:
-            href = link.get("href", "")
-            m = re.search(r"id=(\d+)", href)
-            if not m:
+        # Результати в <div quesid="XXXXX"> (не в <a href>!)
+        for row in soup.find_all(lambda t: t.name and t.get("quesid")):
+            quesid = row.get("quesid")
+            if not quesid or quesid in seen_ids:
                 continue
-            item_id = m.group(1)
-            if item_id in seen_ids:
-                continue
-            seen_ids.add(item_id)
-            title = link.get_text(strip=True)[:200]
-            items.append({"id": item_id, "title": title, "category": ""})
+            seen_ids.add(quesid)
+            link = row.find("a")
+            title = link.get_text(strip=True)[:200] if link else ""
+            cat_el = row.find(class_=re.compile(r"categ|theme|category", re.I))
+            category = cat_el.get_text(strip=True)[:100] if cat_el else ""
+            items.append({"id": quesid, "title": title, "category": category})
             new_count += 1
-
-        # Якщо не знайшли посилань з href, шукаємо просто ID у тексті
-        if new_count == 0:
-            for item_id in ids_found:
-                if item_id not in seen_ids:
-                    seen_ids.add(item_id)
-                    items.append({"id": item_id, "title": "", "category": ""})
-                    new_count += 1
 
         log(f"  📄 start={start}: +{new_count} нових (всього {len(items)})")
 
@@ -182,41 +170,38 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
                 pass
             time.sleep(3)
 
-        # Збираємо всі посилання
-        page_num = 1
+        # Збираємо результати: div[quesid] (не <a href>!)
+        seen_ids_pw: set[str] = set()
+        pw_start = 0
+        PW_PAGE = 20
         while True:
-            links = page.query_selector_all("a[href*='id=']")
+            rows = page.query_selector_all("div[quesid]")
             found = 0
-            for link in links:
-                href = link.get_attribute("href") or ""
-                if "src=ques" not in href and "bz/view" not in href:
+            for row in rows:
+                quesid = row.get_attribute("quesid") or ""
+                if not quesid or quesid in seen_ids_pw:
                     continue
-                m = re.search(r"id=(\d+)", href)
-                if m and not any(x["id"] == m.group(1) for x in items):
-                    title = link.inner_text().strip()[:200]
-                    items.append({"id": m.group(1), "title": title, "category": ""})
-                    found += 1
-
-            log(f"  📄 Playwright сторінка {page_num}: +{found} нових (всього {len(items)})")
-
-            next_btn = None
-            for sel in ["a[title*='аступн']", "a:has-text('Наступна')", "a:has-text('»')",
-                        f"a[href*='page={page_num + 1}']", ".pagination a:last-child"]:
+                seen_ids_pw.add(quesid)
                 try:
-                    el = page.query_selector(sel)
-                    if el and el.is_visible():
-                        next_btn = el
-                        break
+                    link = row.query_selector("a")
+                    title = link.inner_text().strip()[:200] if link else ""
                 except Exception:
-                    pass
+                    title = ""
+                items.append({"id": quesid, "title": title, "category": ""})
+                found += 1
 
-            if not next_btn or found == 0:
+            log(f"  📄 Playwright start={pw_start}: +{found} нових (всього {len(items)})")
+
+            if found == 0:
                 break
 
-            next_btn.click()
-            page.wait_for_load_state("networkidle", timeout=30_000)
-            time.sleep(0.5)
-            page_num += 1
+            # Наступна сторінка через JS-функцію searchInBZ(start)
+            pw_start += PW_PAGE
+            try:
+                page.evaluate(f"searchInBZ({pw_start})")
+                time.sleep(2)
+            except Exception:
+                break
 
         browser.close()
 
