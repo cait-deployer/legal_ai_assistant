@@ -52,7 +52,29 @@ os.makedirs(MOD_DIR, exist_ok=True)
 
 
 # ── PDF extraction ──────────────────────────────────────────────────────────────
+MIN_TEXT_CHARS = 100  # якщо текстовий шар < 100 символів → вважаємо скан
+
+
 def extract_pdf_text(pdf_bytes: bytes) -> str:
+    """
+    1) Спробуємо витягти текстовий шар (PyMuPDF → pypdf).
+    2) Якщо текст порожній або занадто короткий — OCR через Tesseract.
+    """
+    text = _extract_text_layer(pdf_bytes)
+    if len(text.strip()) >= MIN_TEXT_CHARS:
+        return text
+
+    # Fallback: OCR
+    print(f"       🔍 Текстовий шар порожній → OCR (Tesseract)...")
+    ocr_text = _ocr_pdf(pdf_bytes)
+    if ocr_text.strip():
+        return ocr_text
+
+    print(f"       ⚠️  OCR також порожній (можливо зашифрований або пошкоджений PDF)")
+    return text  # повертаємо що є (може бути порожнє)
+
+
+def _extract_text_layer(pdf_bytes: bytes) -> str:
     try:
         import fitz
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -69,6 +91,34 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
         return "\n\n".join(p for p in pages if p.strip())
     except Exception as ex:
         print(f"  ❌ PDF parse error: {ex}")
+        return ""
+
+
+def _ocr_pdf(pdf_bytes: bytes) -> str:
+    """
+    OCR через Tesseract. Потрібно:
+      apt-get install -y tesseract-ocr tesseract-ocr-ukr poppler-utils
+      pip install pdf2image pytesseract
+    """
+    try:
+        import pytesseract
+        from pdf2image import convert_from_bytes
+    except ImportError:
+        print("       ⚠️  OCR недоступний: pip install pdf2image pytesseract")
+        print("             apt-get install -y tesseract-ocr tesseract-ocr-ukr poppler-utils")
+        return ""
+
+    try:
+        images = convert_from_bytes(pdf_bytes, dpi=200)
+        pages = []
+        for img in images:
+            text = pytesseract.image_to_string(img, lang="ukr+rus", config="--psm 1")
+            text = _clean_page(text)
+            if text.strip():
+                pages.append(text)
+        return "\n\n".join(pages)
+    except Exception as ex:
+        print(f"       ❌ OCR error: {ex}")
         return ""
 
 
