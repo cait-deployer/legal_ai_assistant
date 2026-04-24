@@ -1251,11 +1251,11 @@ async def debug_search(q: str, request: Request):
     if client_host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(403, "Forbidden: internal endpoint")
     try:
-        from rada_to_supabase import embeddings
-        from qdrant_storage import search_qdrant, ALL_COLLECTIONS
+        import embed_v2 as _embed_v2
+        from qdrant_storage import search_qdrant, ALL_V2_COLLECTIONS
         import asyncio as _aio
-        q_vec = await _aio.to_thread(embeddings.embed_query, q)
-        collections = _route_collections(q, ALL_COLLECTIONS, q_vec)
+        q_vec = await _aio.to_thread(_embed_v2.embed_query, q)
+        collections = _route_collections(q, ALL_V2_COLLECTIONS, q_vec)
         results = await _aio.to_thread(search_qdrant, q_vec, 5, collections, 0.0)
         return {
             "collections_searched": collections,
@@ -1299,8 +1299,8 @@ async def rebuild_centroids(request: Request):
         global _centroids, _centroid_building
         try:
             import asyncio
-            from qdrant_storage import ALL_COLLECTIONS
-            new_centroids = await asyncio.to_thread(_compute_centroids, ALL_COLLECTIONS)
+            from qdrant_storage import ALL_V2_COLLECTIONS
+            new_centroids = await asyncio.to_thread(_compute_centroids, ALL_V2_COLLECTIONS)
             with _centroids_lock:
                 _centroids = new_centroids
             logger.info(f"CENTROID ✅ Centroid rebuild complete ({len(new_centroids)} collections)")
@@ -1378,7 +1378,7 @@ async def supreme_laws(
             next_page_offset = None
             while True:
                 batch, next_page_offset = client.scroll(
-                    collection_name="laws_supreme",
+                    collection_name="laws_supreme_v2",
                     scroll_filter=scroll_filter,
                     with_payload=True,
                     limit=1000,
@@ -2496,7 +2496,7 @@ async def get_laws(
     """Список унікальних законів Ради з Qdrant (chunk_index=0)."""
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, RADA_COLLECTIONS
+        from qdrant_storage import get_client, RADA_V2_COLLECTIONS
 
         client = get_client()
         must = [FieldCondition(key="chunk_index", match=MatchValue(value=0))]
@@ -2505,7 +2505,7 @@ async def get_laws(
         scroll_filter = Filter(must=must)
 
         all_points: list = []
-        for col in RADA_COLLECTIONS:
+        for col in RADA_V2_COLLECTIONS:
             try:
                 next_page_offset = None
                 while True:
@@ -2566,12 +2566,12 @@ async def get_law_text_endpoint(law_id: str):
         raise HTTPException(400, "law_id required")
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, ALL_COLLECTIONS
+        from qdrant_storage import get_client, ALL_V2_COLLECTIONS
 
         client = get_client()
         all_chunks: list = []
         # Шукаємо по всіх колекціях — law_id унікальний
-        for col in ALL_COLLECTIONS:
+        for col in ALL_V2_COLLECTIONS:
             try:
                 next_page_offset = None
                 while True:
@@ -2618,7 +2618,7 @@ async def get_base_docs(
     """Список унікальних документів з Qdrant (chunk_index=0 = один запис на закон)."""
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, RADA_COLLECTIONS, ALL_COLLECTIONS
+        from qdrant_storage import get_client, RADA_V2_COLLECTIONS, ALL_V2_COLLECTIONS
 
         client = get_client()
 
@@ -2629,19 +2629,23 @@ async def get_base_docs(
 
         # Вибираємо колекції відповідно до фільтру source
         if source == "rada":
-            target_cols = RADA_COLLECTIONS
+            target_cols = RADA_V2_COLLECTIONS
         elif source == "supreme":
-            target_cols = ["laws_supreme"]
+            target_cols = ["laws_supreme_v2"]
         elif source == "wiki":
-            target_cols = ["laws_wiki"]
+            target_cols = ["laws_wiki_v2"]
         elif source == "ccu":
-            target_cols = ["laws_ccu"]
+            target_cols = ["laws_ccu_v2"]
         elif source == "lpd":
-            target_cols = ["laws_positions"]
+            target_cols = ["laws_positions_v2"]
         elif source == "kmu":
-            target_cols = ["laws_kmu"]
+            target_cols = ["laws_kmu_v2"]
+        elif source == "mod":
+            target_cols = ["laws_mod_v2"]
+        elif source == "zir":
+            target_cols = ["laws_zir_v2"]
         else:
-            target_cols = ALL_COLLECTIONS
+            target_cols = ALL_V2_COLLECTIONS
 
         all_points: list = []
         for col in target_cols:
@@ -2699,13 +2703,13 @@ async def get_base_categories():
     """Унікальні категорії з Qdrant для фільтра."""
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        from qdrant_storage import get_client, RADA_COLLECTIONS
+        from qdrant_storage import get_client, RADA_V2_COLLECTIONS
 
         client = get_client()
         scroll_filter = Filter(must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))])
 
         categories: set[str] = set()
-        for col in RADA_COLLECTIONS:
+        for col in RADA_V2_COLLECTIONS:
           next_page_offset = None
           while True:
             batch, next_page_offset = client.scroll(
@@ -2899,7 +2903,7 @@ async def get_rada_coverage(refresh: bool = False):
     import asyncio as _asyncio
     import time as _time
     from qdrant_client.models import Filter, FieldCondition, MatchValue
-    from qdrant_storage import get_client, RADA_COLLECTIONS
+    from qdrant_storage import get_client, RADA_V2_COLLECTIONS
     from rada_scanner import ALL_THEMES, get_section_doc_count
 
     # ── 1. Qdrant: збираємо chunk_index=0 по всіх РАДА-колекціях ──
@@ -2910,7 +2914,7 @@ async def get_rada_coverage(refresh: bool = False):
     ])
 
     all_points: list = []
-    for col in RADA_COLLECTIONS:
+    for col in RADA_V2_COLLECTIONS:
         next_offset = None
         while True:
             batch, next_offset = client.scroll(
@@ -3009,11 +3013,13 @@ async def get_rada_coverage(refresh: bool = False):
 
     # ── 5. Інші джерела (КСУ, Вікі, Верховний суд) ───────────────────────────
     NON_RADA_COLS = [
-        ("laws_positions", "Правові позиції Верховного Суду", "lpd"),
-        ("laws_ccu",       "Конституційний суд України",      "ccu"),
-        ("laws_wiki",      "Вікіпедія — правові статті",      "wiki"),
-        ("laws_supreme",   "Верховний суд України",            "supreme"),
-        ("laws_kmu",       "Кабінет Міністрів України",        "kmu"),
+        ("laws_positions_v2", "Правові позиції Верховного Суду", "lpd"),
+        ("laws_ccu_v2",       "Конституційний суд України",      "ccu"),
+        ("laws_wiki_v2",      "Вікіпедія — правові статті",      "wiki"),
+        ("laws_supreme_v2",   "Верховний суд України",            "supreme"),
+        ("laws_kmu_v2",       "Кабінет Міністрів України",        "kmu"),
+        ("laws_mod_v2",       "Міністерство оборони України",     "mod"),
+        ("laws_zir_v2",       "Зведений інформаційний реєстр ДПС","zir"),
     ]
     other_sources = []
     for col_name, col_label, sync_src in NON_RADA_COLS:
@@ -3102,7 +3108,7 @@ async def get_rada_coverage(refresh: bool = False):
 
 _CENTROID_FILE = BASE_DIR / "collection_centroids.json"
 _CENTROID_SAMPLE = 300   # векторів на колекцію для апроксимації центроїду
-_ALWAYS_INCLUDE = {"laws_positions", "laws_supreme", "laws_kmu"}
+_ALWAYS_INCLUDE = {"laws_positions_v2", "laws_supreme_v2", "laws_kmu_v2"}
 
 _centroids: dict[str, list[float]] = {}
 _centroids_lock = threading.Lock()
@@ -3192,8 +3198,8 @@ def _load_centroids() -> dict[str, list[float]]:
             logger.info(f"CENTROID ✅ Centroid router: loaded {len(_centroids)} collections from file")
         else:
             logger.info("CENTROID ⏳ Centroid router: building from Qdrant (one-time, ~10s)...")
-            from qdrant_storage import ALL_COLLECTIONS
-            _centroids = _compute_centroids(ALL_COLLECTIONS)
+            from qdrant_storage import ALL_V2_COLLECTIONS
+            _centroids = _compute_centroids(ALL_V2_COLLECTIONS)
 
         return _centroids
 
@@ -3245,8 +3251,8 @@ def _route_collections(
             return list(all_collections)
 
         if query_vector is None:
-            from rada_to_supabase import embeddings as _emb
-            q_vec = _emb.embed_query(question)
+            import embed_v2 as _embed_v2
+            q_vec = _embed_v2.embed_query(question)
         else:
             q_vec = query_vector
 
@@ -3296,7 +3302,7 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
         return all_cols
 
     _probe_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.4) - 0.10)
-    _always_include = {"laws_kmu", "laws_positions"}
+    _always_include = {"laws_kmu_v2", "laws_positions_v2"}
 
     async def _probe(col: str) -> tuple[str, float]:
         try:
@@ -3364,7 +3370,7 @@ async def ask(body: AskRequest):
 
     # 1. Ініціалізація + embed query + HyDE гіпотетична відповідь (паралельно)
     try:
-        from rada_to_supabase import embeddings
+        import embed_v2 as _embed_v2
         from vertexai.generative_models import GenerativeModel, GenerationConfig
         import json as _json
 
@@ -3457,7 +3463,7 @@ async def ask(body: AskRequest):
 
         # Embed оригінального запиту + rewrite паралельно
         query_vector, rewritten_query = await _asyncio.gather(
-            _asyncio.to_thread(embeddings.embed_query, search_question),
+            _asyncio.to_thread(_embed_v2.embed_query, search_question),
             _rewrite_query(search_question),
         )
         hypothetical_text = rewritten_query  # alias для title boost keywords
@@ -3466,28 +3472,32 @@ async def ask(body: AskRequest):
         raise HTTPException(500, f"Embedding/HyDE error: {e}")
 
     # 2. Визначаємо колекції
-    from qdrant_storage import search_qdrant, RADA_COLLECTIONS, ALL_COLLECTIONS
+    from qdrant_storage import search_qdrant, RADA_V2_COLLECTIONS, ALL_V2_COLLECTIONS
 
     # Крок 1: визначаємо дозволені колекції за тарифом
     if body.filter_sources:
         allowed = set(body.filter_sources)
         plan_collections: list[str] = []
         if "rada" in allowed:
-            plan_collections += RADA_COLLECTIONS
+            plan_collections += RADA_V2_COLLECTIONS
         if "supreme" in allowed:
-            plan_collections.append("laws_supreme")
+            plan_collections.append("laws_supreme_v2")
         if "wiki" in allowed:
-            plan_collections.append("laws_wiki")
+            plan_collections.append("laws_wiki_v2")
         if "ccu" in allowed:
-            plan_collections.append("laws_ccu")
+            plan_collections.append("laws_ccu_v2")
         if "lpd" in allowed:
-            plan_collections.append("laws_positions")
+            plan_collections.append("laws_positions_v2")
         if "kmu" in allowed:
-            plan_collections.append("laws_kmu")
+            plan_collections.append("laws_kmu_v2")
+        if "mod" in allowed:
+            plan_collections.append("laws_mod_v2")
+        if "zir" in allowed:
+            plan_collections.append("laws_zir_v2")
         if not plan_collections:
-            plan_collections = ALL_COLLECTIONS
+            plan_collections = ALL_V2_COLLECTIONS
     else:
-        plan_collections = ALL_COLLECTIONS
+        plan_collections = ALL_V2_COLLECTIONS
 
     # Крок 2: vector pre-scan звужує до релевантних колекцій в межах дозволених тарифом
     target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
@@ -3507,7 +3517,7 @@ async def ask(body: AskRequest):
     try:
         if rewritten_query:
             rw_vector, orig_results = await _asyncio.gather(
-                _asyncio.to_thread(embeddings.embed_query, rewritten_query),
+                _asyncio.to_thread(_embed_v2.embed_query, rewritten_query),
                 _asyncio.to_thread(search_qdrant, query_vector, fetch_k, target_collections, match_threshold),
             )
             rw_results = await _asyncio.to_thread(
@@ -3531,8 +3541,8 @@ async def ask(body: AskRequest):
     if low_confidence:
         logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → widening BM25/title scope",
                     results[0]["similarity"], _RAW_GATE)
-        _lc_extra = ["rada_labor", "rada_civil", "laws_kmu", "rada_finance",
-                     "laws_positions", "rada_admin", "rada_state"]
+        _lc_extra = ["rada_labor_v2", "rada_civil_v2", "laws_kmu_v2", "rada_finance_v2",
+                     "laws_positions_v2", "rada_admin_v2", "rada_state_v2"]
         target_collections = list(dict.fromkeys(
             target_collections + [c for c in _lc_extra if c in plan_collections]
         ))
@@ -3564,9 +3574,9 @@ async def ask(body: AskRequest):
     rada_boost = settings_cache.get_float("rada_source_boost", 1.15)
     for r in results:
         col = r.get("_collection", "")
-        if col == "laws_supreme":
+        if col == "laws_supreme_v2":
             r["similarity"] = r["similarity"] * 0.88
-        elif abs(rada_boost - 1.0) > 0.001 and (col.startswith("rada_") or col == "laws_positions"):
+        elif abs(rada_boost - 1.0) > 0.001 and (col.startswith("rada_") or col == "laws_positions_v2"):
             r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
@@ -3590,8 +3600,8 @@ async def ask(body: AskRequest):
         col = r.get("_collection", "")
         _by_col.setdefault(col, []).append(r)
 
-    _pos_col = _by_col.pop("laws_positions", [])
-    _sup_col = _by_col.pop("laws_supreme", [])
+    _pos_col = _by_col.pop("laws_positions_v2", [])
+    _sup_col = _by_col.pop("laws_supreme_v2", [])
     pos_taken = _pos_col[:_max_pos]
     sup_taken = _sup_col[:_MAX_COURT]
 
@@ -3701,7 +3711,7 @@ async def ask(body: AskRequest):
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=1)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
-            _COL_PRI = {"laws_kmu": 0, "laws_supreme": 1, "laws_ccu": 2, "laws_wiki": 3}
+            _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
             _title_results = _title_results[:20]  # більший cap щоб охопити більше law_ids
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
@@ -3732,7 +3742,7 @@ async def ask(body: AskRequest):
 
     # Protected slots: laws_kmu і laws_positions з title match гарантовано виживають крізь reranker
     # Причина: реранкер оптимізує "лінгвістичну очевидність", а КМУ/позиції мають сухий табличний текст
-    _protected_colls = {"laws_kmu", "laws_positions"}
+    _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
     _rr_protected = [r for r in results
                      if r.get("_collection") in _protected_colls
                      and r.get("_title_match")
@@ -3929,9 +3939,9 @@ async def ask(body: AskRequest):
 
         # Розподіляємо за правовою ієрархією: закони → КМУ → суди
         col = r.get("_collection", "")
-        if col in ("laws_positions", "laws_supreme", "laws_ccu"):
+        if col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2"):
             court_chunks.append(chunk_text)
-        elif col == "laws_kmu":
+        elif col == "laws_kmu_v2":
             kmu_chunks.append(chunk_text)
         else:
             law_chunks.append(chunk_text)
