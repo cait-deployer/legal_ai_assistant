@@ -170,7 +170,16 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
                 pass
             time.sleep(3)
 
-        # Збираємо результати: div[quesid] (не <a href>!)
+        # Логуємо пагінаційний блок для діагностики
+        try:
+            panel_html = page.evaluate(
+                "document.querySelector('#bzeditMenuPanel1')?.innerHTML || '(порожній)'"
+            )
+            log(f"  📋 bzeditMenuPanel1: {panel_html[:400]}")
+        except Exception:
+            pass
+
+        # Збираємо результати: div[quesid]
         seen_ids_pw: set[str] = set()
         pw_start = 0
         PW_PAGE = 20
@@ -191,16 +200,54 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
                 found += 1
 
             log(f"  📄 Playwright start={pw_start}: +{found} нових (всього {len(items)})")
-
             if found == 0:
                 break
 
-            # Наступна сторінка через JS-функцію searchInBZ(start)
             pw_start += PW_PAGE
-            try:
-                page.evaluate(f"searchInBZ({pw_start})")
-                time.sleep(2)
-            except Exception:
+            next_ok = False
+
+            # Стратегія 1: клік по елементу пагінації у #bzeditMenuPanel1
+            for sel in [
+                "#bzeditMenuPanel1 a:last-child",
+                "#bzeditMenuPanel1 a[onclick*='next']",
+                "#bzeditMenuPanel1 a[onclick*='search']",
+                "a[title*='аступн']", "a[title*='Next']",
+                "a:has-text('»')", "a:has-text('>')",
+                ".pagination a:last-child",
+            ]:
+                try:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible():
+                        el.click()
+                        time.sleep(2)
+                        next_ok = True
+                        log(f"  ➡️  Next via click: {sel}")
+                        break
+                except Exception:
+                    pass
+
+            # Стратегія 2: window.iStart / window.curStart + searchInBZ()
+            if not next_ok:
+                try:
+                    page.evaluate(f"window.iStart = {pw_start}; searchInBZ();")
+                    time.sleep(2)
+                    next_ok = True
+                    log(f"  ➡️  Next via iStart={pw_start}")
+                except Exception:
+                    pass
+
+            # Стратегія 3: searchInBZ з параметром start
+            if not next_ok:
+                try:
+                    page.evaluate(f"searchInBZ(0, {pw_start})")
+                    time.sleep(2)
+                    next_ok = True
+                    log(f"  ➡️  Next via searchInBZ(0, {pw_start})")
+                except Exception:
+                    pass
+
+            if not next_ok:
+                log("  ⚠️  Не знайдено механізм пагінації")
                 break
 
         browser.close()
