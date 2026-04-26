@@ -1,4 +1,4 @@
-"""
+﻿"""
 server.py — FastAPI бекенд для URAI (уп Assistant).
 
 Запуск:  cd /home/devops/app/backend && uvicorn server:app --host 0.0.0.0 --port 8000
@@ -92,6 +92,9 @@ REINDEX_RADA_STATE  = BASE_DIR / "reindex_rada_full_state.json"  # Переін�
 # ── V2 scraper sources ─────────────────────────────────────────────────────────
 V2_SCRAPE_SOURCES  = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir")
 V2_REINDEX_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir")
+
+_TAX_KEYWORDS = ("пдв", "ват", "податк", "єдиний податок", "фоп", "пдфо", "акциз",
+                 "реєстрац", "платник", "зir", "зір", "дпс", "митн", "збір")
 
 def _scrape_v2_state_file(source: str) -> Path:
     return BASE_DIR / f"scrape_v2_{source}_state.json"
@@ -1300,17 +1303,19 @@ async def patch_sync_settings(body: dict = Body(default={})):
 
     updated = []
 
+    def _sb_patch(url_suffix: str, payload: dict) -> None:
+        with httpx.Client(timeout=10) as c:
+            c.patch(
+                f"{_SB_URL}/rest/v1/app_settings{url_suffix}",
+                headers=_sb_hdrs(prefer_minimal=True),
+                json=payload,
+            )
+
     # Оновити schedule_hour
     new_hour = body.get("schedule_hour")
     if new_hour is not None:
         new_hour = max(0, min(23, int(new_hour)))
-        with httpx.Client(timeout=10) as c:
-            c.patch(
-                f"{_SB_URL}/rest/v1/app_settings?key=eq.schedule_hour",
-                headers=_sb_hdrs(prefer_minimal=True),
-                json={"value_text": str(new_hour)},
-            )
-        settings_cache.load()
+        await asyncio.to_thread(_sb_patch, "?key=eq.schedule_hour", {"value_text": str(new_hour)})
         _reschedule(new_hour)
         updated.append(f"schedule_hour={new_hour}")
 
@@ -1320,15 +1325,10 @@ async def patch_sync_settings(body: dict = Body(default={})):
         if src not in _ALL_SCHEDULE_SOURCES:
             continue
         key = f"schedule_{src}_enabled" if src != "rada" else "schedule_enabled"
-        with httpx.Client(timeout=10) as c:
-            c.patch(
-                f"{_SB_URL}/rest/v1/app_settings?key=eq.{key}",
-                headers=_sb_hdrs(prefer_minimal=True),
-                json={"value_bool": bool(enabled)},
-            )
+        await asyncio.to_thread(_sb_patch, f"?key=eq.{key}", {"value_bool": bool(enabled)})
         updated.append(f"{key}={enabled}")
 
-    settings_cache.load()
+    await asyncio.to_thread(settings_cache.load)
     return {"updated": updated}
 
 
@@ -3672,10 +3672,19 @@ async def ask(body: AskRequest):
     # laws_supreme soft penalty ×0.88: широкі PDF-огляди матчаться на все, знижуємо їх вагу
     # Значення > 1.0 = Рада іде вище; 1.0 = без буста (можна змінити в адмінці)
     rada_boost = settings_cache.get_float("rada_source_boost", 1.15)
+
+    # ZIR boost для податкових запитів: ZIR — офіційна позиція ДПС, завжди актуальна.
+    # Boost запобігає витісненню ZIR старими судовими рішеннями по тим же темам.
+    _q_lower = body.question.lower()
+    _is_tax_query = any(kw in _q_lower for kw in _TAX_KEYWORDS)
+    _zir_boost = 1.3 if _is_tax_query else 1.0
+
     for r in results:
         col = r.get("_collection", "")
         if col == "laws_supreme_v2":
             r["similarity"] = r["similarity"] * 0.88
+        elif col == "laws_zir_v2" and _is_tax_query:
+            r["similarity"] = min(r["similarity"] * _zir_boost, 1.0)
         elif abs(rada_boost - 1.0) > 0.001 and (col.startswith("rada_") or col == "laws_positions_v2"):
             r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
     results.sort(key=lambda x: x["similarity"], reverse=True)
