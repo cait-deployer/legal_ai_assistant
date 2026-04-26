@@ -334,12 +334,12 @@ def save_item(item_id: str, question: str, answer: str, meta: dict) -> None:
 
 
 # ── Entry point for server.py ──────────────────────────────────────────────────
-def run_scrape_zir(log_callback=None, stop_event=None) -> None:
+def run_scrape_zir(log_callback=None, stop_event=None, force: bool = False) -> None:
     _log  = log_callback or (lambda msg, lvl="info": print(msg))
     _stop = stop_event or threading.Event()
 
     _log("🔍 ЗІР: отримуємо список питань-відповідей...", "info")
-    _log(f"   Директорія: {ZIR_DIR}", "info")
+    _log(f"   Директорія: {ZIR_DIR}" + (" [FORCE]" if force else ""), "info")
 
     try:
         items = fetch_all_ids(log=lambda msg: _log(msg, "info"))
@@ -363,7 +363,7 @@ def run_scrape_zir(log_callback=None, stop_event=None) -> None:
         item_id = str(item["id"])
         txt_path = Path(ZIR_DIR, f"zir_{item_id}.txt")
 
-        if txt_path.exists():
+        if not force and txt_path.exists():
             skip += 1
             continue
 

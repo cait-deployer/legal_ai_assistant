@@ -384,6 +384,7 @@ def main():
 def run_scrape_mod(
     log_callback=None,
     stop_event=None,
+    force: bool = False,
 ) -> None:
     """Entry point for server.py — runs full scrape (no --test mode)."""
     import threading
@@ -392,7 +393,7 @@ def run_scrape_mod(
     _stop = stop_event or threading.Event()
 
     _log("🔍 Збираємо список документів МОУ (Playwright)...", "info")
-    _log(f"   Директорія: {MOD_DIR}", "info")
+    _log(f"   Директорія: {MOD_DIR}" + (" [FORCE]" if force else ""), "info")
 
     docs = fetch_docs_playwright(headless=True)
     if not docs:
@@ -421,7 +422,7 @@ def run_scrape_mod(
             meta = normalize_meta(item)
             slug = meta["law_id"]
 
-            if Path(MOD_DIR, f"{slug}.txt").exists():
+            if not force and Path(MOD_DIR, f"{slug}.txt").exists():
                 skip += 1
                 continue
 

@@ -489,12 +489,12 @@ def _meta_incomplete(source: str, law_id: str) -> bool:
 
 
 # ── Process single document ───────────────────────────────────────────────────
-def _process_one(source: str, doc: dict, status: dict) -> str:
+def _process_one(source: str, doc: dict, status: dict, force: bool = False) -> str:
     """Returns: ok | empty | restricted | error | skipped"""
     law_id = _law_id_for(source, doc)
 
     with _status_lock:
-        if status.get(law_id, {}).get("status") == "ok" and not _meta_incomplete(source, law_id):
+        if not force and status.get(law_id, {}).get("status") == "ok" and not _meta_incomplete(source, law_id):
             return "skipped"
 
     try:
@@ -532,13 +532,13 @@ def _process_one(source: str, doc: dict, status: dict) -> str:
 
 
 # ── Worker wrapper — sets TLS so _log() routes to correct callback ──────────────
-def _process_one_ctx(source: str, doc: dict, status: dict) -> str:
+def _process_one_ctx(source: str, doc: dict, status: dict, force: bool = False) -> str:
     _tls.source = source
-    return _process_one(source, doc, status)
+    return _process_one(source, doc, status, force=force)
 
 
 # ── Process one source ─────────────────────────────────────────────────────────
-def _process_source(source: str, items: list, start_idx: int, state: dict, status: dict) -> None:
+def _process_source(source: str, items: list, start_idx: int, state: dict, status: dict, force: bool = False) -> None:
     stats = state["stats"]
     total = len(items)
     processed = 0
@@ -555,7 +555,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
             batch     = list(enumerate(items[i:batch_end], start=i))
 
             with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-                futs = {ex.submit(_process_one_ctx, source, doc, status): (j, doc) for j, doc in batch}
+                futs = {ex.submit(_process_one_ctx, source, doc, status, force): (j, doc) for j, doc in batch}
                 for fut in as_completed(futs):
                     j, doc = futs[fut]
                     law_id = _law_id_for(source, doc)
@@ -590,7 +590,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
                 break
             doc    = items[j]
             law_id = _law_id_for(source, doc)
-            st = _process_one(source, doc, status)
+            st = _process_one(source, doc, status, force=force)
             if st == "error":
                 session_error_docs.append(doc)
             stats[st] = stats.get(st, 0) + 1
@@ -644,7 +644,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
 
 
 # ── Internal run logic (always single source) ─────────────────────────────────
-def _run_main(source: str, rada_collection: str | None = None) -> None:
+def _run_main(source: str, rada_collection: str | None = None, force: bool = False) -> None:
     _tls.source = source
     os.makedirs(RAW_DIR, exist_ok=True)
 
@@ -658,7 +658,7 @@ def _run_main(source: str, rada_collection: str | None = None) -> None:
     status = _load_status()
 
     _log(f"\n{'='*60}")
-    _log(f"ДЖЕРЕЛО: {source.upper()}")
+    _log(f"ДЖЕРЕЛО: {source.upper()}" + (" [FORCE]" if force else ""))
     _log(f"{'='*60}")
 
     items = _get_ids(source)
@@ -677,7 +677,7 @@ def _run_main(source: str, rada_collection: str | None = None) -> None:
     if start_idx > 0:
         _log(f"  Відновлення з позиції {start_idx}/{len(items)}")
 
-    _process_source(source, items, start_idx, state, status)
+    _process_source(source, items, start_idx, state, status, force=force)
 
     if _should_stop():
         _log("\n⏸ Зупинено. Запусти знову для продовження.")
@@ -694,6 +694,7 @@ def run_scrape_all(
     rada_collection: str | None = None,
     log_callback=None,
     stop_event: threading.Event | None = None,
+    force: bool = False,
 ) -> None:
     """Called from server.py for a SINGLE source. Runs in a daemon thread."""
     evt = stop_event if stop_event is not None else threading.Event()
@@ -701,7 +702,7 @@ def run_scrape_all(
     _stop_evts[source] = evt
     _tls.source = source
     try:
-        _run_main(source=source, rada_collection=rada_collection)
+        _run_main(source=source, rada_collection=rada_collection, force=force)
     finally:
         _log_cbs.pop(source, None)
         _stop_evts.pop(source, None)

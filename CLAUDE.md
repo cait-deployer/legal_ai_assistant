@@ -60,12 +60,15 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - `app/admin/coverage/page.tsx` — Collection coverage stats
 - `app/admin/stats/page.tsx` — System stats / usage
 - `app/admin/v2/page.tsx` — V2 панель (Скрапер / Реіндекс / Аналітика / Диск / Джерела)
+- `app/admin/sync/page.tsx` — Зведення джерел + Centroid Router + Авто-синхронізація (розклад per source)
 
 ## Key patterns
 - Settings (AI model, thresholds) — Supabase `app_settings` table, read via `settings_cache`
 - All Qdrant collections v1: `RADA_COLLECTIONS` (13) + `laws_supreme`, `laws_wiki`, `laws_ccu`, `laws_positions`, `laws_kmu` (768 dims)
 - V2 Qdrant collections: same names with `_v2` suffix (18 collections, 3072 dims) — shadow, not yet live in production
 - `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini
+- Auto-sync scheduler: APScheduler `daily_sync` cron job at `schedule_hour` UTC. Per-source flags: `schedule_enabled` (Rada legacy V1), `schedule_{source}_enabled` for V2 sources. `schedule_hour` key (int, stored as value_text). UI: `/admin/sync` → ScheduleWidget. Endpoints: `GET /admin/sync/status`, `PATCH /admin/sync/settings`.
+- Scraper `force=True` mode: bypasses skip logic (re-downloads existing files). Available in `run_scrape_all`, `run_scrape_mod`, `run_scrape_zir`. Trigger via `/admin/v2/scrape/trigger` with `{"force": true}`.
 - Scraper pause/resume: JSON state files in `backend/` (`sync_state.json`, `wiki_state.json`, `ccu_state.json`)
 - V2 scraper pause/resume: `scrape_v2_{source}_state.json` (per source)
 - V2 reindex pause/resume: `reindex_v2_{source}_state.json` (per source, e.g. `reindex_v2_rada_state.json`)

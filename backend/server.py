@@ -1014,27 +1014,62 @@ def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# APScheduler — автоматичний щоденний запуск
+# APScheduler — автоматичний щоденний запуск (всі джерела)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _scheduler = BackgroundScheduler(timezone="UTC")
 
+# Час останнього авто-запуску по кожному джерелу (зберігається в пам'яті)
+_schedule_last_sync: dict[str, str] = {}
+
+# Всі джерела що підтримують авто-синхронізацію
+_ALL_SCHEDULE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir")
+
 
 def _scheduled_sync() -> None:
-    """Викликається щодня о 01:00 UTC. Перевіряє прапор і запускає синхронізацію."""
-    if not settings_cache.get_bool("schedule_enabled", False):
-        print("⏰ [scheduler] schedule_enabled=false — пропускаємо")
-        return
-    with _lock:
-        if _sync["rada"]["running"]:
-            print("⏰ [scheduler] Рада вже виконується — пропускаємо")
-            return
-    session_id = str(uuid.uuid4())
-    print(f"⏰ [scheduler] Автозапуск: {session_id[:8]}")
+    """Викликається щодня о schedule_hour UTC. Запускає всі ввімкнені джерела."""
+    print("⏰ [scheduler] Перевірка авто-синхронізації...")
+
+    # Рада — використовує legacy _do_rada (V1 flow)
+    if settings_cache.get_bool("schedule_enabled", False):
+        with _lock:
+            if not _sync["rada"]["running"]:
+                session_id = str(uuid.uuid4())
+                print(f"⏰ [scheduler] Рада (legacy): {session_id[:8]}")
+                try:
+                    _start_sync("rada", _do_rada, session_id)
+                    _schedule_last_sync["rada"] = datetime.utcnow().isoformat() + "Z"
+                except Exception as e:
+                    print(f"⏰ [scheduler] Рада помилка: {e}")
+            else:
+                print("⏰ [scheduler] Рада вже виконується — пропускаємо")
+
+    # V2 джерела — scrape_all_v2 / scrape_mod_v2 / scrape_zir_v2
+    for src in V2_SCRAPE_SOURCES:
+        key = f"schedule_{src}_enabled"
+        if not settings_cache.get_bool(key, False):
+            continue
+        slot = f"scrape_v2_{src}"
+        with _lock:
+            if _sync[slot]["running"]:
+                print(f"⏰ [scheduler] {src} вже виконується — пропускаємо")
+                continue
+        session_id = str(uuid.uuid4())
+        print(f"⏰ [scheduler] {src}: {session_id[:8]}")
+        try:
+            _start_sync(slot, _do_scrape_v2, session_id, source=src, rada_collection=None, force=False)
+            _schedule_last_sync[src] = datetime.utcnow().isoformat() + "Z"
+        except Exception as e:
+            print(f"⏰ [scheduler] {src} помилка: {e}")
+
+
+def _reschedule(hour: int) -> None:
+    """Перепланувати cron job на нову годину."""
     try:
-        _start_sync("rada", _do_rada, session_id)
+        _scheduler.reschedule_job("daily_sync", trigger="cron", hour=hour, minute=0)
+        print(f"⏰ [scheduler] Перенесено на {hour:02d}:00 UTC")
     except Exception as e:
-        print(f"⏰ [scheduler] Помилка запуску: {e}")
+        print(f"⏰ [scheduler] reschedule error: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1065,9 +1100,10 @@ async def lifespan(app: FastAPI):
         total = len(state.get("all_laws", []))
         print(f"⚠️  Знайдено збережений стан: Рада, прогрес {idx}/{total}")
 
-    _scheduler.add_job(_scheduled_sync, "cron", hour=1, minute=0, id="rada_daily")
+    schedule_hour = int(settings_cache.get_float("schedule_hour") or 1)
+    _scheduler.add_job(_scheduled_sync, "cron", hour=schedule_hour, minute=0, id="daily_sync")
     _scheduler.start()
-    print("✅ URAI backend ready.")
+    print(f"✅ URAI backend ready. Scheduler: {schedule_hour:02d}:00 UTC")
     yield
     _scheduler.shutdown(wait=False)
 
@@ -1230,6 +1266,70 @@ async def rada_logs():
 @app.get("/admin/rada/schedule")
 async def get_schedule():
     return {"enabled": settings_cache.get_bool("schedule_enabled", False)}
+
+
+# ── /admin/sync — multi-source schedule management ────────────────────────────
+
+@app.get("/admin/sync/status")
+async def get_sync_status():
+    """Стан авто-синхронізації по кожному джерелу."""
+    schedule_hour = int(settings_cache.get_float("schedule_hour") or 1)
+    sources = {}
+    for src in _ALL_SCHEDULE_SOURCES:
+        key = f"schedule_{src}_enabled" if src != "rada" else "schedule_enabled"
+        slot = f"scrape_v2_{src}" if src != "rada" else "rada"
+        with _lock:
+            running = _sync[slot]["running"]
+        sources[src] = {
+            "enabled":   settings_cache.get_bool(key, False),
+            "running":   running,
+            "last_sync": _schedule_last_sync.get(src),
+        }
+    return {
+        "schedule_hour": schedule_hour,
+        "sources": sources,
+    }
+
+
+@app.patch("/admin/sync/settings")
+async def patch_sync_settings(body: dict = Body(default={})):
+    """Оновити розклад авто-синхронізації. Приймає:
+    { schedule_hour: int, sources: { rada: bool, kmu: bool, ... } }"""
+    if not _SB_URL:
+        raise HTTPException(500, "Supabase не налаштовано")
+
+    updated = []
+
+    # Оновити schedule_hour
+    new_hour = body.get("schedule_hour")
+    if new_hour is not None:
+        new_hour = max(0, min(23, int(new_hour)))
+        with httpx.Client(timeout=10) as c:
+            c.patch(
+                f"{_SB_URL}/rest/v1/app_settings?key=eq.schedule_hour",
+                headers=_sb_hdrs(prefer_minimal=True),
+                json={"value_text": str(new_hour)},
+            )
+        settings_cache.load()
+        _reschedule(new_hour)
+        updated.append(f"schedule_hour={new_hour}")
+
+    # Оновити per-source enabled flags
+    sources_patch = body.get("sources", {})
+    for src, enabled in sources_patch.items():
+        if src not in _ALL_SCHEDULE_SOURCES:
+            continue
+        key = f"schedule_{src}_enabled" if src != "rada" else "schedule_enabled"
+        with httpx.Client(timeout=10) as c:
+            c.patch(
+                f"{_SB_URL}/rest/v1/app_settings?key=eq.{key}",
+                headers=_sb_hdrs(prefer_minimal=True),
+                json={"value_bool": bool(enabled)},
+            )
+        updated.append(f"{key}={enabled}")
+
+    settings_cache.load()
+    return {"updated": updated}
 
 
 @app.post("/admin/settings/refresh")
@@ -1851,21 +1951,21 @@ async def resume_reindex_rada():
 
 # ── /admin/v2 — Scraper & Reindex v2 (gemini-embedding-001, 3072 dims) ────────
 
-def _do_scrape_v2(session_id: str, source: str, rada_collection: str | None) -> None:
+def _do_scrape_v2(session_id: str, source: str, rada_collection: str | None, force: bool = False) -> None:
     slot = f"scrape_v2_{source}"
     log = _make_reindex_log_cb(slot)
     try:
         _v2_scrape_stop[source].clear()
         if source == "mod":
             from scrape_mod_v2 import run_scrape_mod
-            run_scrape_mod(log_callback=log, stop_event=_v2_scrape_stop[source])
+            run_scrape_mod(log_callback=log, stop_event=_v2_scrape_stop[source], force=force)
         elif source == "zir":
             from scrape_zir_v2 import run_scrape_zir
-            run_scrape_zir(log_callback=log, stop_event=_v2_scrape_stop[source])
+            run_scrape_zir(log_callback=log, stop_event=_v2_scrape_stop[source], force=force)
         else:
             from scrape_all_v2 import run_scrape_all
             run_scrape_all(source=source, rada_collection=rada_collection,
-                           log_callback=log, stop_event=_v2_scrape_stop[source])
+                           log_callback=log, stop_event=_v2_scrape_stop[source], force=force)
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:
@@ -1924,11 +2024,12 @@ async def v2_scrape_trigger(body: dict = Body(default={})):
     if source not in V2_SCRAPE_SOURCES:
         raise HTTPException(400, f"source має бути одним із {list(V2_SCRAPE_SOURCES)}")
     rada_collection = body.get("rada_collection") or None
+    force = bool(body.get("force", False))
     slot = f"scrape_v2_{source}"
     session_id = str(uuid.uuid4())
     try:
         _start_sync(slot, _do_scrape_v2, session_id,
-                    source=source, rada_collection=rada_collection)
+                    source=source, rada_collection=rada_collection, force=force)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"ok": True, "session_id": session_id}
