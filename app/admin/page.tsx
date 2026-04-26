@@ -1,34 +1,28 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import {
-  LayoutDashboard, FileText, Clock,
-  CheckCircle, XCircle, Loader2, RefreshCw,
-  ArrowRight, Zap, Calendar, Settings, BookOpen, Pause,
-  AlertTriangle, Info, TrendingUp, Timer,
+  LayoutDashboard, FileText, Clock, RefreshCw,
+  Loader2, Zap, Settings, ArrowRight, Calendar,
 } from "lucide-react"
 
-type Stats = {
-  doc_count: number
-  law_count?: number
-  law_count_per_collection?: Record<string, number>
-  collection_stats?: Record<string, number>
-  last_sync: {
-    status: string
-    started_at: string
-    finished_at?: string
-    laws_processed?: number
-    error_message?: string
-  } | null
-  schedule_enabled: boolean
-  scraping_running: boolean
-  can_resume: boolean
-  resume_progress?: { next_index: number; total: number } | null
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type CollectionStats = { doc_count: number; law_count: number | null; law_count_per_collection: Record<string, number> | null }
+
+type SyncStatus = {
+  schedule_hour: number
+  sources: Record<string, { enabled: boolean; running: boolean; last_sync: string | null }>
 }
 
-const COLLECTION_LABELS: Record<string, string> = {
+type ScrapeStatus = Record<string, { running: boolean; can_resume: boolean }>
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const COL_LABELS: Record<string, string> = {
+  // Рада V1
   rada_finance:   "Фінанси / Податки",
   rada_state:     "Держустрій",
   rada_personnel: "Кадри",
@@ -41,116 +35,93 @@ const COLLECTION_LABELS: Record<string, string> = {
   rada_housing:   "Житлове / Будівництво",
   rada_land:      "Земельне / АПК",
   rada_industry:  "Бізнес / Промисловість",
-  rada_other:     "Інше (РАДА)",
-  laws_supreme:   "Верховний Суд",
-  laws_wiki:      "Правова допомога",
-  laws_ccu:       "Конституційний Суд",
+  rada_other:     "Інше (Рада)",
+  laws_supreme:   "Верховний суд",
+  laws_wiki:      "Legal Aid Wiki",
+  laws_ccu:       "Конституційний суд",
+  laws_kmu:       "Кабінет Міністрів",
+  laws_positions: "Правові позиції ВС",
+  laws_mod:       "МОУ (PDF)",
+  laws_zir:       "ЗІР ДПС",
+  // Рада V2
+  rada_finance_v2:   "Фінанси / Податки (V2)",
+  rada_state_v2:     "Держустрій (V2)",
+  rada_personnel_v2: "Кадри (V2)",
+  rada_court_v2:     "Суд / Правосуддя (V2)",
+  rada_intl_v2:      "Міжнародне (V2)",
+  rada_labor_v2:     "Трудове / Соціальне (V2)",
+  rada_civil_v2:     "Цивільне / Сімейне (V2)",
+  rada_criminal_v2:  "Кримінальне (V2)",
+  rada_admin_v2:     "Адміністративне (V2)",
+  rada_housing_v2:   "Житлове / Будівництво (V2)",
+  rada_land_v2:      "Земельне / АПК (V2)",
+  rada_industry_v2:  "Бізнес / Промисловість (V2)",
+  rada_other_v2:     "Інше (Рада V2)",
+  laws_supreme_v2:   "Верховний суд (V2)",
+  laws_wiki_v2:      "Legal Aid Wiki (V2)",
+  laws_ccu_v2:       "Конституційний суд (V2)",
+  laws_kmu_v2:       "Кабінет Міністрів (V2)",
+  laws_positions_v2: "Правові позиції ВС (V2)",
+  laws_mod_v2:       "МОУ (V2)",
+  laws_zir_v2:       "ЗІР ДПС (V2)",
 }
 
-type SyncRun = {
-  status: "success" | "error" | "paused"
-  laws_processed: number
-  duration_sec: number | null
-  started_at: string | null
-  source?: string
+function fmtTime(iso: string | null) {
+  if (!iso) return null
+  const d = Date.now() - new Date(iso).getTime()
+  const h = Math.floor(d / 3600000)
+  const min = Math.floor(d / 60000)
+  if (min < 1) return "щойно"
+  if (h < 1)   return `${min} хв тому`
+  if (h < 24)  return `${h} год тому`
+  return new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })
 }
 
-type SyncStats = {
-  reliability_30d: { total: number; success: number; error: number; paused: number; pct: number | null }
-  laws_30d: number
-  laws_7d: number
-  avg_duration_sec: number | null
-  consecutive_failures: number
-  last_success_at: string | null
-  last_failure_at: string | null
-  last_14_runs: SyncRun[]
-  alerts: { level: "error" | "warning" | "info"; message: string }[]
-}
-
-function fmtDuration(sec: number | null): string {
-  if (sec == null) return "—"
-  if (sec < 60) return `${sec} с`
-  return `${Math.floor(sec / 60)} хв ${sec % 60} с`
-}
-
-function fmtRelative(iso: string | null): string {
-  if (!iso) return "—"
-  const diff = Date.now() - new Date(iso).getTime()
-  const d = Math.floor(diff / 86400000)
-  const h = Math.floor(diff / 3600000)
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return "щойно"
-  if (h < 1) return `${m} хв тому`
-  if (d < 1) return `${h} год тому`
-  if (d === 1) return "вчора"
-  return `${d} дн. тому`
-}
-
-function Sparkline({ runs }: { runs: SyncRun[] }) {
-  if (!runs.length) return null
-  const maxLaws = Math.max(...runs.map(r => r.laws_processed), 1)
-  return (
-    <div className="flex items-end gap-0.5 h-10">
-      {runs.map((r, i) => {
-        const h = Math.max(4, Math.round((r.laws_processed / maxLaws) * 40))
-        const color = r.status === "success" ? "bg-emerald-500" : r.status === "error" ? "bg-red-500" : "bg-blue-400"
-        const label = `${r.started_at ? new Date(r.started_at).toLocaleDateString("uk-UA") : ""} · ${r.laws_processed} законів · ${r.status}`
-        return (
-          <div key={i} title={label} className="group relative flex-1 flex items-end cursor-default">
-            <div className={`w-full rounded-sm opacity-70 group-hover:opacity-100 transition-opacity ${color}`} style={{ height: `${h}px` }} />
-          </div>
-        )
-      })}
-    </div>
-  )
-}
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [syncStats, setSyncStats] = useState<SyncStats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [scheduleToggling, setScheduleToggling] = useState(false)
+  const [stats, setStats]           = useState<CollectionStats | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const [scrape, setScrape]         = useState<ScrapeStatus>({})
+  const [loading, setLoading]       = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [textIndexReady, setTextIndexReady] = useState<boolean | null>(null)
 
-  const fetchStats = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [res, syncRes, idxRes] = await Promise.all([
+      const [statsRes, syncRes, scrapeRes] = await Promise.allSettled([
         fetch("/api/admin/stats"),
-        fetch("/api/admin/sync/stats"),
-        fetch("/api/admin/text-index/status"),
+        fetch("/api/admin/sync/status"),
+        fetch("/api/admin/v2/scrape/status"),
       ])
-      setStats(await res.json())
-      if (syncRes.ok) setSyncStats(await syncRes.json())
-      if (idxRes.ok) {
-        const idxData = await idxRes.json()
-        setTextIndexReady(idxData.all_ready ?? null)
-      }
+      if (statsRes.status === "fulfilled" && statsRes.value.ok)  setStats(await statsRes.value.json())
+      if (syncRes.status  === "fulfilled" && syncRes.value.ok)   setSyncStatus(await syncRes.value.json())
+      if (scrapeRes.status === "fulfilled" && scrapeRes.value.ok) setScrape(await scrapeRes.value.json())
       setLastUpdated(new Date())
-    } catch { }
-    finally { setLoading(false) }
-  }
+    } catch { /* ignore */ }
+    setLoading(false)
+  }, [])
 
-  useEffect(() => { fetchStats() }, [])
+  useEffect(() => { fetchAll() }, [fetchAll])
 
-  const handleToggleSchedule = async () => {
-    if (!stats || scheduleToggling) return
-    const next = !stats.schedule_enabled
-    setScheduleToggling(true)
-    try {
-      await fetch("/api/admin/rada/schedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next }),
-      })
-      setStats((s) => s ? { ...s, schedule_enabled: next } : s)
-    } catch { }
-    finally { setScheduleToggling(false) }
-  }
+  // Derived
+  const enabledSources  = syncStatus ? Object.values(syncStatus.sources).filter(s => s.enabled).length : 0
+  const totalSources    = syncStatus ? Object.keys(syncStatus.sources).length : 8
+  const anyRunning      = syncStatus
+    ? Object.values(syncStatus.sources).some(s => s.running)
+    : Object.values(scrape).some(s => s.running)
+  const anyV2Running    = Object.values(scrape).some(s => s.running)
+  const scheduleHour    = syncStatus?.schedule_hour ?? 1
+
+  const lastSyncTimes   = syncStatus
+    ? Object.entries(syncStatus.sources)
+        .filter(([, s]) => s.last_sync)
+        .sort(([, a], [, b]) => new Date(b.last_sync!).getTime() - new Date(a.last_sync!).getTime())
+    : []
 
   return (
     <div className="space-y-6 py-2">
+
       {/* Header */}
       <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#C9A84C]/10">
         <div className="flex items-center gap-3">
@@ -165,11 +136,11 @@ export default function AdminDashboard() {
         <div className="flex items-center gap-2 shrink-0">
           {lastUpdated && (
             <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">
-              Оновлено {lastUpdated.toLocaleTimeString()}
+              Оновлено {lastUpdated.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" })}
             </p>
           )}
           <Button
-            variant="ghost" size="sm" onClick={fetchStats} disabled={loading}
+            variant="ghost" size="sm" onClick={fetchAll} disabled={loading}
             className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl h-9"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -178,20 +149,10 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Full-text index badge */}
-      {textIndexReady === false && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/5 text-amber-400 text-sm">
-          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-          <span>
-            <strong>Keyword-індекс будується</strong> — Qdrant індексує базу знань у фоні для покращення пошуку.
-            Це автоматично. Після завершення бейджик зникне.
-          </span>
-        </div>
-      )}
-
-      {/* Stat cards */}
+      {/* Cards row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {/* Doc count */}
+
+        {/* Card: Документи в базі */}
         <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 hover:border-[#C9A84C]/30 rounded-[2rem] p-6 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
             <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Документів у базі</p>
@@ -211,15 +172,15 @@ export default function AdminDashboard() {
               ? `Унікальних законів · ${stats.doc_count?.toLocaleString("uk-UA")} чанків`
               : "Векторних чанків у Qdrant"}
           </p>
-          {(stats?.law_count_per_collection || stats?.collection_stats) && (
+          {stats?.law_count_per_collection && (
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto pr-1">
-              {Object.entries(stats.law_count_per_collection ?? stats.collection_stats ?? {})
+              {Object.entries(stats.law_count_per_collection)
                 .filter(([, count]) => count > 0)
                 .sort(([, a], [, b]) => b - a)
                 .map(([col, count]) => (
                   <div key={col} className="flex items-center justify-between gap-2">
                     <span className="text-[10px] text-[#C9A84C]/50 truncate">
-                      {COLLECTION_LABELS[col] ?? col}
+                      {COL_LABELS[col] ?? col}
                     </span>
                     <span className="text-[10px] font-bold text-[#C9A84C]/80 tabular-nums shrink-0">
                       {count.toLocaleString("uk-UA")}
@@ -230,10 +191,10 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* Schedule toggle */}
+        {/* Card: Авто-синхронізація */}
         <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 hover:border-[#C9A84C]/30 rounded-[2rem] p-6 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Автосинхронізація</p>
+            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Авто-синхронізація</p>
             <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
               <Calendar className="w-4 h-4 text-blue-400" />
             </div>
@@ -241,32 +202,36 @@ export default function AdminDashboard() {
           {loading ? (
             <div className="h-10 w-28 rounded-xl bg-[#C9A84C]/5 animate-pulse" />
           ) : (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full transition-colors ${stats?.schedule_enabled ? "bg-emerald-400" : "bg-[#C9A84C]/20"}`} />
-                  <span className="text-xl font-serif font-bold text-white">
-                    {stats?.schedule_enabled ? "Увімкнено" : "Вимкнено"}
-                  </span>
-                </div>
-                <p className="text-[10px] text-[#C9A84C]/50 mt-1.5 font-black uppercase tracking-wider">Щодня о 01:00</p>
+            <>
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`w-2.5 h-2.5 rounded-full ${enabledSources > 0 ? "bg-emerald-400" : "bg-gray-600"}`} />
+                <span className="text-xl font-serif font-bold text-white">
+                  {enabledSources > 0 ? `${enabledSources} / ${totalSources} джерел` : "Вимкнено"}
+                </span>
               </div>
-              <button
-                onClick={handleToggleSchedule}
-                disabled={scheduleToggling}
-                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-300 focus:outline-none disabled:opacity-60 ${stats?.schedule_enabled ? "bg-[#C9A84C]" : "bg-[#C9A84C]/20"
-                  }`}
-                role="switch"
-                aria-checked={stats?.schedule_enabled}
-              >
-                <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-300 ${stats?.schedule_enabled ? "translate-x-6" : "translate-x-1"
-                  }`} />
-              </button>
-            </div>
+              <p className="text-[10px] text-[#C9A84C]/50 font-black uppercase tracking-wider mb-3">
+                Щодня о {String(scheduleHour).padStart(2, "0")}:00 UTC · лише скрапінг
+              </p>
+              {lastSyncTimes.length > 0 && (
+                <div className="space-y-1">
+                  {lastSyncTimes.slice(0, 3).map(([src, s]) => (
+                    <div key={src} className="flex justify-between text-[10px]">
+                      <span className="text-gray-500 font-mono">{src}</span>
+                      <span className="text-gray-400">{fmtTime(s.last_sync)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
+          <Link href="/admin/sync" className="block mt-4">
+            <div className="flex items-center gap-1 text-[10px] text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors">
+              Керувати <ArrowRight className="w-3 h-3" />
+            </div>
+          </Link>
         </div>
 
-        {/* Scraping status */}
+        {/* Card: Статус скрапінгу */}
         <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 hover:border-[#C9A84C]/30 rounded-[2rem] p-6 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
             <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">Статус скрапінгу</p>
@@ -276,31 +241,27 @@ export default function AdminDashboard() {
           </div>
           {loading ? (
             <div className="h-10 w-28 rounded-xl bg-[#C9A84C]/5 animate-pulse" />
-          ) : stats?.scraping_running ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-              <span className="text-xl font-serif font-bold text-amber-400">Виконується</span>
-            </div>
-          ) : stats?.can_resume ? (
-            <div>
-              <div className="flex items-center gap-2">
-                <Pause className="w-4 h-4 text-blue-400" />
-                <span className="text-xl font-serif font-bold text-blue-400">Призупинено</span>
+          ) : anyV2Running ? (
+            <>
+              <div className="flex items-center gap-2 mb-1">
+                <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                <span className="text-xl font-serif font-bold text-amber-400">Виконується</span>
               </div>
-              {stats.resume_progress && (
-                <div className="mt-2">
-                  <div className="flex justify-between text-[10px] text-[#E0E6ED]/50 mb-1">
-                    <span>Прогрес</span>
-                    <span>{stats.resume_progress.next_index} / {stats.resume_progress.total}</span>
-                  </div>
-                  <div className="w-full bg-[#0A0E1A] rounded-full h-1 overflow-hidden">
-                    <div
-                      className="bg-blue-400 h-full rounded-full"
-                      style={{ width: `${Math.round((stats.resume_progress.next_index / stats.resume_progress.total) * 100)}%` }}
-                    />
-                  </div>
-                </div>
-              )}
+              <div className="mt-2 space-y-1">
+                {Object.entries(scrape)
+                  .filter(([, s]) => s.running)
+                  .map(([src]) => (
+                    <div key={src} className="flex items-center gap-1.5 text-[10px] text-amber-300">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block" />
+                      <span className="font-mono">{src}</span>
+                    </div>
+                  ))}
+              </div>
+            </>
+          ) : Object.values(scrape).some(s => s.can_resume) ? (
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+              <span className="text-xl font-serif font-bold text-amber-400">Призупинено</span>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -308,135 +269,49 @@ export default function AdminDashboard() {
               <span className="text-xl font-serif font-bold text-white">Очікування</span>
             </div>
           )}
-          <p className="text-[10px] text-[#C9A84C]/50 mt-2 font-black uppercase tracking-wider">Поточний стан синхронізації</p>
-        </div>
-      </div>
-
-      {/* Sync health widget */}
-      <div className={`bg-[#0d1120]/60 border rounded-[2rem] p-6 transition-all ${
-        (syncStats?.consecutive_failures ?? 0) >= 3 ? "border-red-500/30"
-        : (syncStats?.consecutive_failures ?? 0) === 1 ? "border-amber-500/20"
-        : "border-[#C9A84C]/10"
-      }`}>
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[#C9A84C]" />
-              <h2 className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Аналітика синхронізації</h2>
-            </div>
-            <p className="text-sm text-[#E0E6ED]/70 mt-1">Надійність та статистика за 30 днів</p>
-          </div>
-          <Link href="/admin/settings">
-            <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 rounded-xl">
+          <p className="text-[10px] text-[#C9A84C]/50 mt-3 font-black uppercase tracking-wider">
+            {anyV2Running
+              ? `${Object.values(scrape).filter(s => s.running).length} з 8 джерел`
+              : "Всі 8 джерел"}
+          </p>
+          <Link href="/admin/sync" className="block mt-2">
+            <div className="flex items-center gap-1 text-[10px] text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors">
               Керувати <ArrowRight className="w-3 h-3" />
-            </Button>
+            </div>
           </Link>
         </div>
+      </div>
 
-        {loading ? (
-          <div className="space-y-3">
-            <div className="h-10 w-full rounded-xl bg-[#C9A84C]/5 animate-pulse" />
-            <div className="grid grid-cols-4 gap-3">
-              {[0,1,2,3].map(i => <div key={i} className="h-14 rounded-xl bg-[#C9A84C]/5 animate-pulse" />)}
+      {/* Sources mini-table */}
+      {syncStatus && (
+        <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-[2rem] p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#C9A84C]" />
+              <h2 className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Джерела — остання авто-синхронізація</h2>
             </div>
+            <Link href="/admin/sync">
+              <Button variant="ghost" size="sm" className="gap-1 h-8 text-xs text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 rounded-xl">
+                Зведення <ArrowRight className="w-3 h-3" />
+              </Button>
+            </Link>
           </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Alerts */}
-            {syncStats?.alerts.map((a, i) => (
-              <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${
-                a.level === "error"   ? "bg-red-500/10 border-red-500/20 text-red-400"
-                : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                : "bg-[#C9A84C]/5 border-[#C9A84C]/15 text-[#C9A84C]/80"
-              }`}>
-                {a.level === "error"   && <XCircle className="w-4 h-4 shrink-0" />}
-                {a.level === "warning" && <AlertTriangle className="w-4 h-4 shrink-0" />}
-                {a.level === "info"    && <Info className="w-4 h-4 shrink-0" />}
-                {a.message}
-              </div>
-            ))}
-
-            {/* Stat row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {/* Reliability */}
-              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
-                  <TrendingUp className="w-3 h-3" /> Надійність
-                </p>
-                <p className={`text-2xl font-bold mt-1 ${
-                  syncStats?.reliability_30d.pct == null ? "text-[#E0E6ED]/30"
-                  : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
-                  : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
-                  : "text-red-400"
-                }`}>
-                  {syncStats?.reliability_30d.pct != null ? `${syncStats.reliability_30d.pct}%` : "—"}
-                </p>
-                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
-                  {syncStats ? `${syncStats.reliability_30d.success}/${syncStats.reliability_30d.total} запусків` : "—"}
-                </p>
-              </div>
-
-              {/* Laws 30d */}
-              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
-                  <CheckCircle className="w-3 h-3" /> Законів / міс
-                </p>
-                <p className="text-2xl font-bold mt-1 text-white">
-                  {syncStats?.laws_30d != null ? syncStats.laws_30d.toLocaleString("uk-UA") : "—"}
-                </p>
-                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
-                  {syncStats?.laws_7d != null ? `${syncStats.laws_7d} за 7 днів` : ""}
-                </p>
-              </div>
-
-              {/* Avg duration */}
-              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
-                  <Timer className="w-3 h-3" /> Сер. тривалість
-                </p>
-                <p className="text-2xl font-bold mt-1 text-white">
-                  {fmtDuration(syncStats?.avg_duration_sec ?? null)}
-                </p>
-                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">успішних запусків</p>
-              </div>
-
-              {/* Last success */}
-              <div className="bg-[#0A0E1A]/60 rounded-2xl px-4 py-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Останній успіх
-                </p>
-                <p className={`text-xl font-bold mt-1 ${
-                  !syncStats?.last_success_at ? "text-[#E0E6ED]/30"
-                  : Date.now() - new Date(syncStats.last_success_at).getTime() > 7 * 86400000 ? "text-red-400"
-                  : Date.now() - new Date(syncStats.last_success_at).getTime() > 3 * 86400000 ? "text-amber-400"
-                  : "text-emerald-400"
-                }`}>
-                  {fmtRelative(syncStats?.last_success_at ?? null)}
-                </p>
-                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
-                  {syncStats?.last_success_at ? new Date(syncStats.last_success_at).toLocaleDateString("uk-UA") : ""}
-                </p>
-              </div>
-            </div>
-
-            {/* Sparkline */}
-            {syncStats && syncStats.last_14_runs.length > 0 && (
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/40 mb-2">
-                  Останні {syncStats.last_14_runs.length} запусків
-                  <span className="ml-2 font-normal normal-case text-[#E0E6ED]/30">(висота = кількість законів)</span>
-                </p>
-                <Sparkline runs={syncStats.last_14_runs} />
-                <div className="flex items-center gap-4 mt-2 text-[10px] text-[#E0E6ED]/40">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> успіх</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" /> помилка</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400 inline-block" /> призупинено</span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {Object.entries(syncStatus.sources).map(([src, s]) => (
+              <div key={src} className="bg-[#0A0E1A]/60 rounded-2xl px-3 py-2.5">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${s.enabled ? "bg-emerald-400" : "bg-gray-600"}`} />
+                  <span className="text-[10px] font-mono text-gray-400">{src}</span>
+                  {s.running && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-auto" />}
+                </div>
+                <div className="text-[10px] text-gray-600">
+                  {s.last_sync ? fmtTime(s.last_sync) : "—"}
                 </div>
               </div>
-            )}
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Quick actions */}
       <div className="bg-[#0d1120]/40 border border-dashed border-[#C9A84C]/10 rounded-[2rem] p-6">
@@ -446,24 +321,25 @@ export default function AdminDashboard() {
             <p className="text-sm text-[#E0E6ED]/70 mt-1">Перейдіть до потрібного розділу</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/admin/settings">
+            <Link href="/admin/sync">
               <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl text-xs">
-                <Settings className="w-4 h-4" /> Налаштування
+                <Calendar className="w-4 h-4" /> Синхронізація
               </Button>
             </Link>
-            <Link href="/admin/base">
+            <Link href="/admin/ai-settings">
               <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl text-xs">
-                <BookOpen className="w-4 h-4" /> База знань
+                <Settings className="w-4 h-4" /> AI Налаштування
               </Button>
             </Link>
-            <Link href="/">
+            <Link href="/admin/coverage">
               <Button variant="ghost" size="sm" className="gap-2 h-9 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl text-xs">
-                <FileText className="w-4 h-4" /> Відкрити чат
+                <FileText className="w-4 h-4" /> Покриття бази
               </Button>
             </Link>
           </div>
         </div>
       </div>
+
     </div>
   )
 }

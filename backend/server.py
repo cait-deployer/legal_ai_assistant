@@ -1022,8 +1022,8 @@ def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
 
 _scheduler = BackgroundScheduler(timezone="UTC")
 
-# Час останнього авто-запуску по кожному джерелу (зберігається в пам'яті)
-_schedule_last_sync: dict[str, str] = {}
+# Стан останнього авто-запуску по кожному джерелу (зберігається в пам'яті)
+_schedule_last_sync: dict[str, dict] = {}  # {ts: str, logs: list[str]}
 
 # Всі джерела що підтримують авто-синхронізацію
 _ALL_SCHEDULE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir")

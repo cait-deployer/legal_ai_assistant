@@ -228,24 +228,29 @@ function ScheduleWidget() {
   const [status, setStatus]   = useState<SyncStatus | null>(null)
   const [hour, setHour]       = useState(1)
   const [sources, setSources] = useState<Record<string, boolean>>({})
+  const [isDirty, setIsDirty] = useState(false)
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(false)
   const [error, setError]     = useState("")
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (forceOverwrite = false) => {
     try {
       const res = await fetch("/api/admin/sync/status")
       if (res.ok) {
         const d: SyncStatus = await res.json()
-        setStatus(d); setHour(d.schedule_hour)
-        const init: Record<string, boolean> = {}
-        for (const [src, s] of Object.entries(d.sources)) init[src] = s.enabled
-        setSources(init)
+        setStatus(d)
+        // не перезаписуємо локальні зміни якщо користувач щось потикав
+        if (forceOverwrite || !isDirty) {
+          setHour(d.schedule_hour)
+          const init: Record<string, boolean> = {}
+          for (const [src, s] of Object.entries(d.sources)) init[src] = s.enabled
+          setSources(init)
+        }
       }
     } catch { /* ignore */ }
-  }, [])
+  }, [isDirty])
 
-  useEffect(() => { fetchStatus() }, [fetchStatus])
+  useEffect(() => { fetchStatus(true) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSave() {
     setSaving(true); setError(""); setSaved(false)
@@ -256,9 +261,24 @@ function ScheduleWidget() {
         body: JSON.stringify({ schedule_hour: hour, sources }),
       })
       if (!res.ok) { const d = await res.json(); setError(d.error || "Помилка") }
-      else { setSaved(true); setTimeout(() => setSaved(false), 3000) }
+      else {
+        setIsDirty(false)
+        setSaved(true)
+        setTimeout(() => setSaved(false), 3000)
+        await fetchStatus(true)
+      }
     } catch { setError("Помилка з'єднання") }
     setSaving(false)
+  }
+
+  function handleToggle(src: string) {
+    setSources(prev => ({ ...prev, [src]: !prev[src] }))
+    setIsDirty(true)
+  }
+
+  function handleHourChange(val: number) {
+    setHour(val)
+    setIsDirty(true)
   }
 
   const anyEnabled = Object.values(sources).some(Boolean)
@@ -272,10 +292,10 @@ function ScheduleWidget() {
           {anyEnabled && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">Активна</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={fetchStatus} className="p-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-gray-400 hover:text-[#E0E6ED] transition-colors"><RefreshCw className="w-3 h-3" /></button>
-          <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C9A84C]/10 border border-[#C9A84C]/25 text-[#C9A84C] text-xs font-bold hover:bg-[#C9A84C]/20 disabled:opacity-50 transition-colors">
+          <button onClick={() => fetchStatus(false)} className="p-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-gray-400 hover:text-[#E0E6ED] transition-colors"><RefreshCw className="w-3 h-3" /></button>
+          <button onClick={handleSave} disabled={saving} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 transition-colors ${isDirty ? "bg-[#C9A84C]/20 border border-[#C9A84C]/50 text-[#C9A84C] hover:bg-[#C9A84C]/30" : "bg-[#C9A84C]/10 border border-[#C9A84C]/25 text-[#C9A84C] hover:bg-[#C9A84C]/20"}`}>
             <Save className="w-3 h-3" />
-            {saving ? "Збереження..." : saved ? "Збережено ✓" : "Зберегти"}
+            {saving ? "Збереження..." : saved ? "Збережено ✓" : isDirty ? "Зберегти *" : "Зберегти"}
           </button>
         </div>
       </div>
@@ -292,7 +312,7 @@ function ScheduleWidget() {
       {/* Hour */}
       <div className="flex items-center gap-3">
         <span className="text-xs text-gray-400 shrink-0">Щодня о:</span>
-        <select value={hour} onChange={e => setHour(Number(e.target.value))}
+        <select value={hour} onChange={e => handleHourChange(Number(e.target.value))}
           className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-2 py-1 text-xs text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40">
           {Array.from({ length: 24 }, (_, i) => (
             <option key={i} value={i}>{String(i).padStart(2, "0")}:00 UTC</option>
@@ -319,7 +339,7 @@ function ScheduleWidget() {
                 <div className="flex items-center gap-2 shrink-0">
                   {s?.running && <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">▶ Зараз</span>}
                   <button
-                    onClick={() => setSources(prev => ({ ...prev, [src]: !prev[src] }))}
+                    onClick={() => handleToggle(src)}
                     className={`relative w-9 h-5 rounded-full transition-colors ${sources[src] ? "bg-[#C9A84C]" : "bg-gray-700"}`}
                     aria-label={sources[src] ? "Вимкнути" : "Ввімкнути"}
                   >
