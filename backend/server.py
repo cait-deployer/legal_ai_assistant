@@ -3981,7 +3981,7 @@ async def ask(body: AskRequest):
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 3000))
+        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
@@ -4125,6 +4125,17 @@ async def ask(body: AskRequest):
         main_model = GenerativeModel(model_name, system_instruction=system_prompt)
         clf_model  = GenerativeModel(model_name)
 
+        # thinking_budget=0: відповідь будується з готового контексту, thinking не потрібен
+        # і тільки їсть токени → обрізає відповідь
+        try:
+            from vertexai.generative_models import ThinkingConfig as _ThinkingConfig
+            _main_gen_cfg = GenerationConfig(
+                temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens,
+                thinking_config=_ThinkingConfig(thinking_budget=0),
+            )
+        except Exception:
+            _main_gen_cfg = GenerationConfig(temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens)
+
         llm_timeout = settings_cache.get_float("llm_timeout_seconds", 90.0)
         try:
             response, clf_response = await _asyncio.wait_for(
@@ -4132,7 +4143,7 @@ async def ask(body: AskRequest):
                     _asyncio.to_thread(
                         main_model.generate_content,
                         prompt,
-                        generation_config=GenerationConfig(temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens),
+                        generation_config=_main_gen_cfg,
                     ),
                     _asyncio.to_thread(
                         clf_model.generate_content,
