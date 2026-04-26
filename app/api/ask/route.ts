@@ -12,6 +12,8 @@ const SOURCE_FEATURE_MAP: Record<string, string> = {
   source_ccu:      "ccu",
   source_lpd:      "lpd",
   source_kmu:      "kmu",
+  source_mod:      "mod",
+  source_zir:      "zir",
 }
 
 // Response quality feature keys (passed as-is to backend)
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
       const sources = features
         .map((f) => SOURCE_FEATURE_MAP[f.feature_key])
         .filter(Boolean) as string[]
-      if (sources.length > 0) filter_sources = sources
+      if (sources.length > 0) filter_sources = [...new Set([...sources, "mod", "zir"])]
 
       // Response quality features
       response_features = features
