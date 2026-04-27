@@ -31,6 +31,8 @@ npm run build && systemctl restart frontend.service && systemctl restart backend
 - `backend/scrape_mod_v2.py` — MOD scraper: Playwright-based PDF downloader for mod.gov.ua. OCR fallback via Tesseract (ukr+rus+eng) for scanned PDFs. Entry point: `run_scrape_mod(log_callback, stop_event)`
 - `backend/scrape_zir_v2.py` — ZIR scraper: POST API для отримання ID + requests+BeautifulSoup для індивідуальних сторінок. ~5900 Q&A. Entry point: `run_scrape_zir(log_callback, stop_event)`
 - `backend/reindex_v2.py` — Reads from disk, chunks, embeds with embed_v2, uploads to `*_v2` Qdrant collections. Safe order: embed first → delete old → upload. Per-source state files.
+- `backend/enrich_opendata_meta.py` — Enriches `.meta.json` files with full Liga-Zakon-quality metadata from `data.rada.gov.ua` OpenData API. 3 phases: (1) fetch cards, (2) build reverse-dead index, (3) write `rada_*` fields to `.meta.json`. Entry: `run_enrich(log_callback, stop_event, sources, force)`
+- `backend/update_qdrant_meta.py` — Patches Qdrant payload (set_payload) with enriched `rada_*` fields from `.meta.json` without re-embedding. Entry: `run_update_qdrant(log_callback, stop_event, sources)`
 
 ## Data Sources (8 sources scraped to /root/laws_raw/)
 
@@ -61,6 +63,7 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - `app/admin/stats/page.tsx` — System stats / usage
 - `app/admin/v2/page.tsx` — V2 панель (Скрапер / Реіндекс / Аналітика / Диск / Джерела)
 - `app/admin/sync/page.tsx` — Зведення джерел + Centroid Router + Авто-синхронізація (розклад per source)
+- `app/admin/meta/page.tsx` — Браузер збагачених метаданих (Rada + KMU): фільтри, таблиця, контроль збагачення
 
 ## Key patterns
 - Settings (AI model, thresholds) — Supabase `app_settings` table, read via `settings_cache`
@@ -84,6 +87,12 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - `upload_to_qdrant()` returns `bool` — always check return value for accurate success counting
 - `delete_law_chunks()` retries 3× with exponential backoff — don't call unless certain
 - V2 reindex: only ONE source can run at a time (enforced by `_any_reindex_v2_running()` in server.py)
+- Metadata enrichment: `enrich_opendata_meta.py` fetches OpenData cards → writes `rada_*` fields to `.meta.json`. State: `enrich_opendata_state.json`. Cache: `enrich_opendata_cards_cache.json` (TTL 7 days). Sources: `["rada", "kmu"]`
+- Qdrant metadata patch: `update_qdrant_meta.py` reads `.meta.json` → `set_payload()` on all chunks of the law (filter by `law_id`). State: `update_qdrant_meta_state.json`. No re-embedding.
+- Enriched fields in Qdrant payload (after patch): `rada_status`, `rada_status_name`, `rada_is_dead`, `rada_is_dead_by_status`, `rada_is_dead_by_link`, `rada_no_text`, `rada_adopted_date`, `rada_last_edition`, `rada_dead_since`, `rada_replaced_by`, `rada_cancelled_by`, `rada_theme`, `rada_classifiers`, `rada_org`, `rada_doc_type`, etc.
+- Dead document detection: `rada_is_dead=True` → excluded from `/ask` results (checked in `_is_expired()` alongside legacy status string check)
+- Citation modal (chat): shows enriched metadata (adopted_date, last_edition, dead_since, theme, org, replaced_by links, cancelled_by links) when available
+- Enrichment endpoints: `POST /admin/enrich/start`, `POST /admin/enrich/stop`, `GET /admin/enrich/status`, `POST /admin/enrich/qdrant/apply`, `POST /admin/enrich/qdrant/stop`, `GET /admin/meta/list`
 
 ## Rules: when making changes
 - **Architecture changes** → update the Architecture section in this file

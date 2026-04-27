@@ -118,6 +118,8 @@ _SOURCES = (
     "reindex_v2",  # "all sources" fallback
     "reindex_v2_rada", "reindex_v2_kmu", "reindex_v2_ccu",
     "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions", "reindex_v2_mod", "reindex_v2_zir",
+    "enrich_opendata",    # збагачення метаданих Rada+KMU через OpenData API
+    "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
 )
 _sync: dict[str, dict] = {
     src: {
@@ -136,6 +138,8 @@ _v2_stop = {
     **{s: threading.Event() for s in V2_REINDEX_SOURCES},
 }
 _v2_scrape_stop = {s: threading.Event() for s in V2_SCRAPE_SOURCES}
+_enrich_stop     = threading.Event()
+_qdrant_meta_stop = threading.Event()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2266,14 +2270,39 @@ async def v2_analytics(
 
     # Qdrant v2 stats
     qdrant_v2: dict = {}
+    qdrant_v2_laws: dict = {}  # unique law counts per source (chunk_index==0)
     try:
         from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
         qc = _qclient()
+        first_chunk_filter = Filter(
+            must=[FieldCondition(key="chunk_index", match=MatchValue(value=0))]
+        )
+        # source prefix → list of matching v2 collection names
+        _SRC_COL_MAP: dict[str, list[str]] = {
+            "rada":      [c for c in ALL_V2_COLLECTIONS if c.startswith("laws_rada") or c.startswith("rada")],
+            "kmu":       ["laws_kmu_v2"],
+            "ccu":       ["laws_ccu_v2"],
+            "supreme":   ["laws_supreme_v2"],
+            "wiki":      ["laws_wiki_v2"],
+            "positions": ["laws_positions_v2"],
+            "mod":       ["laws_mod_v2"],
+            "zir":       ["laws_zir_v2"],
+        }
         for col in ALL_V2_COLLECTIONS:
             try:
                 qdrant_v2[col] = qc.get_collection(col).points_count or 0
             except Exception:
                 qdrant_v2[col] = -1
+        for src, cols in _SRC_COL_MAP.items():
+            total_laws = 0
+            for col in cols:
+                try:
+                    r = qc.count(col, count_filter=first_chunk_filter, exact=True)
+                    total_laws += r.count or 0
+                except Exception:
+                    pass
+            qdrant_v2_laws[src] = total_laws
     except Exception:
         pass
 
@@ -2281,6 +2310,7 @@ async def v2_analytics(
         "summary":        summary,
         "by_source":      by_source,
         "qdrant_v2":      qdrant_v2,
+        "qdrant_v2_laws": qdrant_v2_laws,
         "laws":           page,
         "total_filtered": total_filtered,
     }
@@ -3986,7 +4016,10 @@ async def ask(body: AskRequest):
     # Скасовані документи виключаємо повністю — не в контекст, не в citations
     # (вони дезорієнтують LLM і вводять користувача в оману)
     def _is_expired(r: dict) -> bool:
-        s = r["out_metadata"].get("status", "").lower()
+        m = r["out_metadata"]
+        if m.get("rada_is_dead"):
+            return True
+        s = m.get("status", "").lower()
         return "втратив" in s or "втратила" in s
 
     results = [r for r in results if not _is_expired(r)]
@@ -4007,12 +4040,24 @@ async def ask(body: AskRequest):
         clean_passage = re.sub(r"\n{3,}", "\n\n", clean_passage).strip()[:600]
 
         citations.append({
-            "num": num,
-            "source_title": title,
-            "passage": clean_passage,
-            "status": meta.get("status", ""),
-            "law_url": law_url,
-            "chunk_index": meta.get("chunk_index", 0),
+            "num":           num,
+            "source_title":  title,
+            "passage":       clean_passage,
+            "status":        meta.get("status", ""),
+            "law_url":       law_url,
+            "chunk_index":   meta.get("chunk_index", 0),
+            # enriched OpenData fields (present after meta enrichment)
+            "rada_status_name":  meta.get("rada_status_name", ""),
+            "rada_is_dead":      meta.get("rada_is_dead", False),
+            "rada_no_text":      meta.get("rada_no_text", False),
+            "rada_adopted_date": meta.get("rada_adopted_date", ""),
+            "rada_last_edition": meta.get("rada_last_edition", ""),
+            "rada_dead_since":   meta.get("rada_dead_since", ""),
+            "rada_replaced_by":  meta.get("rada_replaced_by", []),
+            "rada_cancelled_by": meta.get("rada_cancelled_by", []),
+            "rada_theme":        meta.get("rada_theme", ""),
+            "rada_org":          meta.get("rada_org", ""),
+            "rada_doc_type":     meta.get("rada_doc_type", ""),
         })
 
         if not content:
@@ -4418,6 +4463,197 @@ async def generate_user_prompt(body: GenerateUserPromptRequest):
         return {"prompt": text}
     except Exception as e:
         raise HTTPException(500, f"generate-user-prompt error: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Enrich OpenData metadata (Rada + KMU)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _do_enrich_opendata(session_id: str, sources: list, force: bool = False) -> None:
+    src = "enrich_opendata"
+    log = _make_reindex_log_cb(src)
+    try:
+        _enrich_stop.clear()
+        from enrich_opendata_meta import run_enrich
+        run_enrich(log_callback=log, stop_event=_enrich_stop, sources=sources, force=force)
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+def _do_update_qdrant_meta(session_id: str, sources: list) -> None:
+    src = "update_qdrant_meta"
+    log = _make_reindex_log_cb(src)
+    try:
+        _qdrant_meta_stop.clear()
+        from update_qdrant_meta import run_update_qdrant
+        run_update_qdrant(log_callback=log, stop_event=_qdrant_meta_stop, sources=sources)
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+@app.post("/admin/enrich/start")
+async def enrich_start(body: dict = Body(default={})):
+    sources = body.get("sources") or ["rada", "kmu"]
+    force   = bool(body.get("force", False))
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("enrich_opendata", _do_enrich_opendata, session_id,
+                    sources=sources, force=force)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/enrich/stop")
+async def enrich_stop_route():
+    with _lock:
+        if not _sync["enrich_opendata"]["running"]:
+            raise HTTPException(400, "Збагачення не виконується")
+        _enrich_stop.set()
+        _sync["enrich_opendata"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/enrich/status")
+async def enrich_status():
+    with _lock:
+        s = dict(_sync["enrich_opendata"])
+        logs = list(s.get("live_logs", []))
+    qdm = dict(_sync["update_qdrant_meta"])
+    qdm_logs = list(qdm.get("live_logs", []))
+
+    state_file = Path(__file__).parent / "enrich_opendata_state.json"
+    state = {}
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    qdrant_state_file = Path(__file__).parent / "update_qdrant_meta_state.json"
+    qdrant_state = {}
+    if qdrant_state_file.exists():
+        try:
+            qdrant_state = json.loads(qdrant_state_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    return {
+        "enrich": {
+            "running":         s.get("running", False),
+            "pause_requested": s.get("pause_requested", False),
+            "live_logs":       logs,
+            "state":           state,
+        },
+        "qdrant_meta": {
+            "running":         qdm.get("running", False),
+            "pause_requested": qdm.get("pause_requested", False),
+            "live_logs":       qdm_logs,
+            "state":           qdrant_state,
+        },
+    }
+
+
+@app.post("/admin/enrich/qdrant/apply")
+async def enrich_qdrant_apply(body: dict = Body(default={})):
+    sources = body.get("sources") or ["rada", "kmu"]
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("update_qdrant_meta", _do_update_qdrant_meta, session_id,
+                    sources=sources)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/enrich/qdrant/stop")
+async def enrich_qdrant_stop():
+    with _lock:
+        if not _sync["update_qdrant_meta"]["running"]:
+            raise HTTPException(400, "Патч Qdrant не виконується")
+        _qdrant_meta_stop.set()
+        _sync["update_qdrant_meta"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/meta/list")
+async def meta_list(
+    source: str = "rada",
+    dead: str | None = None,
+    doc_type: str | None = None,
+    theme: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Повертає список збагачених meta.json для перегляду в адмін панелі."""
+    raw_base = Path("/root/laws_raw") / source
+    if not raw_base.exists():
+        return {"items": [], "total": 0, "source": source}
+
+    items = []
+    for meta_path in sorted(raw_base.glob("*.meta.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        if "rada_enriched_at" not in meta:
+            continue
+
+        # Filters
+        if dead == "true" and not meta.get("rada_is_dead"):
+            continue
+        if dead == "false" and meta.get("rada_is_dead"):
+            continue
+        if doc_type and meta.get("rada_doc_type") != doc_type:
+            continue
+        if theme and theme not in (meta.get("rada_theme") or ""):
+            continue
+        if q:
+            q_lower = q.lower()
+            title = (meta.get("rada_title") or "").lower()
+            nreg  = (meta.get("rada_nreg")  or "").lower()
+            if q_lower not in title and q_lower not in nreg:
+                continue
+
+        items.append({
+            "nreg":          meta.get("rada_nreg", meta_path.name.replace(".meta.json", "")),
+            "title":         meta.get("rada_title", ""),
+            "doc_type":      meta.get("rada_doc_type", ""),
+            "status":        meta.get("rada_status", 0),
+            "status_name":   meta.get("rada_status_name", ""),
+            "is_dead":       meta.get("rada_is_dead", False),
+            "dead_by_status":meta.get("rada_is_dead_by_status", False),
+            "dead_by_link":  meta.get("rada_is_dead_by_link", False),
+            "no_text":       meta.get("rada_no_text", False),
+            "adopted_date":  meta.get("rada_adopted_date", ""),
+            "last_edition":  meta.get("rada_last_edition", ""),
+            "dead_since":    meta.get("rada_dead_since", ""),
+            "replaced_by":   meta.get("rada_replaced_by", []),
+            "cancelled_by":  meta.get("rada_cancelled_by", []),
+            "theme":         meta.get("rada_theme", ""),
+            "classifiers":   meta.get("rada_classifiers", []),
+            "org":           meta.get("rada_org", ""),
+            "editions_cnt":  meta.get("rada_editions_cnt", 0),
+            "url":           meta.get("rada_url", ""),
+            "enriched_at":   meta.get("rada_enriched_at", ""),
+        })
+
+    total = len(items)
+    return {
+        "items":  items[offset: offset + limit],
+        "total":  total,
+        "source": source,
+    }
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

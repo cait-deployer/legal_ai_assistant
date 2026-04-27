@@ -42,6 +42,18 @@ type Citation = {
     status?: string;
     law_url?: string;
     chunk_index?: number;
+    // enriched OpenData fields
+    rada_status_name?: string;
+    rada_is_dead?: boolean;
+    rada_no_text?: boolean;
+    rada_adopted_date?: string;
+    rada_last_edition?: string;
+    rada_dead_since?: string;
+    rada_replaced_by?: string[];
+    rada_cancelled_by?: string[];
+    rada_theme?: string;
+    rada_org?: string;
+    rada_doc_type?: string;
 };
 
 type Template = {
@@ -535,15 +547,97 @@ function ChatPage() {
                             <div className="bg-[#0A0E1A] p-2.5 rounded-lg shadow-lg shrink-0 mt-0.5">
                                 <BookOpenText className="h-5 w-5 text-[#C9A84C]" />
                             </div>
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                                 <span className="text-[9px] font-black text-[#0A0E1A]/50 uppercase tracking-[0.2em] block mb-1">Джерело №{activeCitation?.num}</span>
                                 <DialogTitle className="font-serif font-bold text-base sm:text-lg leading-snug">{activeCitation?.source_title}</DialogTitle>
-                                <StatusBadge status={activeCitation?.status} />
+                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                    <StatusBadge status={activeCitation?.status} />
+                                    {activeCitation?.rada_is_dead && (
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-900/80 text-red-200 border border-red-700/50">
+                                            Втратив чинність
+                                        </span>
+                                    )}
+                                    {activeCitation?.rada_doc_type && (
+                                        <span className="text-[10px] text-[#0A0E1A]/60">{activeCitation.rada_doc_type}</span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
                     <ScrollArea className="max-h-[40vh] sm:max-h-[360px] bg-[#0A0E1A]/40">
-                        <div className="p-5 sm:p-7">
+                        <div className="p-5 sm:p-7 space-y-4">
+                            {/* Enriched metadata block */}
+                            {(activeCitation?.rada_adopted_date || activeCitation?.rada_last_edition || activeCitation?.rada_dead_since || activeCitation?.rada_theme || activeCitation?.rada_org || (activeCitation?.rada_replaced_by?.length ?? 0) > 0 || (activeCitation?.rada_cancelled_by?.length ?? 0) > 0) && (
+                                <div className="bg-[#0A0E1A]/60 rounded-lg p-3 space-y-1.5 text-xs border border-[#C9A84C]/10">
+                                    {activeCitation?.rada_org && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Орган:</span>
+                                            <span className="text-zinc-300">{activeCitation.rada_org}</span>
+                                        </div>
+                                    )}
+                                    {activeCitation?.rada_adopted_date && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Прийнято:</span>
+                                            <span className="text-zinc-300">{activeCitation.rada_adopted_date}</span>
+                                        </div>
+                                    )}
+                                    {activeCitation?.rada_last_edition && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Остання редакція:</span>
+                                            <span className="text-zinc-300">{activeCitation.rada_last_edition}</span>
+                                        </div>
+                                    )}
+                                    {activeCitation?.rada_dead_since && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Втратив чинність:</span>
+                                            <span className="text-red-400 font-medium">{activeCitation.rada_dead_since}</span>
+                                        </div>
+                                    )}
+                                    {activeCitation?.rada_theme && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Тема:</span>
+                                            <span className="text-zinc-300">{activeCitation.rada_theme}</span>
+                                        </div>
+                                    )}
+                                    {(activeCitation?.rada_replaced_by?.length ?? 0) > 0 && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Замінено:</span>
+                                            <div className="flex flex-col gap-0.5">
+                                                {activeCitation!.rada_replaced_by!.map((nreg) => (
+                                                    <a
+                                                        key={nreg}
+                                                        href={`https://zakon.rada.gov.ua/laws/show/${nreg}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-[#C9A84C] hover:underline"
+                                                    >
+                                                        {nreg}
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {(activeCitation?.rada_cancelled_by?.length ?? 0) > 0 && (
+                                        <div className="flex gap-2">
+                                            <span className="text-zinc-500 w-28 shrink-0">Скасовано:</span>
+                                            <div className="flex flex-col gap-0.5">
+                                                {activeCitation!.rada_cancelled_by!.map((nreg) => (
+                                                    <a
+                                                        key={nreg}
+                                                        href={`https://zakon.rada.gov.ua/laws/show/${nreg}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-[#C9A84C] hover:underline"
+                                                    >
+                                                        {nreg}
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {/* Passage */}
                             <div className="relative pl-4 border-l-2 border-[#C9A84C]/50">
                                 <p className="text-[9px] font-black text-[#C9A84C]/50 uppercase tracking-widest mb-2.5">
                                     Уривок #{activeCitation?.num}

@@ -364,6 +364,7 @@ export default function SyncPage() {
   const [reindxStatus, setReindxStatus] = useState<Record<string, ReindexSourceStatus>>({})
   const [diskData, setDiskData]         = useState<Record<string, DiskSource>>({})
   const [qdrantCounts, setQdrantCounts] = useState<Record<string, number>>({})
+  const [lawCounts,   setLawCounts]   = useState<Record<string, number>>({})
   const [refreshing, setRefreshing]     = useState(false)
   const [lastRefresh, setLastRefresh]   = useState<Date | null>(null)
   const [needsRebuild, setNeedsRebuild] = useState(false)
@@ -386,7 +387,7 @@ export default function SyncPage() {
       if (scrR.status === "fulfilled" && scrR.value.ok)  setScrapeStatus(await scrR.value.json())
       if (reiR.status === "fulfilled" && reiR.value.ok)  setReindxStatus(await reiR.value.json())
       if (diskR.status === "fulfilled" && diskR.value.ok) { const d = await diskR.value.json(); setDiskData(d.sources ?? {}) }
-      if (anlR.status === "fulfilled" && anlR.value.ok)  { const d = await anlR.value.json(); setQdrantCounts(d.qdrant_v2 ?? {}) }
+      if (anlR.status === "fulfilled" && anlR.value.ok)  { const d = await anlR.value.json(); setQdrantCounts(d.qdrant_v2 ?? {}); setLawCounts(d.qdrant_v2_laws ?? {}) }
       setLastRefresh(new Date())
     } catch { /* ignore */ }
     if (!silent) setRefreshing(false)
@@ -573,8 +574,8 @@ export default function SyncPage() {
           {/* Table header */}
           <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 px-4 py-2 border-b border-white/5 text-[10px] text-gray-600 uppercase tracking-wide">
             <span>Джерело</span>
-            <span className="text-right w-16">Диск</span>
-            <span className="text-right w-16">Qdrant</span>
+            <span className="text-right w-20">Файлів на диску</span>
+            <span className="text-right w-20">Чанків у Qdrant</span>
             <span className="text-center w-20">Скрапер</span>
             <span className="text-center w-20">Реіндекс</span>
             <span className="text-right w-32">Дії</span>
@@ -605,25 +606,28 @@ export default function SyncPage() {
                     <span className="text-xs font-semibold text-[#E0E6ED] truncate">{meta.label}</span>
                     {meta.note && <span className="text-[10px] text-gray-700 hidden sm:inline">({meta.note})</span>}
                   </div>
-                  {/* Progress bar */}
-                  <div className="mt-1.5 h-0.5 w-full max-w-[120px] bg-gray-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${diskPct > 0.8 ? "bg-emerald-500" : diskPct > 0.3 ? "bg-amber-500" : "bg-red-500/60"}`}
-                      style={{ width: `${diskPct * 100}%` }}
-                    />
+                  {/* Qdrant coverage dot */}
+                  <div className="mt-1 flex items-center gap-1">
+                    <span className={`w-1.5 h-1.5 rounded-full inline-block ${qdrantOk ? "bg-emerald-500" : disk > 0 ? "bg-amber-500" : "bg-gray-700"}`} />
+                    <span className="text-[9px] text-gray-700">
+                      {qdrantOk ? "проіндексовано" : disk > 0 ? "є файли, потрібен реіндекс" : "немає даних"}
+                    </span>
                   </div>
                 </div>
 
-                {/* Disk */}
-                <div className={`text-right text-xs font-mono w-16 ${disk > 0 ? "text-[#E0E6ED]" : "text-red-500/60"}`}>
-                  {disk > 0 ? disk.toLocaleString("uk-UA") : "0"}
-                  <div className="text-[9px] text-gray-700">/{meta.expected.toLocaleString()}</div>
+                {/* Disk files */}
+                <div className={`text-right text-xs font-mono w-20 ${disk > 0 ? "text-[#E0E6ED]" : "text-gray-700"}`}>
+                  {disk > 0 ? disk.toLocaleString("uk-UA") : "—"}
+                  <div className="text-[9px] text-gray-700">файлів</div>
                 </div>
 
-                {/* Qdrant */}
-                <div className={`text-right text-xs font-mono w-16 ${qdrantOk ? "text-[#C9A84C]" : "text-gray-700"}`}>
+                {/* Qdrant chunks + unique laws */}
+                <div className={`text-right text-xs font-mono w-20 ${qdrantOk ? "text-[#C9A84C]" : "text-gray-700"}`}>
                   {fmtNum(qdrant)}
-                  <div className="text-[9px] text-gray-700">векторів</div>
+                  <div className="text-[9px] text-gray-700">чанків</div>
+                  {lawCounts[src] != null && lawCounts[src] > 0 && (
+                    <div className="text-[9px] text-emerald-600">{lawCounts[src].toLocaleString("uk-UA")} законів</div>
+                  )}
                 </div>
 
                 {/* Scraper status */}
@@ -685,9 +689,10 @@ export default function SyncPage() {
 
           {/* Legend */}
           <div className="px-4 py-2.5 flex flex-wrap gap-4 text-[10px] text-gray-600">
-            <span><span className="text-blue-400 font-bold">▶С</span> — Запустити/Зупинити скрапінг</span>
-            <span><span className="text-amber-400 font-bold">▶Р</span> — Запустити/Зупинити реіндекс</span>
-            <span><span className="text-amber-400">●</span> amber = призупинено (є стан для відновлення)</span>
+            <span><span className="text-blue-400 font-bold">▶С</span> — Скрапінг: завантажує файли на диск</span>
+            <span><span className="text-amber-400 font-bold">▶Р</span> — Реіндекс: читає файли з диску → записує чанки у Qdrant</span>
+            <span><span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle" /> amber = призупинено (є стан для відновлення)</span>
+            <span>Файли на диску ≠ чанки у Qdrant: 1 файл → кілька чанків після реіндексу. &quot;Законів&quot; — унікальні документи (chunk_index=0)</span>
             <span>Реіндекс: одночасно тільки 1 джерело</span>
           </div>
         </div>
