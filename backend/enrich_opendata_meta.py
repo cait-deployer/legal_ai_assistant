@@ -38,6 +38,7 @@ SLEEP_SEC      = 0.15
 RETRY_SLEEP    = 30
 CACHE_TTL_DAYS = 7
 SAVE_EVERY     = 250   # зберігати кеш кожні N запитів
+LOG_EVERY      = 25    # логувати прогрес кожні N запитів (~4 сек)
 
 # Типи зв'язків: A -> B з таким типом означає "A скасовує B"
 DEAD_LINK_TYPES = {4, 7, 19, 22, 25, 29}
@@ -200,13 +201,17 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
 
         if (i + 1) % SAVE_EVERY == 0:
             _save_cards_cache(cards_cache)
+
+        if (i + 1) % LOG_EVERY == 0:
             done_real = fetched + errors
             pct = round((i + 1) / total * 100)
             eta = _eta(t0, done_real, need_fetch) if need_fetch else "—"
+            elapsed = int(time.time() - t0)
+            speed = round(fetched / elapsed, 1) if elapsed > 0 else 0
             _log(
                 f"[Phase 1] {i+1}/{total} ({pct}%) | "
                 f"отримано={fetched} | помилок={errors} | кеш={skipped} | "
-                f"ETA: {eta}"
+                f"швидкість={speed}/с | ETA: {eta}"
             )
 
     _save_cards_cache(cards_cache)
