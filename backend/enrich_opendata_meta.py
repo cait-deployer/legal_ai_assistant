@@ -24,13 +24,47 @@ from pathlib import Path
 import requests
 
 from rada_opendata import (
+    BASE, HEADERS,
     DEAD_STATUSES, KLAS_MAP, ORG_MAP, PODIA_DEAD_IDS,
     STATUS_MAP, TAGS_MAP, TEMY_MAP, TYP_MAP,
-    decode_hist, decode_links, find_dead_date, fmt_date, get_card,
+    decode_hist, decode_links, find_dead_date, fmt_date,
 )
 
 RAW_BASE   = Path("/root/laws_raw")
 BACKEND    = Path(__file__).parent
+
+
+def _fetch_card(nreg: str) -> tuple[dict | None, str]:
+    """
+    Повертає (card, status) де status:
+      "ok"        — картка знайдена
+      "not_found" — HTTP 404 або нема поля nazva (нормально для KMU/нових docs)
+      "rate_limit"— HTTP 429
+      "timeout"   — таймаут з'єднання
+      "error"     — інша мережева помилка
+    """
+    url = f"{BASE}/laws/card/{nreg}.json"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=12)
+        if r.status_code == 200:
+            try:
+                d = r.json()
+                if "nazva" in d:
+                    return d, "ok"
+                return None, "not_found"
+            except Exception:
+                return None, "not_found"
+        if r.status_code == 404:
+            return None, "not_found"
+        if r.status_code == 429:
+            return None, "rate_limit"
+        return None, f"http_{r.status_code}"
+    except requests.exceptions.Timeout:
+        return None, "timeout"
+    except requests.exceptions.ConnectionError:
+        return None, "connection"
+    except Exception as e:
+        return None, f"error:{type(e).__name__}"
 
 CARDS_CACHE = BACKEND / "enrich_opendata_cards_cache.json"
 STATE_FILE  = BACKEND / "enrich_opendata_state.json"
@@ -38,7 +72,7 @@ STATE_FILE  = BACKEND / "enrich_opendata_state.json"
 SLEEP_SEC      = 0.05
 RETRY_SLEEP    = 30
 CACHE_TTL_DAYS = 7
-WORKERS        = 3     # паралельних потоків для Phase 1
+WORKERS        = 2     # паралельних потоків для Phase 1
 SAVE_EVERY     = 250   # зберігати кеш кожні N запитів
 LOG_EVERY      = 10    # логувати прогрес кожні N запитів
 
@@ -151,25 +185,33 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
 
     _log(f"[Phase 1] Документів: {total} | кеш: {skipped} | завантажити: {need_fetch} | потоків: {WORKERS}")
 
-    counters   = {"fetched": 0, "errors": 0, "done": 0, "first_shown": False}
+    counters   = {"fetched": 0, "not_found": 0, "errors": 0, "done": 0, "first_shown": False}
+    err_types: dict[str, int] = {}
     cache_lock = threading.Lock()
 
     def fetch_one(src: str, nreg: str) -> None:
         if _stop_event and _stop_event.is_set():
             return
         card = None
+        result_status = "error:unknown"
         for attempt in range(3):
-            try:
-                card = get_card(nreg)
+            card, result_status = _fetch_card(nreg)
+            if result_status == "ok":
                 time.sleep(SLEEP_SEC)
                 break
-            except Exception as e:
-                err_str = str(e)
-                if "429" in err_str or "Too Many" in err_str:
-                    _log(f"[Phase 1] Rate limit — чекаємо {RETRY_SLEEP}с...", "warning")
-                    time.sleep(RETRY_SLEEP)
-                elif attempt == 2:
-                    _log(f"[Phase 1] ПОМИЛКА {nreg}: {e}", "error")
+            if result_status == "not_found":
+                break
+            if result_status == "rate_limit":
+                _log(f"[Phase 1] Rate limit — чекаємо {RETRY_SLEEP}с...", "warning")
+                time.sleep(RETRY_SLEEP)
+            elif result_status in ("timeout", "connection") or result_status.startswith("http_"):
+                if attempt < 2:
+                    time.sleep(2)
+                else:
+                    _log(f"[Phase 1] ПОМИЛКА {nreg}: {result_status}", "error")
+            else:
+                if attempt == 2:
+                    _log(f"[Phase 1] ПОМИЛКА {nreg}: {result_status}", "error")
 
         with cache_lock:
             if card:
@@ -183,10 +225,15 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
                         f"[Phase 1] Перший: {nreg} | статус={card.get('status','?')} | "
                         f"nazva={str(card.get('nazva',''))[:50]}"
                     )
-            else:
+            elif result_status == "not_found":
                 cards_cache[nreg] = {"_fetched_at": datetime.utcnow().isoformat(),
                                      "_source": src, "_not_found": True}
+                counters["not_found"] += 1
+            else:
+                cards_cache[nreg] = {"_fetched_at": datetime.utcnow().isoformat(),
+                                     "_source": src, "_error": result_status}
                 counters["errors"] += 1
+                err_types[result_status] = err_types.get(result_status, 0) + 1
 
             counters["done"] += 1
             done = counters["done"]
@@ -198,11 +245,13 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
                 pct   = round(done / need_fetch * 100)
                 eta   = _eta(t0, done, need_fetch)
                 secs  = int(time.time() - t0)
-                speed = round(counters["fetched"] / secs, 1) if secs > 0 else 0
+                speed = round(done / secs, 1) if secs > 0 else 0
+                err_summary = " ".join(f"{k}:{v}" for k, v in err_types.items()) or "0"
                 _log(
                     f"[Phase 1] {done}/{need_fetch} ({pct}%) | "
-                    f"отримано={counters['fetched']} | помилок={counters['errors']} | "
-                    f"швидкість={speed}/с | ETA: {eta}"
+                    f"знайдено={counters['fetched']} | не_в_API={counters['not_found']} | "
+                    f"помилки={counters['errors']}({err_summary}) | "
+                    f"{speed}/с | ETA: {eta}"
                 )
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -217,14 +266,17 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
                 _log(f"[Phase 1] Unexpected: {e}", "error")
 
     _save_cards_cache(cards_cache)
-    elapsed = int(time.time() - t0)
-    fetched = counters["fetched"]
-    errors  = counters["errors"]
+    elapsed   = int(time.time() - t0)
+    fetched   = counters["fetched"]
+    not_found = counters["not_found"]
+    errors    = counters["errors"]
+    err_summary = " ".join(f"{k}:{v}" for k, v in err_types.items()) or "none"
     _log(
         f"[Phase 1] ✓ Завершено за {elapsed}с | "
-        f"fetched={fetched} | errors={errors} | з_кешу={skipped} | всього={total}"
+        f"знайдено={fetched} | не_в_API={not_found} | помилки={errors}({err_summary}) | "
+        f"з_кешу={skipped} | всього={total}"
     )
-    return {"fetched": fetched, "errors": errors, "skipped": skipped, "total": total}
+    return {"fetched": fetched, "not_found": not_found, "errors": errors, "skipped": skipped, "total": total}
 
 
 # ── Phase 2: Reverse dead index ────────────────────────────────────────────────
