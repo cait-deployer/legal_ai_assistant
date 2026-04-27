@@ -17,6 +17,7 @@ import argparse
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -37,8 +38,9 @@ STATE_FILE  = BACKEND / "enrich_opendata_state.json"
 SLEEP_SEC      = 0.05
 RETRY_SLEEP    = 30
 CACHE_TTL_DAYS = 7
+WORKERS        = 3     # паралельних потоків для Phase 1
 SAVE_EVERY     = 250   # зберігати кеш кожні N запитів
-LOG_EVERY      = 50   # логувати прогрес кожні N запитів (~2 хв)
+LOG_EVERY      = 10    # логувати прогрес кожні N запитів
 
 # Типи зв'язків: A -> B з таким типом означає "A скасовує B"
 DEAD_LINK_TYPES = {4, 7, 19, 22, 25, 29}
@@ -136,36 +138,30 @@ def _eta(started: float, done: int, total: int) -> str:
 
 
 def run_phase1(sources: list[str], force: bool = False) -> dict:
-    """Завантажує картки API для всіх nreg → зберігає у кеш."""
+    """Завантажує картки API — WORKERS паралельних потоків."""
     cards_cache = _load_cards_cache()
     all_nregs   = _get_all_nregs(sources)
     total       = len(all_nregs)
-    fetched = errors = skipped = 0
-    t0 = time.time()
+    t0          = time.time()
 
-    already_cached = sum(
-        1 for _, nreg in all_nregs
-        if cards_cache.get(nreg) and not force and _cache_fresh(cards_cache.get(nreg, {}))
-    )
-    need_fetch = total - already_cached
+    to_fetch = [(src, nreg) for src, nreg in all_nregs
+                if not (cards_cache.get(nreg) and not force and _cache_fresh(cards_cache.get(nreg, {})))]
+    skipped    = total - len(to_fetch)
+    need_fetch = len(to_fetch)
 
-    _log(f"[Phase 1] Документів на диску: {total} | в кеші: {already_cached} | потрібно завантажити: {need_fetch}")
-    _log(f"[Phase 1] Швидкість: ~{SLEEP_SEC}с/запит → приблизно {int(need_fetch * SLEEP_SEC / 60)} хв")
+    _log(f"[Phase 1] Документів: {total} | кеш: {skipped} | завантажити: {need_fetch} | потоків: {WORKERS}")
 
-    for i, (src, nreg) in enumerate(all_nregs):
+    counters   = {"fetched": 0, "errors": 0, "done": 0, "first_shown": False}
+    cache_lock = threading.Lock()
+
+    def fetch_one(src: str, nreg: str) -> None:
         if _stop_event and _stop_event.is_set():
-            _log(f"[Phase 1] Зупинено на {i}/{total}", "warning")
-            break
-
-        cached = cards_cache.get(nreg)
-        if cached and not force and _cache_fresh(cached):
-            skipped += 1
-            continue
-
+            return
         card = None
         for attempt in range(3):
             try:
                 card = get_card(nreg)
+                time.sleep(SLEEP_SEC)
                 break
             except Exception as e:
                 err_str = str(e)
@@ -175,47 +171,55 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
                 elif attempt == 2:
                     _log(f"[Phase 1] ПОМИЛКА {nreg}: {e}", "error")
 
-        if card:
-            card["_fetched_at"] = datetime.utcnow().isoformat()
-            card["_source"]     = src
-            cards_cache[nreg]   = card
-            fetched += 1
+        with cache_lock:
+            if card:
+                card["_fetched_at"] = datetime.utcnow().isoformat()
+                card["_source"]     = src
+                cards_cache[nreg]   = card
+                counters["fetched"] += 1
+                if not counters["first_shown"]:
+                    counters["first_shown"] = True
+                    _log(
+                        f"[Phase 1] Перший: {nreg} | статус={card.get('status','?')} | "
+                        f"nazva={str(card.get('nazva',''))[:50]}"
+                    )
+            else:
+                cards_cache[nreg] = {"_fetched_at": datetime.utcnow().isoformat(),
+                                     "_source": src, "_not_found": True}
+                counters["errors"] += 1
 
-            # перший успішний — покажемо що отримали
-            if fetched == 1:
+            counters["done"] += 1
+            done = counters["done"]
+
+            if done % SAVE_EVERY == 0:
+                _save_cards_cache(cards_cache)
+
+            if done % LOG_EVERY == 0:
+                pct   = round(done / need_fetch * 100)
+                eta   = _eta(t0, done, need_fetch)
+                secs  = int(time.time() - t0)
+                speed = round(counters["fetched"] / secs, 1) if secs > 0 else 0
                 _log(
-                    f"[Phase 1] Перший документ: {nreg} | "
-                    f"статус={card.get('status','?')} | "
-                    f"тип={card.get('typ','?')} | "
-                    f"nazva={str(card.get('nazva',''))[:60]}"
+                    f"[Phase 1] {done}/{need_fetch} ({pct}%) | "
+                    f"отримано={counters['fetched']} | помилок={counters['errors']} | "
+                    f"швидкість={speed}/с | ETA: {eta}"
                 )
-        else:
-            cards_cache[nreg] = {
-                "_fetched_at": datetime.utcnow().isoformat(),
-                "_source":     src,
-                "_not_found":  True,
-            }
-            errors += 1
 
-        time.sleep(SLEEP_SEC)
-
-        if (i + 1) % SAVE_EVERY == 0:
-            _save_cards_cache(cards_cache)
-
-        if (i + 1) % LOG_EVERY == 0:
-            done_real = fetched + errors
-            pct = round((i + 1) / total * 100)
-            eta = _eta(t0, done_real, need_fetch) if need_fetch else "—"
-            elapsed = int(time.time() - t0)
-            speed = round(fetched / elapsed, 1) if elapsed > 0 else 0
-            _log(
-                f"[Phase 1] {i+1}/{total} ({pct}%) | "
-                f"отримано={fetched} | помилок={errors} | кеш={skipped} | "
-                f"швидкість={speed}/с | ETA: {eta}"
-            )
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futures = {pool.submit(fetch_one, src, nreg): nreg for src, nreg in to_fetch}
+        for f in as_completed(futures):
+            if _stop_event and _stop_event.is_set():
+                _log(f"[Phase 1] Зупинено після {counters['done']}/{need_fetch}", "warning")
+                break
+            try:
+                f.result()
+            except Exception as e:
+                _log(f"[Phase 1] Unexpected: {e}", "error")
 
     _save_cards_cache(cards_cache)
     elapsed = int(time.time() - t0)
+    fetched = counters["fetched"]
+    errors  = counters["errors"]
     _log(
         f"[Phase 1] ✓ Завершено за {elapsed}с | "
         f"fetched={fetched} | errors={errors} | з_кешу={skipped} | всього={total}"
