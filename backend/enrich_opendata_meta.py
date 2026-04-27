@@ -122,14 +122,34 @@ def _get_all_nregs(sources: list[str]) -> list[tuple[str, str]]:
 
 # ── Phase 1: Завантаження карток ──────────────────────────────────────────────
 
+def _eta(started: float, done: int, total: int) -> str:
+    if done == 0:
+        return "?"
+    elapsed = time.time() - started
+    remaining = elapsed / done * (total - done)
+    if remaining < 60:
+        return f"{int(remaining)}с"
+    if remaining < 3600:
+        return f"{int(remaining // 60)}хв {int(remaining % 60)}с"
+    return f"{int(remaining // 3600)}г {int((remaining % 3600) // 60)}хв"
+
+
 def run_phase1(sources: list[str], force: bool = False) -> dict:
     """Завантажує картки API для всіх nreg → зберігає у кеш."""
     cards_cache = _load_cards_cache()
     all_nregs   = _get_all_nregs(sources)
     total       = len(all_nregs)
     fetched = errors = skipped = 0
+    t0 = time.time()
 
-    _log(f"[Phase 1] Документів на диску: {total}")
+    already_cached = sum(
+        1 for _, nreg in all_nregs
+        if cards_cache.get(nreg) and not force and _cache_fresh(cards_cache.get(nreg, {}))
+    )
+    need_fetch = total - already_cached
+
+    _log(f"[Phase 1] Документів на диску: {total} | в кеші: {already_cached} | потрібно завантажити: {need_fetch}")
+    _log(f"[Phase 1] Швидкість: ~{SLEEP_SEC}с/запит → приблизно {int(need_fetch * SLEEP_SEC / 60)} хв")
 
     for i, (src, nreg) in enumerate(all_nregs):
         if _stop_event and _stop_event.is_set():
@@ -139,8 +159,6 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
         cached = cards_cache.get(nreg)
         if cached and not force and _cache_fresh(cached):
             skipped += 1
-            if i % 1000 == 0 and i > 0:
-                _log(f"[Phase 1] {i}/{total} (кеш: {skipped})")
             continue
 
         card = None
@@ -161,6 +179,15 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
             card["_source"]     = src
             cards_cache[nreg]   = card
             fetched += 1
+
+            # перший успішний — покажемо що отримали
+            if fetched == 1:
+                _log(
+                    f"[Phase 1] Перший документ: {nreg} | "
+                    f"статус={card.get('status','?')} | "
+                    f"тип={card.get('typ','?')} | "
+                    f"nazva={str(card.get('nazva',''))[:60]}"
+                )
         else:
             cards_cache[nreg] = {
                 "_fetched_at": datetime.utcnow().isoformat(),
@@ -173,10 +200,21 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
 
         if (i + 1) % SAVE_EVERY == 0:
             _save_cards_cache(cards_cache)
-            _log(f"[Phase 1] {i+1}/{total} | отримано={fetched} | помилок={errors} | кеш={skipped}")
+            done_real = fetched + errors
+            pct = round((i + 1) / total * 100)
+            eta = _eta(t0, done_real, need_fetch) if need_fetch else "—"
+            _log(
+                f"[Phase 1] {i+1}/{total} ({pct}%) | "
+                f"отримано={fetched} | помилок={errors} | кеш={skipped} | "
+                f"ETA: {eta}"
+            )
 
     _save_cards_cache(cards_cache)
-    _log(f"[Phase 1] Завершено: fetched={fetched}, errors={errors}, skipped={skipped}")
+    elapsed = int(time.time() - t0)
+    _log(
+        f"[Phase 1] ✓ Завершено за {elapsed}с | "
+        f"fetched={fetched} | errors={errors} | з_кешу={skipped} | всього={total}"
+    )
     return {"fetched": fetched, "errors": errors, "skipped": skipped, "total": total}
 
 
@@ -191,27 +229,33 @@ def run_phase2(cards_cache: dict) -> dict:
     dokid_to_nreg: dict[str, str] = {}
     reverse_dead:  dict[str, list] = {}
 
-    for nreg, card in cards_cache.items():
-        if card.get("_not_found"):
-            continue
+    valid_cards = {n: c for n, c in cards_cache.items() if not c.get("_not_found")}
+    not_found   = len(cards_cache) - len(valid_cards)
+
+    _log(f"[Phase 2] Карток у кеші: {len(cards_cache)} | валідних: {len(valid_cards)} | not_found: {not_found}")
+
+    for nreg, card in valid_cards.items():
         dokid = str(card.get("dokid", ""))
         if dokid:
             dokid_to_nreg[dokid] = nreg
 
-    _log(f"[Phase 2] dokid->nreg: {len(dokid_to_nreg)} документів")
+    _log(f"[Phase 2] Побудовано dokid→nreg: {len(dokid_to_nreg)} записів")
 
     cancels_total = 0
-    for nreg, card in cards_cache.items():
-        if card.get("_not_found"):
-            continue
+    docs_with_links = 0
+    rel_type_counts: dict[int, int] = {}
+
+    for nreg, card in valid_cards.items():
         links_str = str(card.get("links", "") or "")
         if not links_str:
             continue
+        docs_with_links += 1
         for lnk in decode_links(links_str):
             try:
                 rel_int = int(lnk.get("rel_code", -1))
             except (ValueError, TypeError):
                 continue
+            rel_type_counts[rel_int] = rel_type_counts.get(rel_int, 0) + 1
             if rel_int not in DEAD_LINK_TYPES:
                 continue
             target_dokid = lnk["dokid"]
@@ -225,7 +269,23 @@ def run_phase2(cards_cache: dict) -> dict:
             cancels_total += 1
 
     unique_targets = len(reverse_dead)
-    _log(f"[Phase 2] Знайдено {cancels_total} скасувань → {unique_targets} унікальних цілей")
+    _log(f"[Phase 2] Документів з посиланнями: {docs_with_links}")
+
+    top_types = sorted(rel_type_counts.items(), key=lambda x: -x[1])[:8]
+    _log(f"[Phase 2] Топ типів зв'язків: { {k: v for k, v in top_types} }")
+    _log(
+        f"[Phase 2] ✓ Скасувань (dead link types): {cancels_total} | "
+        f"унікальних цілей: {unique_targets}"
+    )
+
+    # Показати кілька прикладів reverse_dead
+    examples = list(reverse_dead.items())[:3]
+    for dokid, entries in examples:
+        target_nreg = dokid_to_nreg.get(dokid, f"dokid={dokid}")
+        canceller   = entries[0]["cancelled_by"]
+        rel_name    = entries[0]["rel_name"]
+        _log(f"[Phase 2]   Приклад: {canceller} --[{rel_name}]--> {target_nreg}")
+
     return {"dokid_to_nreg": dokid_to_nreg, "reverse_dead": reverse_dead,
             "cancels_total": cancels_total, "unique_targets": unique_targets}
 
@@ -339,7 +399,12 @@ def run_phase3(
     """Записує збагачені поля у .meta.json (merge, не overwrite)."""
     all_nregs = _get_all_nregs(sources)
     total     = len(all_nregs)
-    updated = skipped = errors = dead_total = dead_by_link = 0
+    updated = skipped = errors = dead_total = dead_by_link = dead_by_status = no_text = 0
+    t0 = time.time()
+
+    _log(f"[Phase 3] Документів для обробки: {total}")
+
+    LOG_EVERY = 200
 
     for i, (src, nreg) in enumerate(all_nregs):
         if _stop_event and _stop_event.is_set():
@@ -372,29 +437,51 @@ def run_phase3(
                 dead_total += 1
             if enriched["rada_is_dead_by_link"]:
                 dead_by_link += 1
+            if enriched["rada_is_dead_by_status"]:
+                dead_by_status += 1
+            if enriched["rada_no_text"]:
+                no_text += 1
+
+            # Перший dead-by-link — покажемо як приклад
+            if enriched["rada_is_dead_by_link"] and dead_by_link == 1:
+                canceller = (enriched.get("rada_cancelled_by") or ["?"])[0]
+                _log(
+                    f"[Phase 3] Перший dead-by-link: {nreg} | "
+                    f"скасовано документом: {canceller}"
+                )
 
         except Exception as e:
             _log(f"[Phase 3] ПОМИЛКА {nreg}: {e}", "error")
             errors += 1
 
-        if (i + 1) % 500 == 0:
+        if (i + 1) % LOG_EVERY == 0:
+            pct = round((i + 1) / total * 100)
+            eta = _eta(t0, updated, total - skipped) if updated else "?"
             _log(
-                f"[Phase 3] {i+1}/{total} | оновлено={updated}"
-                f" | мертвих={dead_total} (reverse={dead_by_link})"
+                f"[Phase 3] {i+1}/{total} ({pct}%) | "
+                f"записано={updated} | пропущено={skipped} | помилок={errors} | "
+                f"мертвих={dead_total} (статус={dead_by_status}, link={dead_by_link}) | "
+                f"без_тексту={no_text} | ETA: {eta}"
             )
 
+    elapsed = int(time.time() - t0)
+    pct_dead = round(dead_total / updated * 100) if updated else 0
     _log(
-        f"[Phase 3] Завершено: updated={updated}, skipped={skipped}, errors={errors}"
+        f"[Phase 3] ✓ Завершено за {elapsed}с | "
+        f"записано={updated} | пропущено={skipped} | помилок={errors}"
     )
     _log(
-        f"[Phase 3] Мертвих: {dead_total} загалом, з яких {dead_by_link} виявлено через reverse links"
+        f"[Phase 3] Мертвих: {dead_total} ({pct_dead}%) | "
+        f"за статусом={dead_by_status} | reverse link={dead_by_link} | без тексту={no_text}"
     )
     return {
-        "updated":      updated,
-        "skipped":      skipped,
-        "errors":       errors,
-        "dead_total":   dead_total,
-        "dead_by_link": dead_by_link,
+        "updated":        updated,
+        "skipped":        skipped,
+        "errors":         errors,
+        "dead_total":     dead_total,
+        "dead_by_link":   dead_by_link,
+        "dead_by_status": dead_by_status,
+        "no_text":        no_text,
     }
 
 
