@@ -34,7 +34,7 @@ BACKEND    = Path(__file__).parent
 CARDS_CACHE = BACKEND / "enrich_opendata_cards_cache.json"
 STATE_FILE  = BACKEND / "enrich_opendata_state.json"
 
-SLEEP_SEC      = 0.15
+SLEEP_SEC      = 0.05
 RETRY_SLEEP    = 30
 CACHE_TTL_DAYS = 7
 SAVE_EVERY     = 250   # зберігати кеш кожні N запитів
