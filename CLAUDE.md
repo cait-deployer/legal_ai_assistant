@@ -64,6 +64,7 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - `app/admin/v2/page.tsx` — V2 панель (Скрапер / Реіндекс / Аналітика / Диск / Джерела)
 - `app/admin/sync/page.tsx` — Зведення джерел + Centroid Router + Авто-синхронізація (розклад per source)
 - `app/admin/meta/page.tsx` — Браузер збагачених метаданих (Rada + KMU): фільтри, таблиця, контроль збагачення
+- `app/admin/feedback/page.tsx` — Перегляд inline відгуків (👍👎) та рейтингів застосунку (⭐), пагінація, статистика
 
 ## Key patterns
 - Settings (AI model, thresholds) — Supabase `app_settings` table, read via `settings_cache`
@@ -93,6 +94,7 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - Dead document detection: `rada_is_dead=True` → excluded from `/ask` results (checked in `_is_expired()` alongside legacy status string check)
 - Citation modal (chat): shows enriched metadata (adopted_date, last_edition, dead_since, theme, org, replaced_by links, cancelled_by links) when available
 - Enrichment endpoints: `POST /admin/enrich/start`, `POST /admin/enrich/stop`, `GET /admin/enrich/status`, `POST /admin/enrich/qdrant/apply`, `POST /admin/enrich/qdrant/stop`, `GET /admin/meta/list`
+- Feedback system: `message_feedback` table (upsert per message per user), `app_reviews` table (full history). `profiles` has `bonus_requests` (additive) + `has_received_review_reward` (one-time flag). RPC `submit_app_review_and_reward(p_rating, p_review_text)` — atomic insert + bonus grant. Reward amount configurable via `app_settings` key `review_reward_requests` (default 50). Trigger threshold: `review_trigger_count` (default 10 total_requests). Endpoints: `POST /api/feedback/message`, `POST /api/feedback/audio`, `POST /api/feedback/review`, `GET/PATCH /api/feedback/review/status`, `GET /api/admin/feedback`. Limit check uses `monthly_limit + bonus_requests`.
 
 ## Rules: when making changes
 - **Architecture changes** → update the Architecture section in this file

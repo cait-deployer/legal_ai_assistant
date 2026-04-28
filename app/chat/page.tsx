@@ -27,6 +27,9 @@ import {
 import { ChatSidebar } from '@/components/chat-sidebar';
 import { ChatTour } from '@/components/chat-tour';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MessageFeedback } from '@/app/components/feedback/MessageFeedback';
+import { ReviewModal } from '@/app/components/feedback/ReviewModal';
+import { useReviewTrigger } from '@/app/hooks/useReviewTrigger';
 
 const SAMPLE_QUESTIONS = [
     { icon: <Scale className="h-4 w-4" />, text: 'Які права має ФОП 3 групи?' },
@@ -146,6 +149,7 @@ function ChatPage() {
     const [limitExceeded, setLimitExceeded] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showTour, setShowTour] = useState(false);
+    const reviewTrigger = useReviewTrigger();
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -178,8 +182,8 @@ function ChatPage() {
             .then(r => r.ok ? r.json() : null)
             .then(profile => {
                 if (!profile) return;
-                const { monthly_limit, requests_this_month, tour_completed } = profile;
-                if (monthly_limit != null && requests_this_month >= monthly_limit) {
+                const { monthly_limit, bonus_requests, requests_this_month, tour_completed } = profile;
+                if (monthly_limit != null && requests_this_month >= monthly_limit + (bonus_requests ?? 0)) {
                     setLimitExceeded(true);
                 }
                 // Show tour only for new users where tour_completed is explicitly false
@@ -254,7 +258,7 @@ function ChatPage() {
             .then(r => r.ok ? r.json() : null)
             .then(profile => {
                 if (!profile) return;
-                if (profile.monthly_limit != null && profile.requests_this_month >= profile.monthly_limit) {
+                if (profile.monthly_limit != null && profile.requests_this_month >= profile.monthly_limit + (profile.bonus_requests ?? 0)) {
                     setLimitExceeded(true);
                 }
             })
@@ -313,11 +317,13 @@ function ChatPage() {
             const data = await res.json();
 
             if (data.answer) {
+                const tempId = Date.now() + 1;
                 setMessages(prev => [...prev, {
-                    id: Date.now() + 1, role: 'ai', text: data.answer,
+                    id: tempId, role: 'ai', text: data.answer,
                     references: data.references ?? [], templates: data.templates ?? [],
                 }]);
 
+                // Save to DB, then update local id with real UUID so MessageFeedback works
                 fetch(`/api/chats/${chatId}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -336,6 +342,11 @@ function ChatPage() {
                             tokens_used: data._meta?.tokens_used ?? 0,
                         },
                     }),
+                }).then(r => r.ok ? r.json() : null).then(saved => {
+                    if (saved?.id) {
+                        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: saved.id } : m));
+                    }
+                    reviewTrigger.check();
                 }).catch(() => { });
 
                 refreshLimit();
@@ -462,6 +473,9 @@ function ChatPage() {
                                                 ) : msg.text}
                                             </Card>
                                             <span className="text-[10px] font-bold text-[#C9A84C]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Ви'}</span>
+                                            {msg.role === 'ai' && typeof msg.id === 'string' && currentChatId && (
+                                                <MessageFeedback messageId={msg.id} chatId={currentChatId} />
+                                            )}
                                         </div>
                                     </motion.div>
                                 ))}
@@ -529,6 +543,15 @@ function ChatPage() {
                     </div>
                 </footer>
             </main>
+
+            {/* App review modal */}
+            {reviewTrigger.status?.show && (
+                <ReviewModal
+                    rewardEligible={reviewTrigger.status.reward_eligible}
+                    onClose={reviewTrigger.dismiss}
+                    onSubmitted={reviewTrigger.dismiss}
+                />
+            )}
 
             {/* First-time user tour */}
             {showTour && (
