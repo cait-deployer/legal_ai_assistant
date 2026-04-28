@@ -19,9 +19,9 @@ export async function POST(request: Request) {
   if (!file) return NextResponse.json({ error: "audio field required" }, { status: 400 })
   if (file.size > MAX_BYTES) return NextResponse.json({ error: "Audio too large (max 5MB)" }, { status: 413 })
 
-  // Safari sends audio/mp4 — Groq doesn't support it
+  // Chrome records audio/webm;codecs=opus — match by prefix
   const mime = file.type || "audio/webm"
-  const supported = SUPPORTED_TYPES.some(t => mime.startsWith(t.split("/")[1]) || mime === t)
+  const supported = SUPPORTED_TYPES.some(t => mime === t || mime.startsWith(t + ";") || mime.startsWith(t))
   if (!supported) {
     return NextResponse.json(
       { error: "unsupported_format", message: "Ваш браузер не підтримує запис у форматі WebM. Будь ласка, введіть текст вручну." },
