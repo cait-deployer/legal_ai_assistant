@@ -14,6 +14,8 @@ URAI — Патч Qdrant payload з збагачених .meta.json (без пе
 import argparse
 import json
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -27,9 +29,9 @@ from qdrant_storage import (
 RAW_BASE   = Path("/root/laws_raw")
 STATE_FILE = Path(__file__).parent / "update_qdrant_meta_state.json"
 
-# Колекції Rada (v1 + v2)
+WORKERS = 8  # parallel law patchers
+
 _RADA_ALL = RADA_COLLECTIONS + RADA_V2_COLLECTIONS
-# Колекції KMU (v1 + v2)
 _KMU_ALL  = ["laws_kmu", "laws_kmu_v2"]
 
 SOURCES_COLLECTIONS: dict[str, list[str]] = {
@@ -37,39 +39,20 @@ SOURCES_COLLECTIONS: dict[str, list[str]] = {
     "kmu":  _KMU_ALL,
 }
 
-# Поля які переносимо з .meta.json у Qdrant payload
 ENRICH_FIELDS = [
-    "rada_status",
-    "rada_status_name",
-    "rada_is_dead",
-    "rada_is_dead_by_status",
-    "rada_is_dead_by_link",
-    "rada_no_text",
-    "rada_tags",
-    "rada_dokid",
-    "rada_nreg",
-    "rada_minjust",
-    "rada_n_vlas",
-    "rada_doc_type",
-    "rada_doc_types",
-    "rada_org",
-    "rada_org_id",
-    "rada_adopted_date",
-    "rada_last_edition",
-    "rada_replaced_by",
-    "rada_cancelled_by",
-    "rada_dead_since",
-    "rada_theme",
-    "rada_classifiers",
-    "rada_editions_cnt",
-    "rada_title",
-    "rada_url",
-    "rada_enriched_at",
+    "rada_status", "rada_status_name",
+    "rada_is_dead", "rada_is_dead_by_status", "rada_is_dead_by_link",
+    "rada_no_text", "rada_tags", "rada_dokid", "rada_nreg", "rada_minjust",
+    "rada_n_vlas", "rada_doc_type", "rada_doc_types", "rada_org", "rada_org_id",
+    "rada_adopted_date", "rada_last_edition", "rada_replaced_by",
+    "rada_cancelled_by", "rada_dead_since", "rada_theme", "rada_classifiers",
+    "rada_editions_cnt", "rada_title", "rada_url", "rada_enriched_at",
 ]
 
 _stop_event: threading.Event | None = None
 _log_fn = print
 _lock   = threading.Lock()
+_counter_lock = threading.Lock()
 
 
 def _log(msg: str, level: str = "info") -> None:
@@ -94,7 +77,6 @@ def _save_state(state: dict) -> None:
 
 
 def _existing_collections() -> set[str]:
-    """Повертає імена колекцій що реально існують в Qdrant."""
     try:
         resp = get_client().get_collections()
         return {c.name for c in resp.collections}
@@ -103,12 +85,46 @@ def _existing_collections() -> set[str]:
         return set()
 
 
+def _patch_one(meta_path: Path, target_colls: list[str]) -> tuple[int, int, bool]:
+    """
+    Patch all chunks of one law across all target collections.
+    Returns (updates, errors, skipped).
+    """
+    if _stop_event and _stop_event.is_set():
+        return 0, 0, True
+
+    nreg = meta_path.name[: -len(".meta.json")]
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        _log(f"[qdrant patch] Не вдалося прочитати {meta_path.name}: {e}", "error")
+        return 0, 1, False
+
+    if "rada_is_dead" not in meta:
+        return 0, 0, False  # not enriched yet — skip silently
+
+    payload = {k: meta[k] for k in ENRICH_FIELDS if k in meta and meta[k] is not None}
+    law_filter = Filter(must=[FieldCondition(key="law_id", match=MatchValue(value=nreg))])
+
+    client  = get_client()
+    updates = errors = 0
+    for coll in target_colls:
+        try:
+            client.set_payload(collection_name=coll, payload=payload, points=law_filter)
+            updates += 1
+        except Exception as e:
+            _log(f"[qdrant patch] ПОМИЛКА {coll}/{nreg}: {e}", "error")
+            errors += 1
+
+    return updates, errors, False
+
+
 def run_update_qdrant(
     log_callback=print,
     stop_event: threading.Event | None = None,
     sources: list[str] | None = None,
 ) -> None:
-    """Entry point для server.py. Запускається в окремому потоці."""
     global _stop_event, _log_fn
     _stop_event = stop_event
     _log_fn     = log_callback
@@ -125,9 +141,8 @@ def run_update_qdrant(
     })
     _save_state(state)
 
-    client      = get_client()
     existing    = _existing_collections()
-    updated_pts = errors = skipped = total_files = 0
+    total_updated = total_errors = total_skipped = total_files = 0
 
     try:
         for src in sources:
@@ -136,7 +151,6 @@ def run_update_qdrant(
                 _log(f"[qdrant patch] Директорія не знайдена: {src_dir}", "warning")
                 continue
 
-            # Колекції цього джерела що реально існують
             target_colls = [c for c in SOURCES_COLLECTIONS.get(src, []) if c in existing]
             if not target_colls:
                 _log(f"[qdrant patch] {src}: немає колекцій у Qdrant, пропускаємо")
@@ -145,68 +159,77 @@ def run_update_qdrant(
             meta_files = sorted(src_dir.glob("*.meta.json"))
             src_total  = len(meta_files)
             total_files += src_total
-            _log(f"[qdrant patch] {src}: {src_total} файлів -> {target_colls}")
+            _log(
+                f"[qdrant patch] ▶ {src.upper()}: {src_total} файлів"
+                f" | колекції={len(target_colls)} | workers={WORKERS}"
+            )
 
-            for i, meta_path in enumerate(meta_files):
-                if _stop_event and _stop_event.is_set():
-                    _log(f"[qdrant patch] Зупинено на {i}/{src_total}", "warning")
-                    state.update({"running": False, "phase": "stopped"})
-                    _save_state(state)
-                    return
+            done = updated = errors = skipped = 0
+            src_start = time.monotonic()
+            LOG_EVERY = max(100, src_total // 50)  # ~50 log lines per source
 
-                # nreg = filename без ".meta.json"
-                nreg = meta_path.name[: -len(".meta.json")]
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                futures = {
+                    pool.submit(_patch_one, mf, target_colls): mf
+                    for mf in meta_files
+                }
+                for fut in as_completed(futures):
+                    if _stop_event and _stop_event.is_set():
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        _log(f"[qdrant patch] ⏹ {src}: зупинено на {done}/{src_total}", "warning")
+                        state.update({"running": False, "phase": "stopped"})
+                        _save_state(state)
+                        return
 
-                try:
-                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                except Exception as e:
-                    _log(f"[qdrant patch] Не вдалося прочитати {meta_path.name}: {e}", "error")
-                    errors += 1
-                    continue
+                    upd, err, stopped = fut.result()
+                    if stopped:
+                        continue
 
-                if "rada_is_dead" not in meta:
-                    skipped += 1
-                    continue
+                    with _counter_lock:
+                        done    += 1
+                        updated += upd
+                        errors  += err
+                        if upd == 0 and err == 0:
+                            skipped += 1
 
-                payload = {k: meta[k] for k in ENRICH_FIELDS if k in meta and meta[k] is not None}
-
-                law_filter = Filter(
-                    must=[FieldCondition(key="law_id", match=MatchValue(value=nreg))]
-                )
-
-                for coll in target_colls:
-                    try:
-                        client.set_payload(
-                            collection_name=coll,
-                            payload=payload,
-                            points=law_filter,
+                    if done % LOG_EVERY == 0 or done == src_total:
+                        elapsed  = time.monotonic() - src_start
+                        speed    = done / elapsed if elapsed > 0 else 0
+                        eta_sec  = (src_total - done) / speed if speed > 0 else 0
+                        eta_min  = int(eta_sec // 60)
+                        eta_s    = int(eta_sec % 60)
+                        pct      = round(done / src_total * 100)
+                        err_rate = round(errors / max(done, 1) * 100, 1)
+                        _log(
+                            f"[qdrant patch] {src} {done}/{src_total} ({pct}%)"
+                            f" | updates={updated} skip={skipped} err={errors}({err_rate}%)"
+                            f" | {speed:.1f} laws/s | ETA {eta_min}хв {eta_s}с"
                         )
-                        updated_pts += 1
-                    except Exception as e:
-                        _log(f"[qdrant patch] ПОМИЛКА {coll}/{nreg}: {e}", "error")
-                        errors += 1
 
-                if (i + 1) % 500 == 0:
-                    pct = round((i + 1) / src_total * 100)
-                    _log(
-                        f"[qdrant patch] {src} {i+1}/{src_total} ({pct}%)"
-                        f" | payload_updates={updated_pts} | errors={errors}"
-                    )
+            elapsed_total = time.monotonic() - src_start
+            _log(
+                f"[qdrant patch] ✓ {src.upper()} завершено за {int(elapsed_total//60)}хв {int(elapsed_total%60)}с"
+                f" | updates={updated} | skip={skipped} | errors={errors}"
+            )
+            total_updated += updated
+            total_errors  += errors
+            total_skipped += skipped
 
         state.update({
             "running":      False,
             "completed_at": datetime.utcnow().isoformat(),
             "stats": {
                 "total_files":   total_files,
-                "updated_pts":   updated_pts,
-                "skipped":       skipped,
-                "errors":        errors,
+                "updated_pts":   total_updated,
+                "skipped":       total_skipped,
+                "errors":        total_errors,
             },
         })
         _save_state(state)
         _log(
             f"[qdrant patch] Завершено: файлів={total_files}"
-            f" | payload_updates={updated_pts} | пропущено={skipped} | помилок={errors}"
+            f" | payload_updates={total_updated}"
+            f" | пропущено={total_skipped} | помилок={total_errors}"
         )
 
     except Exception as e:

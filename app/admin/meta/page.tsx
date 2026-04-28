@@ -170,7 +170,7 @@ export default function MetaPage() {
       await fetch("/api/admin/enrich/qdrant/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sources: [source === "rada" ? "rada" : "kmu"] }),
+        body: JSON.stringify({ sources: ["rada", "kmu"] }),
       })
       await fetchStatus()
     } finally {

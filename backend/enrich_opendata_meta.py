@@ -74,7 +74,6 @@ RETRY_SLEEP    = 30
 CACHE_TTL_DAYS = 7
 WORKERS        = 2     # паралельних потоків для Phase 1
 SAVE_EVERY     = 250   # зберігати кеш кожні N запитів
-LOG_EVERY      = 10    # логувати прогрес кожні N запитів
 
 # Типи зв'язків: A -> B з таким типом означає "A скасовує B"
 DEAD_LINK_TYPES = {4, 7, 19, 22, 25, 29}
@@ -183,7 +182,15 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
     skipped    = total - len(to_fetch)
     need_fetch = len(to_fetch)
 
-    _log(f"[Phase 1] Документів: {total} | кеш: {skipped} | завантажити: {need_fetch} | потоків: {WORKERS}")
+    src_counts = {}
+    for src, _ in to_fetch:
+        src_counts[src] = src_counts.get(src, 0) + 1
+    src_summary = " | ".join(f"{s}={n}" for s, n in src_counts.items())
+    _log(
+        f"[Phase 1] ▶ Документів: {total} | з кешу: {skipped} | завантажити: {need_fetch}"
+        f" | потоків: {WORKERS} | ({src_summary})"
+    )
+    LOG_EVERY = max(50, need_fetch // 100) if need_fetch > 0 else 50  # ~100 log lines
 
     counters   = {"fetched": 0, "not_found": 0, "errors": 0, "done": 0, "first_shown": False}
     err_types: dict[str, int] = {}
@@ -241,17 +248,17 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
             if done % SAVE_EVERY == 0:
                 _save_cards_cache(cards_cache)
 
-            if done % LOG_EVERY == 0:
-                pct   = round(done / need_fetch * 100)
-                eta   = _eta(t0, done, need_fetch)
-                secs  = int(time.time() - t0)
-                speed = round(done / secs, 1) if secs > 0 else 0
+            if done % LOG_EVERY == 0 or done == need_fetch:
+                pct      = round(done / need_fetch * 100)
+                elapsed  = time.time() - t0
+                speed    = round(done / elapsed, 1) if elapsed > 0 else 0
+                eta_str  = _eta(t0, done, need_fetch)
+                err_rate = round(counters["errors"] / max(done, 1) * 100, 1)
                 err_summary = " ".join(f"{k}:{v}" for k, v in err_types.items()) or "0"
                 _log(
-                    f"[Phase 1] {done}/{need_fetch} ({pct}%) | "
-                    f"знайдено={counters['fetched']} | не_в_API={counters['not_found']} | "
-                    f"помилки={counters['errors']}({err_summary}) | "
-                    f"{speed}/с | ETA: {eta}"
+                    f"[Phase 1] {done}/{need_fetch} ({pct}%)"
+                    f" | ok={counters['fetched']} 404={counters['not_found']} err={counters['errors']}({err_rate}%)"
+                    f" | {speed} doc/s | ETA {eta_str}"
                 )
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -266,15 +273,16 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
                 _log(f"[Phase 1] Unexpected: {e}", "error")
 
     _save_cards_cache(cards_cache)
-    elapsed   = int(time.time() - t0)
+    elapsed   = time.time() - t0
     fetched   = counters["fetched"]
     not_found = counters["not_found"]
     errors    = counters["errors"]
     err_summary = " ".join(f"{k}:{v}" for k, v in err_types.items()) or "none"
+    avg_speed = round(need_fetch / elapsed, 1) if elapsed > 0 and need_fetch > 0 else 0
     _log(
-        f"[Phase 1] ✓ Завершено за {elapsed}с | "
-        f"знайдено={fetched} | не_в_API={not_found} | помилки={errors}({err_summary}) | "
-        f"з_кешу={skipped} | всього={total}"
+        f"[Phase 1] ✓ Завершено за {int(elapsed//60)}хв {int(elapsed%60)}с"
+        f" | ok={fetched} 404={not_found} err={errors}({err_summary})"
+        f" | з_кешу={skipped} | всього={total} | {avg_speed} doc/s"
     )
     return {"fetched": fetched, "not_found": not_found, "errors": errors, "skipped": skipped, "total": total}
 
@@ -287,13 +295,14 @@ def run_phase2(cards_cache: dict) -> dict:
       dokid_to_nreg:  {dokid_str: nreg}
       reverse_dead:   {target_dokid: [{cancelled_by, rel_name, rel_code}]}
     """
+    t0 = time.time()
     dokid_to_nreg: dict[str, str] = {}
     reverse_dead:  dict[str, list] = {}
 
     valid_cards = {n: c for n, c in cards_cache.items() if not c.get("_not_found")}
     not_found   = len(cards_cache) - len(valid_cards)
 
-    _log(f"[Phase 2] Карток у кеші: {len(cards_cache)} | валідних: {len(valid_cards)} | not_found: {not_found}")
+    _log(f"[Phase 2] ▶ Карток у кеші: {len(cards_cache)} | валідних: {len(valid_cards)} | not_found: {not_found}")
 
     for nreg, card in valid_cards.items():
         dokid = str(card.get("dokid", ""))
@@ -334,9 +343,10 @@ def run_phase2(cards_cache: dict) -> dict:
 
     top_types = sorted(rel_type_counts.items(), key=lambda x: -x[1])[:8]
     _log(f"[Phase 2] Топ типів зв'язків: { {k: v for k, v in top_types} }")
+    elapsed2 = int(time.time() - t0)
     _log(
-        f"[Phase 2] ✓ Скасувань (dead link types): {cancels_total} | "
-        f"унікальних цілей: {unique_targets}"
+        f"[Phase 2] ✓ Завершено за {elapsed2}с | скасувань: {cancels_total}"
+        f" | унікальних цілей: {unique_targets}"
     )
 
     # Показати кілька прикладів reverse_dead
@@ -463,9 +473,8 @@ def run_phase3(
     updated = skipped = errors = dead_total = dead_by_link = dead_by_status = no_text = 0
     t0 = time.time()
 
-    _log(f"[Phase 3] Документів для обробки: {total}")
-
-    LOG_EVERY = 200
+    LOG_EVERY = max(100, total // 50)  # ~50 log lines
+    _log(f"[Phase 3] ▶ Документів для обробки: {total} | джерела: {', '.join(sources)}")
 
     for i, (src, nreg) in enumerate(all_nregs):
         if _stop_event and _stop_event.is_set():
@@ -515,25 +524,26 @@ def run_phase3(
             _log(f"[Phase 3] ПОМИЛКА {nreg}: {e}", "error")
             errors += 1
 
-        if (i + 1) % LOG_EVERY == 0:
-            pct = round((i + 1) / total * 100)
-            eta = _eta(t0, updated, total - skipped) if updated else "?"
+        if (i + 1) % LOG_EVERY == 0 or (i + 1) == total:
+            pct      = round((i + 1) / total * 100)
+            elapsed  = time.time() - t0
+            speed    = round((i + 1) / elapsed, 1) if elapsed > 0 else 0
+            eta_str  = _eta(t0, i + 1, total)
+            err_rate = round(errors / max(i + 1, 1) * 100, 1)
+            dead_pct = round(dead_total / max(updated, 1) * 100)
             _log(
-                f"[Phase 3] {i+1}/{total} ({pct}%) | "
-                f"записано={updated} | пропущено={skipped} | помилок={errors} | "
-                f"мертвих={dead_total} (статус={dead_by_status}, link={dead_by_link}) | "
-                f"без_тексту={no_text} | ETA: {eta}"
+                f"[Phase 3] {i+1}/{total} ({pct}%)"
+                f" | записано={updated} skip={skipped} err={errors}({err_rate}%)"
+                f" | мертвих={dead_total}({dead_pct}%) status={dead_by_status} link={dead_by_link}"
+                f" | {speed} doc/s | ETA {eta_str}"
             )
 
-    elapsed = int(time.time() - t0)
+    elapsed  = time.time() - t0
     pct_dead = round(dead_total / updated * 100) if updated else 0
     _log(
-        f"[Phase 3] ✓ Завершено за {elapsed}с | "
-        f"записано={updated} | пропущено={skipped} | помилок={errors}"
-    )
-    _log(
-        f"[Phase 3] Мертвих: {dead_total} ({pct_dead}%) | "
-        f"за статусом={dead_by_status} | reverse link={dead_by_link} | без тексту={no_text}"
+        f"[Phase 3] ✓ Завершено за {int(elapsed//60)}хв {int(elapsed%60)}с"
+        f" | записано={updated} | пропущено={skipped} | помилок={errors}"
+        f" | мертвих={dead_total}({pct_dead}%) stat={dead_by_status} link={dead_by_link} без_тексту={no_text}"
     )
     return {
         "updated":        updated,
