@@ -12,7 +12,7 @@ function admin() {
 
 async function checkAdmin() {
   const cookieStore = await cookies()
-  return cookieStore.get("admin_session")?.value === process.env.ADMIN_SECRET
+  return cookieStore.get("admin_session")?.value === "authenticated"
 }
 
 // GET /api/admin/feedback?type=message|review&page=0&limit=50
