@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Mic, Square, Loader2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Mic, Loader2 } from "lucide-react"
 import { useAudioRecorder } from "@/app/hooks/useAudioRecorder"
 
 interface Props {
@@ -12,6 +12,8 @@ export function AudioRecorderButton({ onTranscription }: Props) {
   const { state, transcription, start, stop } = useAudioRecorder()
   const [supported, setSupported] = useState(false)
   const [seconds, setSeconds] = useState(0)
+  const onTranscriptionRef = useRef(onTranscription)
+  useEffect(() => { onTranscriptionRef.current = onTranscription }, [onTranscription])
 
   // Check WebM support only on client after hydration
   useEffect(() => {
@@ -28,12 +30,12 @@ export function AudioRecorderButton({ onTranscription }: Props) {
     return () => clearInterval(t)
   }, [state])
 
-  // Surface transcription to parent when ready
+  // Surface transcription to parent when ready — ref avoids re-firing on every render
   useEffect(() => {
     if (state === "done" && transcription) {
-      onTranscription(transcription)
+      onTranscriptionRef.current(transcription)
     }
-  }, [state, transcription, onTranscription])
+  }, [state, transcription])
 
   if (!supported) return null
 
