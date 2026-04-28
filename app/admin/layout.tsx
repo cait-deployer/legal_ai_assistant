@@ -19,7 +19,7 @@ import {
   Scale, ChevronRight, PanelLeftClose, PanelLeftOpen,
   Settings, BookOpen, CreditCard, Bot, BarChart2, Users, ShieldCheck, Gavel, BookMarked,
   RefreshCw, Database, ChevronDown, LayoutGrid, Building2, HardDriveDownload, Sparkles,
-  Download, HardDrive,
+  Download, HardDrive, MessageSquareHeart,
 } from "lucide-react"
 import { Toaster } from "sonner"
 
@@ -45,10 +45,11 @@ const navigation: NavItem[] = [
       { name: "V2 Панель",       href: "/admin/v2",       icon: Sparkles          },
     ],
   },
-  { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck },
-  { name: "AI Модель",     href: "/admin/ai-settings",   icon: Bot         },
-  { name: "Онбординг",     href: "/admin/onboarding",    icon: Scale       },
-  { name: "База знань",    href: "/admin/base",          icon: BookOpen    },
+  { name: "Покриття бази", href: "/admin/rada/coverage", icon: ShieldCheck        },
+  { name: "Відгуки",       href: "/admin/feedback",      icon: MessageSquareHeart },
+  { name: "AI Модель",     href: "/admin/ai-settings",   icon: Bot                },
+  { name: "Онбординг",     href: "/admin/onboarding",    icon: Scale              },
+  { name: "База знань",    href: "/admin/base",          icon: BookOpen           },
 ]
 
 const SYNC_HREFS = ["/admin/sync", "/admin/scraper", "/admin/reindex", "/admin/data", "/admin/disk", "/admin/sources", "/admin/v2"]
