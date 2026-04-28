@@ -37,15 +37,13 @@ export async function GET() {
   const totalReqs: number = profile.total_requests ?? 0
   const alreadyRewarded: boolean = profile.has_received_review_reward ?? false
 
-  // Show modal when:
-  // - user hit the trigger threshold for the first time (reward eligible), OR
-  // - every additional triggerCount requests after that (collect fresh data, no reward)
-  const shouldShow = totalReqs > 0 && totalReqs % triggerCount === 0
+  // Show modal once: when user reaches threshold AND hasn't reviewed yet
+  const shouldShow = totalReqs >= triggerCount && !alreadyRewarded
 
-  // Avoid spam: don't show if we already prompted on this same request count
+  // Avoid spam: don't re-show within 24h if dismissed without submitting
   const lastPromptedAt = profile.review_prompted_at ? new Date(profile.review_prompted_at) : null
   const recentlyPrompted = lastPromptedAt
-    ? Date.now() - lastPromptedAt.getTime() < 60 * 60 * 1000  // within last hour
+    ? Date.now() - lastPromptedAt.getTime() < 24 * 60 * 60 * 1000
     : false
 
   return NextResponse.json({
