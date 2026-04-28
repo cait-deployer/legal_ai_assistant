@@ -490,7 +490,8 @@ def run_phase3(
             _log(f"[Phase 3] Зупинено на {i}/{total}", "warning")
             break
 
-        card = cards_cache.get(_api_nreg(src, nreg))
+        api_key = _api_nreg(src, nreg)
+        card = cards_cache.get(api_key)
         if not card or card.get("_not_found"):
             skipped += 1
             continue
@@ -504,7 +505,7 @@ def run_phase3(
                 except Exception:
                     pass
 
-            enriched = _build_enriched(nreg, card, reverse_dead, dokid_to_nreg)
+            enriched = _build_enriched(api_key, card, reverse_dead, dokid_to_nreg)
             existing.update(enriched)
             meta_path.write_text(
                 json.dumps(existing, ensure_ascii=False, indent=2),
