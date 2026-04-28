@@ -156,6 +156,13 @@ def _get_all_nregs(sources: list[str]) -> list[tuple[str, str]]:
     return result
 
 
+def _api_nreg(src: str, nreg: str) -> str:
+    """Повертає nreg для запиту до OpenData API (без source-prefix)."""
+    if src == "kmu" and nreg.startswith("kmu_"):
+        return nreg[4:]  # "kmu_p-12-2024" → "p-12-2024"
+    return nreg
+
+
 # ── Phase 1: Завантаження карток ──────────────────────────────────────────────
 
 def _eta(started: float, done: int, total: int) -> str:
@@ -178,7 +185,8 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
     t0          = time.time()
 
     to_fetch = [(src, nreg) for src, nreg in all_nregs
-                if not (cards_cache.get(nreg) and not force and _cache_fresh(cards_cache.get(nreg, {})))]
+                if not (cards_cache.get(_api_nreg(src, nreg)) and not force
+                        and _cache_fresh(cards_cache.get(_api_nreg(src, nreg), {})))]
     skipped    = total - len(to_fetch)
     need_fetch = len(to_fetch)
 
@@ -199,10 +207,11 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
     def fetch_one(src: str, nreg: str) -> None:
         if _stop_event and _stop_event.is_set():
             return
+        api_key = _api_nreg(src, nreg)  # "kmu_p-12-2024" → "p-12-2024"
         card = None
         result_status = "error:unknown"
         for attempt in range(3):
-            card, result_status = _fetch_card(nreg)
+            card, result_status = _fetch_card(api_key)
             if result_status == "ok":
                 time.sleep(SLEEP_SEC)
                 break
@@ -215,30 +224,30 @@ def run_phase1(sources: list[str], force: bool = False) -> dict:
                 if attempt < 2:
                     time.sleep(2)
                 else:
-                    _log(f"[Phase 1] ПОМИЛКА {nreg}: {result_status}", "error")
+                    _log(f"[Phase 1] ПОМИЛКА {api_key}: {result_status}", "error")
             else:
                 if attempt == 2:
-                    _log(f"[Phase 1] ПОМИЛКА {nreg}: {result_status}", "error")
+                    _log(f"[Phase 1] ПОМИЛКА {api_key}: {result_status}", "error")
 
         with cache_lock:
             if card:
                 card["_fetched_at"] = datetime.utcnow().isoformat()
                 card["_source"]     = src
-                cards_cache[nreg]   = card
+                cards_cache[api_key] = card
                 counters["fetched"] += 1
                 if not counters["first_shown"]:
                     counters["first_shown"] = True
                     _log(
-                        f"[Phase 1] Перший: {nreg} | статус={card.get('status','?')} | "
+                        f"[Phase 1] Перший: {api_key} | статус={card.get('status','?')} | "
                         f"nazva={str(card.get('nazva',''))[:50]}"
                     )
             elif result_status == "not_found":
-                cards_cache[nreg] = {"_fetched_at": datetime.utcnow().isoformat(),
-                                     "_source": src, "_not_found": True}
+                cards_cache[api_key] = {"_fetched_at": datetime.utcnow().isoformat(),
+                                        "_source": src, "_not_found": True}
                 counters["not_found"] += 1
             else:
-                cards_cache[nreg] = {"_fetched_at": datetime.utcnow().isoformat(),
-                                     "_source": src, "_error": result_status}
+                cards_cache[api_key] = {"_fetched_at": datetime.utcnow().isoformat(),
+                                        "_source": src, "_error": result_status}
                 counters["errors"] += 1
                 err_types[result_status] = err_types.get(result_status, 0) + 1
 
@@ -481,7 +490,7 @@ def run_phase3(
             _log(f"[Phase 3] Зупинено на {i}/{total}", "warning")
             break
 
-        card = cards_cache.get(nreg)
+        card = cards_cache.get(_api_nreg(src, nreg))
         if not card or card.get("_not_found"):
             skipped += 1
             continue
