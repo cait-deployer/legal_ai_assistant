@@ -31,8 +31,9 @@ from qdrant_storage import (
 RAW_BASE   = Path("/root/laws_raw")
 STATE_FILE = Path(__file__).parent / "update_qdrant_meta_state.json"
 
-COLL_WORKERS     = 8   # паралельних колекцій одночасно
+COLL_WORKERS     = 2   # паралельних колекцій одночасно (більше = Qdrant reset)
 SCROLL_BATCH     = 500 # точок за один scroll()
+SET_PAYLOAD_RETRIES = 3
 LOG_INTERVAL_SEC = 30
 
 _RADA_ALL = RADA_COLLECTIONS + RADA_V2_COLLECTIONS
@@ -169,15 +170,23 @@ def _patch_collection(
     for law_id, ids in law_to_ids.items():
         if stop_event and stop_event.is_set():
             return {"coll": coll, "stopped": True}
-        try:
-            client.set_payload(
-                collection_name=coll,
-                payload=enriched[law_id],
-                points=ids,
-            )
+        last_exc = None
+        for attempt in range(SET_PAYLOAD_RETRIES):
+            try:
+                client.set_payload(
+                    collection_name=coll,
+                    payload=enriched[law_id],
+                    points=ids,
+                )
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                time.sleep(2 ** attempt)  # 1s, 2s, 4s
+        if last_exc is None:
             updated += 1
-        except Exception as e:
-            _log(f"[qdrant patch] ❌ set_payload {coll}/{law_id}: {e}", "error")
+        else:
+            _log(f"[qdrant patch] ❌ set_payload {coll}/{law_id}: {last_exc}", "error")
             errors += 1
 
     elapsed = time.monotonic() - start
