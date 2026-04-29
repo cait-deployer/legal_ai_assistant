@@ -70,7 +70,10 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - Settings (AI model, thresholds) — Supabase `app_settings` table, read via `settings_cache`
 - All Qdrant collections v1: `RADA_COLLECTIONS` (13) + `laws_supreme`, `laws_wiki`, `laws_ccu`, `laws_positions`, `laws_kmu` (768 dims)
 - V2 Qdrant collections: same names with `_v2` suffix (18 collections, 3072 dims) — shadow, not yet live in production
-- `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini
+- `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini (full JSON response)
+- `/ask_stream` endpoint: same pipeline via `_ask_pipeline()` helper → SSE streaming. Events: `data: {"token":"..."}` per chunk, `event: citations\ndata: {...}` at end (full answer + references + _meta). Early-answer path also uses `event: citations`.
+- Response style preferences: `response_length_pref` (short/standard/detailed/full) and `response_lang_style` (legal/plain) stored in `profiles` table. Gated by plan tier — downgraded silently in Next.js route. Word limits: short=200, standard=400, detailed=900, full=2000.
+- Next.js SSE proxy: `app/api/ask/stream/route.ts` — same auth + plan gating as `/api/ask`, proxies stream from backend via `new Response(res.body, ...)`. Chat page reads stream with `ReadableStream` / `getReader()`, appends tokens live, finalizes on `event: citations`.
 - Auto-sync scheduler: APScheduler `daily_sync` cron job at `schedule_hour` UTC. Per-source flags: `schedule_enabled` (Rada legacy V1), `schedule_{source}_enabled` for V2 sources. `schedule_hour` key (int, stored as value_text). UI: `/admin/sync` → ScheduleWidget. Endpoints: `GET /admin/sync/status`, `PATCH /admin/sync/settings`.
 - Scraper `force=True` mode: bypasses skip logic (re-downloads existing files). Available in `run_scrape_all`, `run_scrape_mod`, `run_scrape_zir`. Trigger via `/admin/v2/scrape/trigger` with `{"force": true}`.
 - Scraper pause/resume: JSON state files in `backend/` (`sync_state.json`, `wiki_state.json`, `ccu_state.json`)

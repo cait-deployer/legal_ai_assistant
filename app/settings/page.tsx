@@ -31,6 +31,8 @@ type Profile = {
   last_active_at: string | null; avg_session_duration: number; session_count: number;
   ai_personal_prompt: string | null;
   tour_completed: boolean | null;
+  response_length_pref: "short" | "standard" | "detailed" | "full" | null;
+  response_lang_style: "legal" | "plain" | null;
 }
 
 const SEGMENT_LABELS: Record<Segment, string> = {
@@ -75,6 +77,30 @@ function ProfileTab({ profile }: { profile: Profile }) {
   const [promptSaved, setPromptSaved] = useState(false)
   const [promptGenerating, setPromptGenerating] = useState(false)
   const [promptError, setPromptError] = useState("")
+
+  // Response style preferences
+  const [responseLength, setResponseLength] = useState<"short" | "standard" | "detailed" | "full">(profile.response_length_pref ?? "standard")
+  const [responseLang, setResponseLang] = useState<"legal" | "plain">(profile.response_lang_style ?? "legal")
+  const [styleSaving, setStyleSaving] = useState(false)
+  const [styleSaved, setStyleSaved] = useState(false)
+  const [styleError, setStyleError] = useState("")
+
+  const tier = profile.subscription_tier
+  const isBasicPlus = tier === "basic" || tier === "pro" || tier === "ultra"
+  const isProPlus   = tier === "pro" || tier === "ultra"
+
+  const handleSaveStyle = async () => {
+    setStyleSaving(true); setStyleError(""); setStyleSaved(false)
+    const res = await fetch("/api/settings/profile", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response_length_pref: responseLength, response_lang_style: responseLang }),
+    })
+    setStyleSaving(false)
+    if (res.ok) {
+      setStyleSaved(true); startTransition(() => { mutate("/api/settings/profile") })
+      setTimeout(() => setStyleSaved(false), 3000)
+    } else { setStyleError("Помилка збереження.") }
+  }
 
   const toggleSegment = (s: Segment) => setSegments(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
 
@@ -249,6 +275,106 @@ function ProfileTab({ profile }: { profile: Profile }) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* ── Response Style ── */}
+      <div className="mt-4 rounded-[1.5rem] border border-[#C9A84C]/15 bg-[#0d1120]/60 p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/10 flex items-center justify-center">
+            <Zap className="w-4 h-4 text-[#C9A84C]" />
+          </div>
+          <div>
+            <p className="text-sm font-black text-[#E0E6ED] uppercase tracking-wider">Стиль відповідей AI</p>
+            <p className="text-[11px] text-[#C9A84C]/50 mt-0.5">Застосовується до всіх чатів</p>
+          </div>
+        </div>
+
+        {/* Length */}
+        <div className="space-y-2">
+          <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Довжина відповіді</p>
+          <div className="space-y-2">
+            {([
+              { value: "short",    label: "Коротко",       desc: "Суть за 1–2 абзаци",                   lock: false },
+              { value: "standard", label: "Стандарт",      desc: "Збалансована відповідь",                lock: false },
+              { value: "detailed", label: "Розгорнуто",    desc: "З деталями, нюансами та виключеннями", lock: !isBasicPlus, plan: "Basic+" },
+              { value: "full",     label: "Повний аналіз", desc: "Глибокий розбір на 1–2 сторінки",      lock: !isProPlus,   plan: "Pro+" },
+            ] as const).map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => !opt.lock && setResponseLength(opt.value)}
+                disabled={opt.lock}
+                className={`w-full px-4 py-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${
+                  responseLength === opt.value && !opt.lock
+                    ? "border-[#C9A84C] bg-[#C9A84C]/10"
+                    : opt.lock
+                    ? "border-[#C9A84C]/8 bg-transparent opacity-50 cursor-not-allowed"
+                    : "border-[#C9A84C]/10 bg-[#0d1120]/40 hover:border-[#C9A84C]/30"
+                }`}
+              >
+                <div>
+                  <p className={`text-sm font-bold ${responseLength === opt.value && !opt.lock ? "text-[#C9A84C]" : "text-[#E0E6ED]/80"}`}>{opt.label}</p>
+                  <p className="text-[11px] text-[#E0E6ED]/40 mt-0.5">{opt.desc}</p>
+                </div>
+                <div className="shrink-0">
+                  {opt.lock
+                    ? <span className="text-[9px] font-black text-[#C9A84C]/40 border border-[#C9A84C]/20 rounded-full px-2 py-0.5 uppercase tracking-wider">🔒 {opt.plan}</span>
+                    : responseLength === opt.value
+                    ? <CheckCircle2 className="w-4 h-4 text-[#C9A84C]" />
+                    : null
+                  }
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Language style */}
+        <div className="space-y-2">
+          <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Мова відповіді</p>
+          <div className="space-y-2">
+            {([
+              { value: "legal", label: "Юридична мова", desc: "Точні терміни НПА, як у законодавстві", lock: false },
+              { value: "plain", label: "Простою мовою", desc: "Без жаргону, зрозуміло клієнту",         lock: !isBasicPlus, plan: "Basic+" },
+            ] as const).map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => !opt.lock && setResponseLang(opt.value)}
+                disabled={opt.lock}
+                className={`w-full px-4 py-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${
+                  responseLang === opt.value && !opt.lock
+                    ? "border-[#C9A84C] bg-[#C9A84C]/10"
+                    : opt.lock
+                    ? "border-[#C9A84C]/8 bg-transparent opacity-50 cursor-not-allowed"
+                    : "border-[#C9A84C]/10 bg-[#0d1120]/40 hover:border-[#C9A84C]/30"
+                }`}
+              >
+                <div>
+                  <p className={`text-sm font-bold ${responseLang === opt.value && !opt.lock ? "text-[#C9A84C]" : "text-[#E0E6ED]/80"}`}>{opt.label}</p>
+                  <p className="text-[11px] text-[#E0E6ED]/40 mt-0.5">{opt.desc}</p>
+                </div>
+                <div className="shrink-0">
+                  {opt.lock
+                    ? <span className="text-[9px] font-black text-[#C9A84C]/40 border border-[#C9A84C]/20 rounded-full px-2 py-0.5 uppercase tracking-wider">🔒 {opt.plan}</span>
+                    : responseLang === opt.value
+                    ? <CheckCircle2 className="w-4 h-4 text-[#C9A84C]" />
+                    : null
+                  }
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {styleError && <p className="text-red-400 text-xs flex items-center gap-1.5"><AlertCircle size={12} /> {styleError}</p>}
+
+        <button
+          onClick={handleSaveStyle}
+          disabled={styleSaving || (responseLength === (profile.response_length_pref ?? "standard") && responseLang === (profile.response_lang_style ?? "legal"))}
+          className="w-full h-10 rounded-xl bg-[#C9A84C]/10 hover:bg-[#C9A84C]/20 border border-[#C9A84C]/30 text-[#C9A84C] text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+        >
+          {styleSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : styleSaved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+          {styleSaved ? "Збережено" : "Зберегти стиль"}
+        </button>
       </div>
 
       {/* ── Replay Tour ── */}

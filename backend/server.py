@@ -3477,6 +3477,8 @@ class AskRequest(BaseModel):
     user_profile: dict | None = None           # {role, sub_role, segment} from onboarding
     history: list[dict] | None = None          # [{role:"user"|"assistant", content:"..."}]
     ai_personal_prompt: str | None = None      # персональний AI-профіль юзера (з налаштувань)
+    response_length_pref: str = "standard"     # short|standard|detailed|full (gated by plan on frontend)
+    response_lang_style: str = "legal"         # legal|plain (gated by plan on frontend)
 
 
 class GenerateUserPromptRequest(BaseModel):
@@ -3488,9 +3490,8 @@ class GenerateUserPromptRequest(BaseModel):
 _CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
 
 
-@app.post("/ask")
-async def ask(body: AskRequest):
-    """Приймає питання → повертає відповідь від Gemini + посилання на закони."""
+async def _ask_pipeline(body: AskRequest) -> dict:
+    """Retrieval → rerank → context → prompt building. Повертає dict для /ask і /ask_stream."""
     import asyncio as _asyncio
 
     start_time = time.time()
@@ -3678,7 +3679,7 @@ async def ask(body: AskRequest):
         ))
         logger.info("LOW CONFIDENCE: target_collections expanded → %s", target_collections)
     elif not results:
-        return {
+        return {"early_answer": {
             "answer": "На жаль, у базі знань не знайдено документів за вашим запитом. Спробуйте переформулювати або уточнити питання.",
             "references": [],
             "templates": [],
@@ -3687,7 +3688,7 @@ async def ask(body: AskRequest):
                 "tokens_used": 0,
                 "category": "Загальне",
             },
-        }
+        }}
 
     # Diagnostic: log all found docs per collection
     _diag: dict[str, list] = {}
@@ -3991,7 +3992,7 @@ async def ask(body: AskRequest):
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     # В low_confidence режимі пропускаємо (Gemini вже отримає guardrail в промпті)
     if not low_confidence and (not results or results[0]["similarity"] < min_score):
-        return {
+        return {"early_answer": {
             "answer": (
                 "На жаль, у базі знань не знайдено достатньо інформації для відповіді на це питання. "
                 "Спробуйте переформулювати запит або зверніться до юриста."
@@ -4004,7 +4005,7 @@ async def ask(body: AskRequest):
                 "category": "Загальне",
                 **_CLF_FALLBACK,
             },
-        }
+        }}
 
     # 3. Будуємо збагачений контекст для LLM + citations для фронтенду
     # law_chunks — закони Ради; kmu_chunks — постанови КМУ; court_chunks — судова практика
@@ -4209,15 +4210,24 @@ async def ask(body: AskRequest):
                 "Якщо відповідь повна і питання буде штучним — не питай."
             )
 
-        # Plan-aware length limit — відповідь завжди завершена, не обривається
-        if "response_detailed" in rf or "response_scenarios" in rf:
+        # Word limit: user preference takes priority, plan features can only expand it
+        _pref_limits = {"short": 200, "standard": 400, "detailed": 900, "full": 2000}
+        _word_limit = _pref_limits.get(body.response_length_pref, 400)
+        # plan response_detailed/scenarios can still bump a standard user to 800
+        if _word_limit < 800 and ("response_detailed" in rf or "response_scenarios" in rf):
             _word_limit = 800
-        else:
-            _word_limit = 350
         response_instructions.append(
             f"Пиши завершену відповідь до {_word_limit} слів. "
             "Ніколи не обривай речення — якщо не вистачає місця, скорочуй менш важливі деталі, але завжди завершуй думку."
         )
+
+        # Language style instruction
+        if body.response_lang_style == "plain":
+            response_instructions.append(
+                "СТИЛЬ МОВИ: пиши простою зрозумілою мовою без юридичного жаргону. "
+                "Замінюй складні терміни поясненнями. "
+                "Уявляй що пояснюєш людині без юридичної освіти."
+            )
 
         # Build user profile block if available
         profile_block = ""
@@ -4281,7 +4291,6 @@ async def ask(body: AskRequest):
         clf_model  = GenerativeModel(model_name)
 
         # thinking_budget=0: відповідь будується з готового контексту, thinking не потрібен
-        # і тільки їсть токени → обрізає відповідь
         try:
             from vertexai.generative_models import ThinkingConfig as _ThinkingConfig
             _main_gen_cfg = GenerationConfig(
@@ -4292,51 +4301,69 @@ async def ask(body: AskRequest):
             _main_gen_cfg = GenerationConfig(temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens)
 
         llm_timeout = settings_cache.get_float("llm_timeout_seconds", 90.0)
-        try:
-            response, clf_response = await _asyncio.wait_for(
-                _asyncio.gather(
-                    _asyncio.to_thread(
-                        main_model.generate_content,
-                        prompt,
-                        generation_config=_main_gen_cfg,
-                    ),
-                    _asyncio.to_thread(
-                        clf_model.generate_content,
-                        clf_prompt,
-                        generation_config=GenerationConfig(
-                            temperature=0.0,
-                            response_mime_type="application/json",
-                        ),
-                    ),
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"AI setup error: {e}")
+
+    return {
+        "prompt": prompt, "clf_prompt": clf_prompt,
+        "citations": citations, "results": results, "low_confidence": low_confidence,
+        "main_model": main_model, "clf_model": clf_model,
+        "main_gen_cfg": _main_gen_cfg, "llm_timeout": llm_timeout,
+        "start_time": start_time, "max_output_tokens": max_output_tokens,
+    }
+
+
+@app.post("/ask")
+async def ask(body: AskRequest):
+    """Приймає питання → повертає відповідь від Gemini + посилання на закони."""
+    import asyncio as _asyncio
+    import json as _json
+    from vertexai.generative_models import GenerationConfig
+
+    pipe = await _ask_pipeline(body)
+    if pipe.get("early_answer"):
+        return pipe["early_answer"]
+
+    try:
+        response, clf_response = await _asyncio.wait_for(
+            _asyncio.gather(
+                _asyncio.to_thread(
+                    pipe["main_model"].generate_content,
+                    pipe["prompt"],
+                    generation_config=pipe["main_gen_cfg"],
                 ),
-                timeout=llm_timeout,
-            )
-        except _asyncio.TimeoutError:
-            raise HTTPException(504, f"AI не відповів за {llm_timeout:.0f}с — спробуйте пізніше")
-
-        answer = response.text
-
-        tokens_used = 0
-        try:
-            tokens_used = response.usage_metadata.total_token_count or 0
-        except Exception:
-            pass
-
-        # Log finish reason to diagnose truncation
-        try:
-            finish_reason = response.candidates[0].finish_reason
-            logger.info("FINISH_REASON: %s | tokens_used: %s | max_tokens: %s", finish_reason, tokens_used, max_output_tokens)
-            if str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2"):
-                logger.warning("RESPONSE TRUNCATED by max_output_tokens=%s", max_output_tokens)
-        except Exception:
-            pass
-
+                _asyncio.to_thread(
+                    pipe["clf_model"].generate_content,
+                    pipe["clf_prompt"],
+                    generation_config=GenerationConfig(temperature=0.0, response_mime_type="application/json"),
+                ),
+            ),
+            timeout=pipe["llm_timeout"],
+        )
+    except _asyncio.TimeoutError:
+        raise HTTPException(504, f"AI не відповів за {pipe['llm_timeout']:.0f}с — спробуйте пізніше")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"AI error: {e}")
 
-    # Parse AI classification; fall back to defaults if model returns garbage
+    answer = response.text
+    tokens_used = 0
+    try:
+        tokens_used = response.usage_metadata.total_token_count or 0
+    except Exception:
+        pass
+    try:
+        finish_reason = response.candidates[0].finish_reason
+        logger.info("FINISH_REASON: %s | tokens_used: %s | max_tokens: %s", finish_reason, tokens_used, pipe["max_output_tokens"])
+        if str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2"):
+            logger.warning("RESPONSE TRUNCATED by max_output_tokens=%s", pipe["max_output_tokens"])
+    except Exception:
+        pass
+
     try:
         classification = _json.loads(clf_response.text)
         if classification.get("sentiment") not in ("neutral", "urgent", "frustrated"):
@@ -4348,30 +4375,140 @@ async def ask(body: AskRequest):
     except Exception:
         classification = dict(_CLF_FALLBACK)
 
-    # Filter citations — keep only those actually referenced in the answer
-    # used_nums = {int(n) for n in re.findall(r"\[(\d+)\]", answer)} # Removed: no longer filtering by explicit AI citations
-    used_citations = citations # Changed: return all relevant citations up to max_docs
-
-    # Category — most common category from retrieved Qdrant chunks
-    cats = [r["out_metadata"].get("category", "") for r in results if r["out_metadata"].get("category")]
+    cats = [r["out_metadata"].get("category", "") for r in pipe["results"] if r["out_metadata"].get("category")]
     category = max(set(cats), key=cats.count) if cats else "Загальне"
-
-    elapsed_ms = int((time.time() - start_time) * 1000)
+    elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
     return {
         "answer": answer,
-        "references": used_citations,
+        "references": pipe["citations"],
         "templates": [],
         "_meta": {
             "processing_time_ms": elapsed_ms,
             "tokens_used": tokens_used,
             "category": category,
-            "low_confidence": low_confidence,
-            "top_score": round(results[0]["similarity"], 3) if results else 0.0,
-            "n_docs": len(results),
+            "low_confidence": pipe["low_confidence"],
+            "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
+            "n_docs": len(pipe["results"]),
             **classification,
         },
     }
+
+
+@app.post("/ask_stream")
+async def ask_stream(body: AskRequest):
+    """SSE streaming версія /ask — токени стримуються одразу, citations event в кінці."""
+    import asyncio as _asyncio
+    import json as _json
+    import threading as _threading
+    from fastapi.responses import StreamingResponse as _SR
+
+    pipe = await _ask_pipeline(body)
+
+    if pipe.get("early_answer"):
+        ea = pipe["early_answer"]
+        async def _early_gen():
+            yield f"event: citations\ndata: {_json.dumps(ea, ensure_ascii=False)}\n\n"
+        return _SR(_early_gen(), media_type="text/event-stream",
+                   headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    async def generate():
+        from vertexai.generative_models import GenerationConfig as _GC
+        loop = _asyncio.get_event_loop()
+        token_queue: _asyncio.Queue = _asyncio.Queue()
+        answer_parts: list[str] = []
+
+        clf_task = _asyncio.create_task(
+            _asyncio.to_thread(
+                pipe["clf_model"].generate_content,
+                pipe["clf_prompt"],
+                generation_config=_GC(temperature=0.0, response_mime_type="application/json"),
+            )
+        )
+
+        def _sync_stream():
+            try:
+                for chunk in pipe["main_model"].generate_content(
+                    pipe["prompt"],
+                    generation_config=pipe["main_gen_cfg"],
+                    stream=True,
+                ):
+                    try:
+                        text = chunk.text
+                        if text:
+                            _asyncio.run_coroutine_threadsafe(
+                                token_queue.put(("token", text)), loop
+                            ).result(timeout=10)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                _asyncio.run_coroutine_threadsafe(
+                    token_queue.put(("error", str(exc))), loop
+                ).result(timeout=5)
+            finally:
+                _asyncio.run_coroutine_threadsafe(
+                    token_queue.put(("done", None)), loop
+                ).result(timeout=5)
+
+        _threading.Thread(target=_sync_stream, daemon=True).start()
+
+        while True:
+            try:
+                event_type, data = await _asyncio.wait_for(
+                    token_queue.get(), timeout=pipe["llm_timeout"]
+                )
+            except _asyncio.TimeoutError:
+                yield f"event: error\ndata: {_json.dumps({'error': 'LLM timeout'})}\n\n"
+                clf_task.cancel()
+                return
+
+            if event_type == "done":
+                break
+            elif event_type == "error":
+                yield f"event: error\ndata: {_json.dumps({'error': data})}\n\n"
+                clf_task.cancel()
+                return
+            else:
+                answer_parts.append(data)
+                yield f"data: {_json.dumps({'token': data}, ensure_ascii=False)}\n\n"
+
+        full_answer = "".join(answer_parts)
+
+        try:
+            clf_response = await clf_task
+            import json as __json
+            classification = __json.loads(clf_response.text)
+            if classification.get("sentiment") not in ("neutral", "urgent", "frustrated"):
+                classification["sentiment"] = "neutral"
+            if classification.get("complexity_score") not in (1, 2, 3):
+                classification["complexity_score"] = 1
+            if classification.get("user_intent") not in ("консультація", "документи", "захист прав", "роз'яснення"):
+                classification["user_intent"] = "консультація"
+        except Exception:
+            classification = dict(_CLF_FALLBACK)
+
+        cats = [r["out_metadata"].get("category", "") for r in pipe["results"] if r["out_metadata"].get("category")]
+        category = max(set(cats), key=cats.count) if cats else "Загальне"
+        elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
+
+        citations_payload = {
+            "answer": full_answer,
+            "references": pipe["citations"],
+            "templates": [],
+            "_meta": {
+                "processing_time_ms": elapsed_ms,
+                "tokens_used": 0,
+                "category": category,
+                "low_confidence": pipe["low_confidence"],
+                "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
+                "n_docs": len(pipe["results"]),
+                **classification,
+            },
+        }
+        yield f"event: citations\ndata: {_json.dumps(citations_payload, ensure_ascii=False)}\n\n"
+
+    return _SR(generate(), media_type="text/event-stream",
+               headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/ask_simple")

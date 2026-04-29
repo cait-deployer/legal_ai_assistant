@@ -297,54 +297,130 @@ function ChatPage() {
             body: JSON.stringify({ role: 'user', content: questionText }),
         }).catch(() => { });
 
-        try {
-            // Build conversation history for context (bекенд сам обріже до потрібної кількості)
-            const historyForBackend = messages
-                .filter(m => m.role === 'user' || m.role === 'ai')
-                .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }));
+        // Build conversation history for context
+        const historyForBackend = messages
+            .filter(m => m.role === 'user' || m.role === 'ai')
+            .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }));
 
-            const res = await fetch(`/api/ask`, {
+        // Negative number → typeof !== 'string' → MessageFeedback won't render for temp message
+        const STREAMING_ID = -(Date.now());
+        let firstToken = true;
+        let accText = '';
+        type FinalPayload = { answer: string; references: Citation[]; templates: Template[]; _meta: Record<string, unknown> };
+        let finalPayload: FinalPayload | null = null;
+
+        try {
+            const res = await fetch('/api/ask/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: questionText, history: historyForBackend }),
-                signal: AbortSignal.timeout(120_000),
+                signal: AbortSignal.timeout(185_000),
             });
+
             if (res.status === 429) {
                 setLimitExceeded(true);
+                setIsLoading(false);
+                newChatInProgressRef.current = false;
                 return;
             }
 
-            const data = await res.json();
+            if (!res.ok || !res.body) {
+                toast.error('Сервер не відповідає. Спробуйте ще раз.');
+                setIsLoading(false);
+                newChatInProgressRef.current = false;
+                return;
+            }
 
-            if (data.answer) {
-                const tempId = Date.now() + 1;
-                setMessages(prev => [...prev, {
-                    id: tempId, role: 'ai', text: data.answer,
-                    references: data.references ?? [], templates: data.templates ?? [],
-                }]);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let currentEvent = 'message';
 
-                // Save to DB, then update local id with real UUID so MessageFeedback works
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() ?? '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            currentEvent = line.slice(7).trim();
+                        } else if (line.startsWith('data: ')) {
+                            let parsed: Record<string, unknown>;
+                            try { parsed = JSON.parse(line.slice(6)); } catch { continue; }
+
+                            if (currentEvent === 'message' && parsed.token) {
+                                const token = parsed.token as string;
+                                if (firstToken) {
+                                    firstToken = false;
+                                    setIsLoading(false);
+                                    accText = token;
+                                    setMessages(prev => [...prev, { id: STREAMING_ID, role: 'ai', text: accText, references: [] }]);
+                                } else {
+                                    accText += token;
+                                    setMessages(prev => prev.map(m => m.id === STREAMING_ID ? { ...m, text: accText } : m));
+                                }
+                            } else if (currentEvent === 'citations') {
+                                finalPayload = parsed as unknown as FinalPayload;
+                                const answer = finalPayload.answer || accText;
+                                if (firstToken) {
+                                    // early_answer path: no tokens were streamed
+                                    firstToken = false;
+                                    setIsLoading(false);
+                                    setMessages(prev => [...prev, {
+                                        id: STREAMING_ID, role: 'ai', text: answer,
+                                        references: finalPayload!.references ?? [],
+                                        templates: finalPayload!.templates ?? [],
+                                    }]);
+                                } else {
+                                    setMessages(prev => prev.map(m => m.id === STREAMING_ID ? {
+                                        ...m, text: answer,
+                                        references: finalPayload!.references ?? [],
+                                        templates: finalPayload!.templates ?? [],
+                                    } : m));
+                                }
+                            } else if (currentEvent === 'error') {
+                                toast.error('Помилка генерації відповіді.');
+                            }
+                        } else if (line === '') {
+                            currentEvent = 'message';
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+
+            // Save AI message to DB after stream ends
+            if (finalPayload || accText) {
+                const answer = finalPayload?.answer || accText;
+                const refs = finalPayload?.references ?? [];
+                const meta = finalPayload?._meta ?? {};
+
                 fetch(`/api/chats/${chatId}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         role: 'assistant',
-                        content: data.answer,
-                        citations: data.references ?? [],
+                        content: answer,
+                        citations: refs,
                         analytics: {
                             query_text: questionText,
-                            ai_response: data.answer,
-                            category: data._meta?.category,
-                            sentiment: data._meta?.sentiment,
-                            complexity_score: data._meta?.complexity_score,
-                            user_intent: data._meta?.user_intent,
-                            processing_time_ms: data._meta?.processing_time_ms,
-                            tokens_used: data._meta?.tokens_used ?? 0,
+                            ai_response: answer,
+                            category: meta.category,
+                            sentiment: meta.sentiment,
+                            complexity_score: meta.complexity_score,
+                            user_intent: meta.user_intent,
+                            processing_time_ms: meta.processing_time_ms,
+                            tokens_used: meta.tokens_used ?? 0,
                         },
                     }),
                 }).then(r => r.ok ? r.json() : null).then(saved => {
                     if (saved?.id) {
-                        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: saved.id } : m));
+                        setMessages(prev => prev.map(m => m.id === STREAMING_ID ? { ...m, id: saved.id } : m));
                     }
                     reviewTrigger.check();
                 }).catch(() => { });
@@ -356,7 +432,7 @@ function ChatPage() {
                     fetch(`/api/chats/${chatId}/name`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ question: questionText, answer: data.answer }),
+                        body: JSON.stringify({ question: questionText, answer }),
                     }).then(() => mutate('/api/chats'));
                 } else { mutate('/api/chats'); }
             }

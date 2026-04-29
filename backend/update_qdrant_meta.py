@@ -30,6 +30,7 @@ RAW_BASE   = Path("/root/laws_raw")
 STATE_FILE = Path(__file__).parent / "update_qdrant_meta_state.json"
 
 WORKERS = 8  # parallel law patchers
+LOG_INTERVAL_SEC = 30  # гарантований лог кожні 30 секунд
 
 _RADA_ALL = RADA_COLLECTIONS + RADA_V2_COLLECTIONS
 _KMU_ALL  = ["laws_kmu", "laws_kmu_v2"]
@@ -85,24 +86,24 @@ def _existing_collections() -> set[str]:
         return set()
 
 
-def _patch_one(meta_path: Path, target_colls: list[str]) -> tuple[int, int, bool]:
+def _patch_one(meta_path: Path, target_colls: list[str]) -> tuple[int, int, bool, str]:
     """
     Patch all chunks of one law across all target collections.
-    Returns (updates, errors, skipped).
+    Returns (updates, errors, skipped, law_id).
     """
     if _stop_event and _stop_event.is_set():
-        return 0, 0, True
+        return 0, 0, True, ""
 
     nreg = meta_path.name[: -len(".meta.json")]
 
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except Exception as e:
-        _log(f"[qdrant patch] Не вдалося прочитати {meta_path.name}: {e}", "error")
-        return 0, 1, False
+        _log(f"[qdrant patch] ❌ Не вдалося прочитати {meta_path.name}: {e}", "error")
+        return 0, 1, False, nreg
 
     if "rada_is_dead" not in meta:
-        return 0, 0, False  # not enriched yet — skip silently
+        return 0, 0, False, nreg  # not enriched yet — skip silently
 
     payload = {k: meta[k] for k in ENRICH_FIELDS if k in meta and meta[k] is not None}
     law_filter = Filter(must=[FieldCondition(key="law_id", match=MatchValue(value=nreg))])
@@ -114,10 +115,20 @@ def _patch_one(meta_path: Path, target_colls: list[str]) -> tuple[int, int, bool
             client.set_payload(collection_name=coll, payload=payload, points=law_filter)
             updates += 1
         except Exception as e:
-            _log(f"[qdrant patch] ПОМИЛКА {coll}/{nreg}: {e}", "error")
+            _log(f"[qdrant patch] ❌ ПОМИЛКА {coll}/{nreg}: {e}", "error")
             errors += 1
 
-    return updates, errors, False
+    return updates, errors, False, nreg
+
+
+def _fmt_eta(src_total: int, done: int, elapsed: float) -> str:
+    if done == 0:
+        return "ETA невідомо"
+    speed = done / elapsed
+    eta_sec = (src_total - done) / speed
+    if eta_sec < 60:
+        return f"ETA ~{int(eta_sec)}с"
+    return f"ETA ~{int(eta_sec // 60)}хв {int(eta_sec % 60)}с"
 
 
 def run_update_qdrant(
@@ -141,74 +152,122 @@ def run_update_qdrant(
     })
     _save_state(state)
 
-    existing    = _existing_collections()
+    existing      = _existing_collections()
     total_updated = total_errors = total_skipped = total_files = 0
 
     try:
         for src in sources:
             src_dir = RAW_BASE / src
             if not src_dir.exists():
-                _log(f"[qdrant patch] Директорія не знайдена: {src_dir}", "warning")
+                _log(f"[qdrant patch] ⚠️  Директорія не знайдена: {src_dir}", "warning")
                 continue
 
             target_colls = [c for c in SOURCES_COLLECTIONS.get(src, []) if c in existing]
             if not target_colls:
-                _log(f"[qdrant patch] {src}: немає колекцій у Qdrant, пропускаємо")
+                _log(f"[qdrant patch] ⚠️  {src}: немає колекцій у Qdrant, пропускаємо", "warning")
                 continue
 
             meta_files = sorted(src_dir.glob("*.meta.json"))
             src_total  = len(meta_files)
             total_files += src_total
+
             _log(
                 f"[qdrant patch] ▶ {src.upper()}: {src_total} файлів"
-                f" | колекції={len(target_colls)} | workers={WORKERS}"
+                f" | колекцій={len(target_colls)} | workers={WORKERS}"
             )
+            _log(f"[qdrant patch]   колекції: {', '.join(target_colls)}")
+            _log(
+                f"[qdrant patch]   на закон робиться {len(target_colls)} set_payload() викликів"
+                f" | всього ~{src_total * len(target_colls):,} Qdrant операцій"
+            )
+            _log(f"[qdrant patch]   прогрес кожні {LOG_INTERVAL_SEC}с автоматично ━━━")
 
-            done = updated = errors = skipped = 0
-            src_start = time.monotonic()
-            LOG_EVERY = max(100, src_total // 50)  # ~50 log lines per source
+            # Shared counters (accessed by heartbeat thread + main loop)
+            counters = {"done": 0, "updated": 0, "errors": 0, "skipped": 0, "last_law": ""}
+            src_start    = time.monotonic()
+            last_log_at  = [src_start]  # mutable for heartbeat closure
 
-            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-                futures = {
-                    pool.submit(_patch_one, mf, target_colls): mf
-                    for mf in meta_files
-                }
-                for fut in as_completed(futures):
-                    if _stop_event and _stop_event.is_set():
-                        pool.shutdown(wait=False, cancel_futures=True)
-                        _log(f"[qdrant patch] ⏹ {src}: зупинено на {done}/{src_total}", "warning")
-                        state.update({"running": False, "phase": "stopped"})
-                        _save_state(state)
-                        return
+            def _do_log(label: str = "") -> None:
+                with _counter_lock:
+                    d  = counters["done"]
+                    u  = counters["updated"]
+                    e  = counters["errors"]
+                    sk = counters["skipped"]
+                    ll = counters["last_law"]
+                elapsed  = time.monotonic() - src_start
+                speed    = d / elapsed if elapsed > 0 else 0
+                pct      = round(d / src_total * 100, 1) if src_total else 0
+                err_rate = round(e / max(d, 1) * 100, 1)
+                eta      = _fmt_eta(src_total, d, elapsed)
+                elapsed_str = f"{int(elapsed // 60)}хв {int(elapsed % 60)}с"
+                law_hint = f" | останній={ll}" if ll else ""
+                _log(
+                    f"[qdrant patch] {label}{src} {d}/{src_total} ({pct}%)"
+                    f" | updates={u} skip={sk} err={e}({err_rate}%)"
+                    f" | {speed:.1f} laws/s | {elapsed_str} | {eta}{law_hint}"
+                )
 
-                    upd, err, stopped = fut.result()
-                    if stopped:
-                        continue
+            # Heartbeat thread — гарантує лог кожні LOG_INTERVAL_SEC с
+            hb_stop = threading.Event()
+            def _heartbeat():
+                while not hb_stop.wait(timeout=LOG_INTERVAL_SEC):
+                    now = time.monotonic()
+                    if now - last_log_at[0] >= LOG_INTERVAL_SEC - 1:
+                        last_log_at[0] = now
+                        _do_log("⏳ ")
+            hb_thread = threading.Thread(target=_heartbeat, daemon=True)
+            hb_thread.start()
 
-                    with _counter_lock:
-                        done    += 1
-                        updated += upd
-                        errors  += err
-                        if upd == 0 and err == 0:
-                            skipped += 1
+            try:
+                with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                    futures = {
+                        pool.submit(_patch_one, mf, target_colls): mf
+                        for mf in meta_files
+                    }
+                    for fut in as_completed(futures):
+                        if _stop_event and _stop_event.is_set():
+                            pool.shutdown(wait=False, cancel_futures=True)
+                            hb_stop.set()
+                            with _counter_lock:
+                                d = counters["done"]
+                            _log(f"[qdrant patch] ⏹ {src}: зупинено на {d}/{src_total}", "warning")
+                            state.update({"running": False, "phase": "stopped"})
+                            _save_state(state)
+                            return
 
-                    if done % LOG_EVERY == 0 or done == src_total:
-                        elapsed  = time.monotonic() - src_start
-                        speed    = done / elapsed if elapsed > 0 else 0
-                        eta_sec  = (src_total - done) / speed if speed > 0 else 0
-                        eta_min  = int(eta_sec // 60)
-                        eta_s    = int(eta_sec % 60)
-                        pct      = round(done / src_total * 100)
-                        err_rate = round(errors / max(done, 1) * 100, 1)
-                        _log(
-                            f"[qdrant patch] {src} {done}/{src_total} ({pct}%)"
-                            f" | updates={updated} skip={skipped} err={errors}({err_rate}%)"
-                            f" | {speed:.1f} laws/s | ETA {eta_min}хв {eta_s}с"
-                        )
+                        upd, err, stopped, law_id = fut.result()
+                        if stopped:
+                            continue
+
+                        with _counter_lock:
+                            counters["done"]    += 1
+                            counters["updated"] += upd
+                            counters["errors"]  += err
+                            if upd == 0 and err == 0:
+                                counters["skipped"] += 1
+                            if law_id:
+                                counters["last_law"] = law_id
+
+                        # Time-based log (fires from main thread when heartbeat missed)
+                        now = time.monotonic()
+                        if now - last_log_at[0] >= LOG_INTERVAL_SEC:
+                            last_log_at[0] = now
+                            _do_log()
+
+            finally:
+                hb_stop.set()
+                hb_thread.join(timeout=2)
+
+            # Final summary for this source
+            with _counter_lock:
+                updated = counters["updated"]
+                errors  = counters["errors"]
+                skipped = counters["skipped"]
 
             elapsed_total = time.monotonic() - src_start
             _log(
-                f"[qdrant patch] ✓ {src.upper()} завершено за {int(elapsed_total//60)}хв {int(elapsed_total%60)}с"
+                f"[qdrant patch] ✅ {src.upper()} завершено за"
+                f" {int(elapsed_total // 60)}хв {int(elapsed_total % 60)}с"
                 f" | updates={updated} | skip={skipped} | errors={errors}"
             )
             total_updated += updated
@@ -227,13 +286,13 @@ def run_update_qdrant(
         })
         _save_state(state)
         _log(
-            f"[qdrant patch] Завершено: файлів={total_files}"
+            f"[qdrant patch] 🏁 Завершено: файлів={total_files}"
             f" | payload_updates={total_updated}"
             f" | пропущено={total_skipped} | помилок={total_errors}"
         )
 
     except Exception as e:
-        _log(f"[qdrant patch] КРИТИЧНА ПОМИЛКА: {e}", "error")
+        _log(f"[qdrant patch] 💥 КРИТИЧНА ПОМИЛКА: {e}", "error")
         state.update({"running": False, "error": str(e)})
         _save_state(state)
         raise
