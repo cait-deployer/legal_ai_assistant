@@ -1,20 +1,22 @@
 """
 URAI — Патч Qdrant payload з збагачених .meta.json (без переіндексації).
 
-Читає rada_* поля з .meta.json → set_payload() на всі chunks документа.
-Торкає тільки metadata, вектори не змінюються.
+Архітектура v2 (швидка):
+  1. Завантажуємо всі збагачені payload-и в пам'ять (law_id → dict)
+  2. Для кожної колекції ПАРАЛЕЛЬНО:
+     а. scroll() — один прохід по всіх точках → будуємо law_id → [point_ids]
+     б. set_payload(points=[ids], payload=...) — оновлення по ID (швидко, без скану)
+  Замість 75k × 26 = 2M filter-сканів: 26 scroll-проходів + ~1M ID-оновлень.
 
 Запуск вручну:
   python update_qdrant_meta.py [--source rada|kmu|all]
-
-Запуск з сервера:
-  run_update_qdrant(log_callback, stop_event, sources)
 """
 
 import argparse
 import json
 import threading
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -29,8 +31,9 @@ from qdrant_storage import (
 RAW_BASE   = Path("/root/laws_raw")
 STATE_FILE = Path(__file__).parent / "update_qdrant_meta_state.json"
 
-WORKERS = 8  # parallel law patchers
-LOG_INTERVAL_SEC = 30  # гарантований лог кожні 30 секунд
+COLL_WORKERS     = 8   # паралельних колекцій одночасно
+SCROLL_BATCH     = 500 # точок за один scroll()
+LOG_INTERVAL_SEC = 30
 
 _RADA_ALL = RADA_COLLECTIONS + RADA_V2_COLLECTIONS
 _KMU_ALL  = ["laws_kmu", "laws_kmu_v2"]
@@ -53,7 +56,6 @@ ENRICH_FIELDS = [
 _stop_event: threading.Event | None = None
 _log_fn = print
 _lock   = threading.Lock()
-_counter_lock = threading.Lock()
 
 
 def _log(msg: str, level: str = "info") -> None:
@@ -86,49 +88,107 @@ def _existing_collections() -> set[str]:
         return set()
 
 
-def _patch_one(meta_path: Path, target_colls: list[str]) -> tuple[int, int, bool, str]:
+def _load_enriched_payloads(sources: list[str]) -> dict[str, dict]:
+    """Завантажує всі збагачені .meta.json в пам'ять: law_id → payload dict."""
+    enriched: dict[str, dict] = {}
+    for src in sources:
+        src_dir = RAW_BASE / src
+        if not src_dir.exists():
+            continue
+        for mf in src_dir.glob("*.meta.json"):
+            try:
+                meta = json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if "rada_is_dead" not in meta:
+                continue  # не збагачений — пропускаємо
+            law_id = mf.name[: -len(".meta.json")]
+            enriched[law_id] = {
+                k: meta[k]
+                for k in ENRICH_FIELDS
+                if k in meta and meta[k] is not None
+            }
+    return enriched
+
+
+def _patch_collection(
+    coll: str,
+    enriched: dict[str, dict],
+    stop_event: threading.Event | None,
+) -> dict:
     """
-    Patch all chunks of one law across all target collections.
-    Returns (updates, errors, skipped, law_id).
+    Один прохід по колекції:
+      1. scroll() → будує law_id → [point_ids]
+      2. set_payload(points=[ids]) для кожного закону
+    Повертає статистику.
     """
-    if _stop_event and _stop_event.is_set():
-        return 0, 0, True, ""
+    client = get_client()
+    start  = time.monotonic()
 
-    nreg = meta_path.name[: -len(".meta.json")]
+    # ── Фаза 1: scroll ────────────────────────────────────────────────────────
+    law_to_ids: dict[str, list] = defaultdict(list)
+    total_points = 0
+    offset = None
 
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        _log(f"[qdrant patch] ❌ Не вдалося прочитати {meta_path.name}: {e}", "error")
-        return 0, 1, False, nreg
-
-    if "rada_is_dead" not in meta:
-        return 0, 0, False, nreg  # not enriched yet — skip silently
-
-    payload = {k: meta[k] for k in ENRICH_FIELDS if k in meta and meta[k] is not None}
-    law_filter = Filter(must=[FieldCondition(key="law_id", match=MatchValue(value=nreg))])
-
-    client  = get_client()
-    updates = errors = 0
-    for coll in target_colls:
+    while True:
+        if stop_event and stop_event.is_set():
+            return {"coll": coll, "stopped": True}
         try:
-            client.set_payload(collection_name=coll, payload=payload, points=law_filter)
-            updates += 1
+            results, offset = client.scroll(
+                collection_name=coll,
+                limit=SCROLL_BATCH,
+                offset=offset,
+                with_payload=["law_id"],
+                with_vectors=False,
+            )
         except Exception as e:
-            _log(f"[qdrant patch] ❌ ПОМИЛКА {coll}/{nreg}: {e}", "error")
+            _log(f"[qdrant patch] ❌ scroll {coll}: {e}", "error")
+            return {"coll": coll, "error": str(e)}
+
+        for point in results:
+            lid = (point.payload or {}).get("law_id", "")
+            if lid and lid in enriched:
+                law_to_ids[lid].append(point.id)
+            total_points += 1
+
+        if offset is None:
+            break
+
+    scroll_time = time.monotonic() - start
+    n_to_patch  = len(law_to_ids)
+    _log(
+        f"[qdrant patch] 🔍 {coll}: {total_points:,} точок прогорнуто за"
+        f" {scroll_time:.1f}с | {n_to_patch} законів для патчу"
+    )
+
+    if not law_to_ids:
+        return {"coll": coll, "updated": 0, "errors": 0, "skipped": 0, "points": total_points}
+
+    # ── Фаза 2: set_payload по point IDs ─────────────────────────────────────
+    updated = errors = 0
+    for law_id, ids in law_to_ids.items():
+        if stop_event and stop_event.is_set():
+            return {"coll": coll, "stopped": True}
+        try:
+            client.set_payload(
+                collection_name=coll,
+                payload=enriched[law_id],
+                points=ids,
+            )
+            updated += 1
+        except Exception as e:
+            _log(f"[qdrant patch] ❌ set_payload {coll}/{law_id}: {e}", "error")
             errors += 1
 
-    return updates, errors, False, nreg
-
-
-def _fmt_eta(src_total: int, done: int, elapsed: float) -> str:
-    if done == 0:
-        return "ETA невідомо"
-    speed = done / elapsed
-    eta_sec = (src_total - done) / speed
-    if eta_sec < 60:
-        return f"ETA ~{int(eta_sec)}с"
-    return f"ETA ~{int(eta_sec // 60)}хв {int(eta_sec % 60)}с"
+    elapsed = time.monotonic() - start
+    _log(
+        f"[qdrant patch] ✅ {coll}: {updated} законів оновлено"
+        f" | errors={errors} | {elapsed:.1f}с всього"
+    )
+    return {
+        "coll": coll, "updated": updated, "errors": errors,
+        "skipped": n_to_patch - updated - errors, "points": total_points,
+    }
 
 
 def run_update_qdrant(
@@ -152,150 +212,123 @@ def run_update_qdrant(
     })
     _save_state(state)
 
-    existing      = _existing_collections()
-    total_updated = total_errors = total_skipped = total_files = 0
+    # ── Крок 1: завантажити всі збагачені payload-и в RAM ────────────────────
+    _log("[qdrant patch] 📂 Завантажую збагачені .meta.json в пам'ять...")
+    t0 = time.monotonic()
+    enriched = _load_enriched_payloads(sources)
+    _log(
+        f"[qdrant patch] ✔ Завантажено {len(enriched):,} збагачених законів"
+        f" за {time.monotonic() - t0:.1f}с"
+    )
 
-    try:
-        for src in sources:
-            src_dir = RAW_BASE / src
-            if not src_dir.exists():
-                _log(f"[qdrant patch] ⚠️  Директорія не знайдена: {src_dir}", "warning")
-                continue
-
-            target_colls = [c for c in SOURCES_COLLECTIONS.get(src, []) if c in existing]
-            if not target_colls:
-                _log(f"[qdrant patch] ⚠️  {src}: немає колекцій у Qdrant, пропускаємо", "warning")
-                continue
-
-            meta_files = sorted(src_dir.glob("*.meta.json"))
-            src_total  = len(meta_files)
-            total_files += src_total
-
-            _log(
-                f"[qdrant patch] ▶ {src.upper()}: {src_total} файлів"
-                f" | колекцій={len(target_colls)} | workers={WORKERS}"
-            )
-            _log(f"[qdrant patch]   колекції: {', '.join(target_colls)}")
-            _log(
-                f"[qdrant patch]   на закон робиться {len(target_colls)} set_payload() викликів"
-                f" | всього ~{src_total * len(target_colls):,} Qdrant операцій"
-            )
-            _log(f"[qdrant patch]   прогрес кожні {LOG_INTERVAL_SEC}с автоматично ━━━")
-
-            # Shared counters (accessed by heartbeat thread + main loop)
-            counters = {"done": 0, "updated": 0, "errors": 0, "skipped": 0, "last_law": ""}
-            src_start    = time.monotonic()
-            last_log_at  = [src_start]  # mutable for heartbeat closure
-
-            def _do_log(label: str = "") -> None:
-                with _counter_lock:
-                    d  = counters["done"]
-                    u  = counters["updated"]
-                    e  = counters["errors"]
-                    sk = counters["skipped"]
-                    ll = counters["last_law"]
-                elapsed  = time.monotonic() - src_start
-                speed    = d / elapsed if elapsed > 0 else 0
-                pct      = round(d / src_total * 100, 1) if src_total else 0
-                err_rate = round(e / max(d, 1) * 100, 1)
-                eta      = _fmt_eta(src_total, d, elapsed)
-                elapsed_str = f"{int(elapsed // 60)}хв {int(elapsed % 60)}с"
-                law_hint = f" | останній={ll}" if ll else ""
-                _log(
-                    f"[qdrant patch] {label}{src} {d}/{src_total} ({pct}%)"
-                    f" | updates={u} skip={sk} err={e}({err_rate}%)"
-                    f" | {speed:.1f} laws/s | {elapsed_str} | {eta}{law_hint}"
-                )
-
-            # Heartbeat thread — гарантує лог кожні LOG_INTERVAL_SEC с
-            hb_stop = threading.Event()
-            def _heartbeat():
-                while not hb_stop.wait(timeout=LOG_INTERVAL_SEC):
-                    now = time.monotonic()
-                    if now - last_log_at[0] >= LOG_INTERVAL_SEC - 1:
-                        last_log_at[0] = now
-                        _do_log("⏳ ")
-            hb_thread = threading.Thread(target=_heartbeat, daemon=True)
-            hb_thread.start()
-
-            try:
-                with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-                    futures = {
-                        pool.submit(_patch_one, mf, target_colls): mf
-                        for mf in meta_files
-                    }
-                    for fut in as_completed(futures):
-                        if _stop_event and _stop_event.is_set():
-                            pool.shutdown(wait=False, cancel_futures=True)
-                            hb_stop.set()
-                            with _counter_lock:
-                                d = counters["done"]
-                            _log(f"[qdrant patch] ⏹ {src}: зупинено на {d}/{src_total}", "warning")
-                            state.update({"running": False, "phase": "stopped"})
-                            _save_state(state)
-                            return
-
-                        upd, err, stopped, law_id = fut.result()
-                        if stopped:
-                            continue
-
-                        with _counter_lock:
-                            counters["done"]    += 1
-                            counters["updated"] += upd
-                            counters["errors"]  += err
-                            if upd == 0 and err == 0:
-                                counters["skipped"] += 1
-                            if law_id:
-                                counters["last_law"] = law_id
-
-                        # Time-based log (fires from main thread when heartbeat missed)
-                        now = time.monotonic()
-                        if now - last_log_at[0] >= LOG_INTERVAL_SEC:
-                            last_log_at[0] = now
-                            _do_log()
-
-            finally:
-                hb_stop.set()
-                hb_thread.join(timeout=2)
-
-            # Final summary for this source
-            with _counter_lock:
-                updated = counters["updated"]
-                errors  = counters["errors"]
-                skipped = counters["skipped"]
-
-            elapsed_total = time.monotonic() - src_start
-            _log(
-                f"[qdrant patch] ✅ {src.upper()} завершено за"
-                f" {int(elapsed_total // 60)}хв {int(elapsed_total % 60)}с"
-                f" | updates={updated} | skip={skipped} | errors={errors}"
-            )
-            total_updated += updated
-            total_errors  += errors
-            total_skipped += skipped
-
-        state.update({
-            "running":      False,
-            "completed_at": datetime.utcnow().isoformat(),
-            "stats": {
-                "total_files":   total_files,
-                "updated_pts":   total_updated,
-                "skipped":       total_skipped,
-                "errors":        total_errors,
-            },
-        })
+    if not enriched:
+        _log("[qdrant patch] ⚠️  Немає збагачених законів — запусти спочатку Фазу 1–3", "warning")
+        state.update({"running": False})
         _save_state(state)
+        return
+
+    # ── Крок 2: визначити колекції ────────────────────────────────────────────
+    existing = _existing_collections()
+    all_colls: list[str] = []
+    for src in sources:
+        colls = [c for c in SOURCES_COLLECTIONS.get(src, []) if c in existing]
+        all_colls.extend(colls)
+
+    if not all_colls:
+        _log("[qdrant patch] ⚠️  Немає колекцій у Qdrant", "warning")
+        state.update({"running": False})
+        _save_state(state)
+        return
+
+    _log(
+        f"[qdrant patch] 🚀 Старт: {len(all_colls)} колекцій"
+        f" | {COLL_WORKERS} паралельних воркерів"
+        f" | scroll_batch={SCROLL_BATCH}"
+    )
+    _log(f"[qdrant patch]   колекції: {', '.join(all_colls)}")
+    _log(
+        f"[qdrant patch]   нова архітектура: scroll_once_per_coll + set_payload_by_ids"
+        f" (замість {len(enriched):,} × {len(all_colls)} filter-сканів)"
+    )
+
+    # ── Крок 3: паралельна обробка колекцій ──────────────────────────────────
+    run_start      = time.monotonic()
+    total_updated  = total_errors = total_points = 0
+    done_colls     = 0
+    last_log_at    = [run_start]
+
+    def _progress_log(label: str = "") -> None:
+        elapsed = time.monotonic() - run_start
+        pct     = round(done_colls / len(all_colls) * 100, 1) if all_colls else 0
         _log(
-            f"[qdrant patch] 🏁 Завершено: файлів={total_files}"
-            f" | payload_updates={total_updated}"
-            f" | пропущено={total_skipped} | помилок={total_errors}"
+            f"[qdrant patch] {label}{done_colls}/{len(all_colls)} колекцій ({pct}%)"
+            f" | updated={total_updated:,} pts | errors={total_errors}"
+            f" | elapsed={int(elapsed // 60)}хв {int(elapsed % 60)}с"
         )
 
-    except Exception as e:
-        _log(f"[qdrant patch] 💥 КРИТИЧНА ПОМИЛКА: {e}", "error")
-        state.update({"running": False, "error": str(e)})
-        _save_state(state)
-        raise
+    hb_stop = threading.Event()
+    def _heartbeat():
+        while not hb_stop.wait(timeout=LOG_INTERVAL_SEC):
+            now = time.monotonic()
+            if now - last_log_at[0] >= LOG_INTERVAL_SEC - 1:
+                last_log_at[0] = now
+                _progress_log("⏳ ")
+    hb = threading.Thread(target=_heartbeat, daemon=True)
+    hb.start()
+
+    try:
+        with ThreadPoolExecutor(max_workers=COLL_WORKERS) as pool:
+            futures = {
+                pool.submit(_patch_collection, coll, enriched, stop_event): coll
+                for coll in all_colls
+            }
+            for fut in as_completed(futures):
+                if stop_event and stop_event.is_set():
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    _log("[qdrant patch] ⏹ Зупинено", "warning")
+                    state.update({"running": False, "phase": "stopped"})
+                    _save_state(state)
+                    return
+
+                res = fut.result()
+                if res.get("stopped"):
+                    continue
+                if res.get("error"):
+                    _log(f"[qdrant patch] ❌ Колекція {res['coll']} завершилась з помилкою: {res['error']}", "error")
+
+                with _lock:
+                    done_colls    += 1
+                    total_updated += res.get("updated", 0)
+                    total_errors  += res.get("errors", 0)
+                    total_points  += res.get("points", 0)
+
+                now = time.monotonic()
+                if now - last_log_at[0] >= LOG_INTERVAL_SEC:
+                    last_log_at[0] = now
+                    _progress_log()
+
+    finally:
+        hb_stop.set()
+        hb.join(timeout=2)
+
+    elapsed_total = time.monotonic() - run_start
+    state.update({
+        "running":      False,
+        "completed_at": datetime.utcnow().isoformat(),
+        "stats": {
+            "collections":   len(all_colls),
+            "total_points":  total_points,
+            "updated_laws":  total_updated,
+            "errors":        total_errors,
+        },
+    })
+    _save_state(state)
+    _log(
+        f"[qdrant patch] 🏁 Завершено за {int(elapsed_total // 60)}хв {int(elapsed_total % 60)}с"
+        f" | колекцій={len(all_colls)}"
+        f" | оновлено законів={total_updated:,}"
+        f" | помилок={total_errors}"
+    )
 
 
 if __name__ == "__main__":
