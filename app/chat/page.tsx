@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, Suspense } from 'react';
+import { useEffect, useRef, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { mutate } from 'swr';
 import { Textarea } from '@/components/ui/textarea';
@@ -155,6 +155,41 @@ function ChatPage() {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const sessionStartRef = useRef<number>(Date.now());
     const newChatInProgressRef = useRef(false);
+
+    // Typewriter effect refs
+    const twQueueRef    = useRef('');   // chars waiting to be shown
+    const twDisplayRef  = useRef('');   // chars already shown
+    const twTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const twMsgIdRef    = useRef<number | string | null>(null);
+
+    // drainQueue: виводить символи з черги по 1 (або по кілька при відставанні)
+    // useCallback з [] — стабільна функція, всі залежності через refs
+    const drainQueue = useCallback(() => {
+        if (!twQueueRef.current) { twTimerRef.current = null; return; }
+        const lag = twQueueRef.current.length;
+        const n   = lag > 120 ? 6 : lag > 40 ? 3 : 1;   // catch-up if queue is large
+        twDisplayRef.current += twQueueRef.current.slice(0, n);
+        twQueueRef.current    = twQueueRef.current.slice(n);
+        setMessages(prev => prev.map(m =>
+            m.id === twMsgIdRef.current ? { ...m, text: twDisplayRef.current } : m
+        ));
+        const delay = twQueueRef.current.length > 120 ? 6 : 18;
+        twTimerRef.current = setTimeout(drainQueue, delay);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // flushTypewriter: миттєво виводить залишок черги (викликається коли citations прийшли)
+    const flushTypewriter = useCallback(() => {
+        if (twTimerRef.current) { clearTimeout(twTimerRef.current); twTimerRef.current = null; }
+        if (twQueueRef.current) {
+            twDisplayRef.current += twQueueRef.current;
+            twQueueRef.current = '';
+            setMessages(prev => prev.map(m =>
+                m.id === twMsgIdRef.current ? { ...m, text: twDisplayRef.current } : m
+            ));
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const LOADING_MESSAGES = [
         'Шукаю відповідний закон...',
@@ -357,12 +392,14 @@ function ChatPage() {
                                 if (firstToken) {
                                     firstToken = false;
                                     setIsLoading(false);
-                                    accText = token;
-                                    setMessages(prev => [...prev, { id: STREAMING_ID, role: 'ai', text: accText, references: [] }]);
-                                } else {
-                                    accText += token;
-                                    setMessages(prev => prev.map(m => m.id === STREAMING_ID ? { ...m, text: accText } : m));
+                                    twDisplayRef.current = '';
+                                    twQueueRef.current = '';
+                                    twMsgIdRef.current = STREAMING_ID;
+                                    setMessages(prev => [...prev, { id: STREAMING_ID, role: 'ai', text: '', references: [] }]);
                                 }
+                                accText += token;
+                                twQueueRef.current += token;
+                                if (!twTimerRef.current) twTimerRef.current = setTimeout(drainQueue, 18);
                             } else if (currentEvent === 'citations') {
                                 finalPayload = parsed as unknown as FinalPayload;
                                 const answer = finalPayload.answer || accText;
@@ -376,6 +413,7 @@ function ChatPage() {
                                         templates: finalPayload!.templates ?? [],
                                     }]);
                                 } else {
+                                    flushTypewriter();
                                     setMessages(prev => prev.map(m => m.id === STREAMING_ID ? {
                                         ...m, text: answer,
                                         references: finalPayload!.references ?? [],
