@@ -3529,10 +3529,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if _is_russian(question):
             try:
                 _tr_model = GenerativeModel(_model_name)
-                _tr_resp = await __import__("asyncio").to_thread(
-                    _tr_model.generate_content,
-                    f"Переклади на українську мову. Відповідь — тільки переклад без пояснень:\n\n{question}",
-                    generation_config=GenerationConfig(temperature=0.0, max_output_tokens=300),
+                _tr_resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        _tr_model.generate_content,
+                        f"Переклади на українську мову. Відповідь — тільки переклад без пояснень:\n\n{question}",
+                        generation_config=GenerationConfig(temperature=0.0, max_output_tokens=300),
+                    ),
+                    timeout=8.0,
                 )
                 search_question = _tr_resp.text.strip() or question
                 logger.info("RU→UA: %s → %s", question[:60], search_question[:60])
@@ -3565,10 +3568,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 except Exception:
                     _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=2500)
                 _rewrite_examples = settings_cache.get("rewrite_examples", "")
-                resp = await _asyncio.to_thread(
-                    _m.generate_content,
-                    f"{_rewrite_examples}\n{q} →",
-                    generation_config=_rw_cfg,
+                resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        _m.generate_content,
+                        f"{_rewrite_examples}\n{q} →",
+                        generation_config=_rw_cfg,
+                    ),
+                    timeout=8.0,
                 )
                 # Debug: log all parts to understand model output
                 try:
@@ -3602,9 +3608,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 logger.info("REWRITE failed: %s", e)
                 return None
 
+        async def _embed_query_with_timeout(text: str):
+            return await _asyncio.wait_for(
+                _asyncio.to_thread(_embed_v2.embed_query, text),
+                timeout=15.0,
+            )
+
         # Embed оригінального запиту + rewrite паралельно
         query_vector, rewritten_query = await _asyncio.gather(
-            _asyncio.to_thread(_embed_v2.embed_query, search_question),
+            _embed_query_with_timeout(search_question),
             _rewrite_query(search_question),
         )
         hypothetical_text = rewritten_query  # alias для title boost keywords
