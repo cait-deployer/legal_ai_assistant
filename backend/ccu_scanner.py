@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 import httpx
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from rada_to_supabase import embeddings
+import embed_v2
 from qdrant_storage import upload_to_qdrant, get_existing_law_ids
 
 # Семафор обмежує одночасні HTTP-запити до ccu.gov.ua (не більше 2 за раз)
@@ -302,19 +302,11 @@ def process_ccu_doc(
     scraped_at  = datetime.now(timezone.utc).isoformat()
     source_name = f"КСУ {doc_type}: {doc['doc_num']}"
 
-    # Batch embed — по 5 чанків за раз (уникаємо ліміту токенів Google API)
-    vectors: list = []
     try:
-        for b in range(0, len(chunks), 5):
-            vectors.extend(embeddings.embed_documents(chunks[b:b + 5]))
+        vectors = embed_v2.embed_documents(chunks, task="RETRIEVAL_DOCUMENT")
     except Exception as e:
-        print(f"⚠️ Batch embed помилка, перемикаємось на поштучні: {e}")
-        vectors = []
-        for chunk in chunks:
-            try:
-                vectors.append(embeddings.embed_query(chunk))
-            except Exception:
-                vectors.append(None)
+        print(f"⚠️ CCU embed error: {e}")
+        return False
 
     for i, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
         if vector is None:
@@ -334,11 +326,11 @@ def process_ccu_doc(
         }
         upload_to_qdrant(
             chunk_text, metadata, vector,
-            collection_name="laws_ccu",
+            collection_name="laws_ccu_v2",
             session_id=session_id,
         )
 
-    print(f"✅ КСУ '{doc['doc_num']}' ({doc_type}) → laws_ccu ({len(chunks)} чанків)")
+    print(f"✅ КСУ '{doc['doc_num']}' ({doc_type}) → laws_ccu_v2 ({len(chunks)} чанків)")
     return True
 
 

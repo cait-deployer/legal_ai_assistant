@@ -2,7 +2,7 @@
 kmu_scanner.py — Скрапер НПА Кабінету Міністрів України.
 Джерело: https://zakon.rada.gov.ua/laws/main/o2
 (Документи видавника "Кабінет Міністрів України" — 88 000+ НПА)
-Колекція: laws_kmu
+Колекція: laws_kmu_v2
 """
 import time
 import threading
@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from langchain_text_splitters import MarkdownTextSplitter
-from rada_to_supabase import embeddings
+import embed_v2
 from qdrant_storage import upload_to_qdrant, get_existing_law_ids
 
 # Секція КМУ на zakon.rada.gov.ua: /laws/main/o2 = Документи видавника КМУ
@@ -73,16 +73,11 @@ def process_kmu_doc(
     # Title-prefix: embedding знає назву документу в кожному чанку
     prefixed = [f"{title}\n\n{chunk}" for chunk in chunks]
 
-    vectors: list = []
     try:
-        for b in range(0, len(prefixed), EMBED_BATCH):
-            vectors.extend(embeddings.embed_documents(prefixed[b:b + EMBED_BATCH]))
+        vectors = embed_v2.embed_documents(prefixed, task="RETRIEVAL_DOCUMENT")
     except Exception as e:
-        print(f"⚠️ KMU embed fallback: {e}")
-        vectors = []
-        for pc in prefixed:
-            try:    vectors.append(embeddings.embed_query(pc))
-            except: vectors.append(None)
+        print(f"⚠️ KMU embed error: {e}")
+        return False
 
     for i, (chunk_text, vector) in enumerate(zip(prefixed, vectors)):
         if vector is None:
@@ -103,11 +98,11 @@ def process_kmu_doc(
                 "chunk_index":   i,
             },
             vector,
-            collection_name="laws_kmu",
+            collection_name="laws_kmu_v2",
             session_id=session_id,
         )
 
-    print(f"✅ KMU '{title[:60]}' → laws_kmu ({len(chunks)} ч.)")
+    print(f"✅ KMU '{title[:60]}' → laws_kmu_v2 ({len(chunks)} ч.)")
     return True
 
 

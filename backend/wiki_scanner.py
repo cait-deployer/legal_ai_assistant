@@ -4,7 +4,8 @@ import httpx
 import time
 import re
 from datetime import datetime, timezone
-from rada_to_supabase import embeddings, upload_chunk_to_supabase, delete_old_law_chunks
+import embed_v2
+from qdrant_storage import upload_to_qdrant, delete_law_chunks as delete_old_law_chunks
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Використовуємо API поінт для MediaWiki
@@ -121,8 +122,15 @@ def scrape_wiki_article(url, title, session_id=None, existing_ids=None):
         chunks = text_splitter.split_text(text)
         scraped_at = datetime.now(timezone.utc).isoformat()
 
-        for i, chunk_text in enumerate(chunks):
-            vector = embeddings.embed_query(chunk_text)
+        try:
+            vectors = embed_v2.embed_documents(chunks, task="RETRIEVAL_DOCUMENT")
+        except Exception as e:
+            print(f"⚠️ Wiki embed error: {e}")
+            return False
+
+        for i, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
+            if vector is None:
+                continue
             metadata = {
                 "source": f"Wiki: {title}",
                 "law_id": law_id,
@@ -134,14 +142,13 @@ def scrape_wiki_article(url, title, session_id=None, existing_ids=None):
                 "scraped_at": scraped_at,
                 "chunk_index": i,
             }
-            upload_chunk_to_supabase(
+            upload_to_qdrant(
                 chunk_text, metadata, vector,
+                collection_name="laws_wiki_v2",
                 session_id=session_id,
-                collection_name="laws_wiki",   # ← правильна колекція
             )
-            time.sleep(0.2)
 
-        print(f"✅ Wiki '{title}' → laws_wiki ({len(chunks)} чанків)")
+        print(f"✅ Wiki '{title}' → laws_wiki_v2 ({len(chunks)} чанків)")
         return True
 
     except Exception as e:

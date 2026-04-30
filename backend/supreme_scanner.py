@@ -4,8 +4,8 @@ import tempfile
 from bs4 import BeautifulSoup
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from rada_to_supabase import embeddings, upload_chunk_to_supabase
-from qdrant_storage import get_existing_law_ids
+import embed_v2
+from qdrant_storage import upload_to_qdrant, get_existing_law_ids
 from datetime import datetime
 import time
 
@@ -101,8 +101,17 @@ def process_supreme_pdf(review_url, title, session_id=None, existing_ids=None):
         chunks = splitter.split_documents(pages)
 
         scraped_at = datetime.now().isoformat()
-        for i, chunk in enumerate(chunks):
-            vector = embeddings.embed_query(chunk.page_content)
+        chunk_texts = [c.page_content for c in chunks]
+        try:
+            vectors = embed_v2.embed_documents(chunk_texts, task="RETRIEVAL_DOCUMENT")
+        except Exception as e:
+            print(f"⚠️ Supreme embed error: {e}")
+            os.remove(tmp_path)
+            return
+
+        for i, (chunk_text, vector) in enumerate(zip(chunk_texts, vectors)):
+            if vector is None:
+                continue
             metadata = {
                 "source": title,
                 "law_id": law_id,
@@ -112,14 +121,14 @@ def process_supreme_pdf(review_url, title, session_id=None, existing_ids=None):
                 "scraped_at": scraped_at,
                 "chunk_index": i,
             }
-            upload_chunk_to_supabase(
-                chunk.page_content, metadata, vector,
+            upload_to_qdrant(
+                chunk_text, metadata, vector,
+                collection_name="laws_supreme_v2",
                 session_id=session_id,
-                collection_name="laws_supreme",
             )
 
         os.remove(tmp_path)
-        print(f"✅ Огляд '{title}' додано в базу ({len(chunks)} чанків).")
+        print(f"✅ Огляд '{title}' → laws_supreme_v2 ({len(chunks)} чанків).")
     except Exception as e:
         print(f"❌ Помилка обробки PDF {title}: {e}")
 

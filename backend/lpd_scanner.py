@@ -26,7 +26,7 @@ from html.parser import HTMLParser
 
 import httpx
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from rada_to_supabase import embeddings
+import embed_v2
 from qdrant_storage import upload_to_qdrant, get_existing_law_ids
 
 # ── Константи ─────────────────────────────────────────────────────────────────
@@ -175,21 +175,14 @@ def process_position(
     scraped_at  = datetime.now(timezone.utc).isoformat()
     source_name = f"Правова позиція {court_abbr}: {title[:80]}" if title else f"Правова позиція {court_abbr} #{pos_id}"
 
-    # ── Ембедінг батчами по 5 ─────────────────────────────────────────────────
-    vectors: list = []
+    # ── Ембедінг v2 ───────────────────────────────────────────────────────────
     try:
-        for b in range(0, len(chunks), 5):
-            vectors.extend(embeddings.embed_documents(chunks[b : b + 5]))
+        vectors = embed_v2.embed_documents(chunks, task="RETRIEVAL_DOCUMENT")
     except Exception as e:
-        print(f"⚠️  LPD #{pos_id} batch embed → поштучно: {e}")
-        vectors = []
-        for chunk in chunks:
-            try:
-                vectors.append(embeddings.embed_query(chunk))
-            except Exception:
-                vectors.append(None)
+        print(f"⚠️  LPD #{pos_id} embed error: {e}")
+        return False
 
-    # ── Запис у Qdrant ─────────────────────────────────────────────────────────
+    # ── Запис у Qdrant v2 ─────────────────────────────────────────────────────
     for i, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
         if vector is None:
             continue
@@ -213,11 +206,11 @@ def process_position(
         }
         upload_to_qdrant(
             chunk_text, metadata, vector,
-            collection_name="laws_positions",
+            collection_name="laws_positions_v2",
             session_id=session_id,
         )
 
-    print(f"✅ LPD #{pos_id} ({court_abbr}) → laws_positions ({len(chunks)} чанків)")
+    print(f"✅ LPD #{pos_id} ({court_abbr}) → laws_positions_v2 ({len(chunks)} чанків)")
     return True
 
 

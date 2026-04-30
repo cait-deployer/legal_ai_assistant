@@ -3833,9 +3833,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             ).lower()
             if not any(s in _src for s in _kw_stems):
                 continue
-            # Динамічний score: більше збіглих стемів → вищий score (0.25–0.55)
+            # Динамічний score: більше збіглих стемів → вищий score (0.25–0.60)
             _matched = sum(1 for s in _kw_stems if s in _src)
-            r["similarity"] = 0.25 + 0.30 * (_matched / max(len(_kw_stems), 1))
+            _bm25_score = 0.25 + 0.35 * (_matched / max(len(_kw_stems), 1))
+            # KMU і positions keyword matches буст: ці колекції часто мають табличний текст
+            # що погано матчиться векторно, але точно відповідає по ключових словах
+            if r.get("_collection") in ("laws_kmu_v2", "laws_positions_v2"):
+                _bm25_score = min(_bm25_score + 0.20, 0.72)
+            r["similarity"] = _bm25_score
             results.append(r)
             _existing_ids.add(_key)
             _kw_added += 1
