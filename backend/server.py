@@ -3574,6 +3574,36 @@ def _term_overlap_score(result: dict, terms: list[str]) -> int:
     return sum(1 for term in terms if term in haystack)
 
 
+def _authority_score(result: dict) -> float:
+    col = result.get("_collection", "")
+    meta = result.get("out_metadata", {})
+    doc_type = meta.get("rada_doc_type") or meta.get("doc_type", "")
+
+    score = 1.0
+    if col == "laws_kmu_v2":
+        score = 1.18
+    elif col.startswith("rada_"):
+        score = 1.12
+    elif col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2"):
+        score = 1.03
+    elif col == "laws_zir_v2":
+        score = 0.96
+    elif col == "laws_wiki_v2":
+        score = 0.90
+
+    type_boost = {
+        "Кодекс": 0.08,
+        "Закон": 0.07,
+        "Постанова": 0.06,
+        "Наказ": 0.04,
+        "Розпорядження": 0.03,
+        "Лист": -0.08,
+        "Роз'яснення": -0.05,
+        "Інформаційний лист": -0.08,
+    }.get(doc_type, 0.0)
+    return score + type_boost
+
+
 def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs: int) -> list[dict]:
     terms = _query_terms(query_text)
     if len(terms) < 2:
@@ -3584,7 +3614,14 @@ def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs:
     if len(matched) < 2:
         return results[:max_docs]
 
-    matched.sort(key=lambda item: (item[0], item[1].get("similarity", 0.0)), reverse=True)
+    matched.sort(
+        key=lambda item: (
+            item[0],
+            _authority_score(item[1]),
+            item[1].get("similarity", 0.0),
+        ),
+        reverse=True,
+    )
     matched_rows = [r for _, r in matched]
     matched_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
@@ -4005,10 +4042,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 continue
             _doc_key = (_col, _lid)
             _overlap = _term_overlap_score(r, _doc_terms)
-            _score = sim + min(_overlap, 5) * 0.035
+            _authority = _authority_score(r)
+            _score = (sim * 0.70) + (min(_overlap, 6) * 0.035) + (_authority * 0.22)
             prev = _seed_candidates.get(_doc_key)
             if not prev or _score > prev["score"]:
-                _seed_candidates[_doc_key] = {"score": _score, "overlap": _overlap, "similarity": sim}
+                _seed_candidates[_doc_key] = {
+                    "score": _score,
+                    "overlap": _overlap,
+                    "similarity": sim,
+                    "authority": _authority,
+                }
 
         _expanded_added = 0
         _expansion_vector = rw_vector or query_vector
@@ -4016,7 +4059,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", 3))
         _seed_docs = sorted(
             _seed_candidates.items(),
-            key=lambda item: (item[1]["overlap"], item[1]["score"], item[1]["similarity"]),
+            key=lambda item: (
+                item[1]["score"],
+                item[1]["authority"],
+                item[1]["overlap"],
+                item[1]["similarity"],
+            ),
             reverse=True,
         )[:_seed_limit]
 
@@ -4058,7 +4106,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "DOC SET EXPANSION: додано %d чанків із %d документів: %s",
                 _expanded_added,
                 len(_seed_docs),
-                [f"{col}:{lid}:ov={info['overlap']}" for (col, lid), info in _seed_docs[:8]],
+                [f"{col}:{lid}:s={info['score']:.3f}:ov={info['overlap']}:a={info['authority']:.2f}" for (col, lid), info in _seed_docs[:8]],
             )
     except Exception as _de_err:
         logger.warning("Doc expansion error: %s", _de_err)
@@ -4208,6 +4256,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         (r for r in results if r.get("_doc_expansion")),
         key=lambda r: (
             -int(r.get("_docset_rank") or 999),
+            _authority_score(r),
             _term_overlap_score(r, _docset_terms),
             r.get("similarity", 0.0),
         ),
@@ -4278,7 +4327,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 f"Respond ONLY with a JSON object, no other text.\n"
                 f"Format: {{\"indices\": [3, 7, 1, 12]}}\n\n"
                 f"Task: select the {_rr_slots} most relevant fragments for the question below.\n"
-                f"Priority: laws/codes > KMU resolutions > Supreme Court positions > wiki.\n"
+                f"Priority: direct normative acts and official procedures first "
+                f"(laws/codes, KMU resolutions, ministry orders/instructions), then official tax explanations, "
+                f"then court positions, then wiki/background materials.\n"
                 f"Indices are fragment numbers from 1 to {len(_candidates)}.\n\n"
                 f"Question: {search_question}\n\n"
                 f"{_chunks_text}"
