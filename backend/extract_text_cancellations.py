@@ -109,6 +109,19 @@ def _save_check_state(state: dict[str, Any]) -> None:
     OPENDATA_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _status_summary(stats: Counter) -> dict[str, int]:
+    return {
+        "found": stats["found"],
+        "not_found": stats["not_found"],
+        "retry": stats["rate_limit"] + stats["timeout"] + stats["connection"],
+        "http_403": stats["http_403"],
+        "other": sum(
+            v for k, v in stats.items()
+            if k not in {"found", "not_found", "rate_limit", "timeout", "connection", "http_403"}
+        ),
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -525,6 +538,18 @@ def run_check_missing_opendata(
             if idx % log_every == 0 or idx == len(nregs):
                 elapsed = time.time() - started
                 speed = round(idx / elapsed, 1) if elapsed > 0 else 0
+                state.update({
+                    "running": True,
+                    "phase": "check_opendata",
+                    "stats": dict(stats),
+                    "summary": _status_summary(stats),
+                    "total_checked": len(results),
+                    "found_count": stats["found"],
+                    "total_to_check": len(nregs),
+                    "last_nreg": nreg,
+                    "updated_at": datetime.utcnow().isoformat(),
+                })
+                _save_check_state(state)
                 other_stats = " ".join(
                     f"{k}:{v}" for k, v in sorted(stats.items())
                     if k not in {"found", "not_found", "rate_limit", "timeout", "connection"}

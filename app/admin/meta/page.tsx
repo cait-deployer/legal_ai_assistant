@@ -398,6 +398,7 @@ export default function MetaPage() {
               OpenData found: {((missingCheckState.found_count as number | undefined) ?? 0)}
               {" | "}checked: {((missingCheckState.total_checked as number | undefined) ?? 0)}
               {" | "}not_found: {((missingCheckState.stats as Record<string, number> | undefined)?.not_found ?? 0)}
+              {" | "}403: {((missingCheckState.stats as Record<string, number> | undefined)?.http_403 ?? 0)}
             </div>
           </div>
 
