@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import sys
 import time
 from typing import Any
 
@@ -13,9 +15,29 @@ DEFAULT_QUESTIONS = [
 ]
 
 
-def _post_ask(base_url: str, question: str, history: list[dict[str, str]], max_docs: int) -> dict[str, Any]:
+def _load_token(args: argparse.Namespace) -> str:
+    if args.token:
+        return args.token.strip()
+    if args.token_file:
+        with open(args.token_file, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return os.environ.get("CHAT_TEST_TOKEN", "").strip()
+
+
+def _post_ask(
+    base_url: str,
+    question: str,
+    history: list[dict[str, str]],
+    max_docs: int,
+    token: str,
+) -> dict[str, Any]:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     response = requests.post(
         f"{base_url.rstrip('/')}/ask",
+        headers=headers,
         json={
             "question": question,
             "history": history,
@@ -27,6 +49,12 @@ def _post_ask(base_url: str, question: str, history: list[dict[str, str]], max_d
         },
         timeout=190,
     )
+    if response.status_code == 401:
+        raise RuntimeError(
+            "401 Unauthorized. You may be hitting the protected frontend/proxy instead of the Python backend "
+            "(try --base-url http://localhost:8080 on the server). If this endpoint is intentionally protected, "
+            "pass a Supabase access token with --token, --token-file, or CHAT_TEST_TOKEN."
+        )
     response.raise_for_status()
     return response.json()
 
@@ -38,7 +66,10 @@ def _print_result(index: int, question: str, data: dict[str, Any], elapsed: floa
 
     print("=" * 88)
     print(f"Q{index}: {question}")
-    print(f"elapsed={elapsed:.1f}s top_score={meta.get('top_score')} n_docs={meta.get('n_docs')} low_confidence={meta.get('low_confidence')}")
+    print(
+        f"elapsed={elapsed:.1f}s top_score={meta.get('top_score')} "
+        f"n_docs={meta.get('n_docs')} low_confidence={meta.get('low_confidence')}"
+    )
     print("- answer preview -")
     print(answer[:1500].replace("\n\n\n", "\n\n"))
     if len(answer) > 1500:
@@ -59,15 +90,22 @@ def main() -> None:
     parser.add_argument("--max-docs", type=int, default=15)
     parser.add_argument("--question", action="append", help="Override scenario questions. Can be passed multiple times.")
     parser.add_argument("--json-out", default="", help="Optional path to write full JSON results.")
+    parser.add_argument("--token", default="", help="Supabase access token for protected /ask endpoints.")
+    parser.add_argument("--token-file", default="", help="Path to a file containing the Supabase access token.")
     args = parser.parse_args()
 
+    token = _load_token(args)
     questions = args.question or DEFAULT_QUESTIONS
     history: list[dict[str, str]] = []
     full_results: list[dict[str, Any]] = []
 
     for idx, question in enumerate(questions, start=1):
         started = time.time()
-        data = _post_ask(args.base_url, question, history, args.max_docs)
+        try:
+            data = _post_ask(args.base_url, question, history, args.max_docs, token)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(2)
         elapsed = time.time() - started
         _print_result(idx, question, data, elapsed)
 
