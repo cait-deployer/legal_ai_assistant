@@ -416,7 +416,7 @@ def get_unique_law_count() -> dict | None:
 
 # ── FULL-TEXT INDEX (keyword fallback) ────────────────────────────────────────
 
-def ensure_text_indexes() -> dict[str, str]:
+def ensure_text_indexes(collections: list[str] | None = None) -> dict[str, str]:
     """
     Створює full-text індекс по полях 'content' і 'source' для всіх колекцій.
     Qdrant будує індекс у фоні — не блокує роботу системи.
@@ -424,27 +424,26 @@ def ensure_text_indexes() -> dict[str, str]:
     """
     client = get_client()
     status: dict[str, str] = {}
-    for name in ALL_COLLECTIONS:
+    target_collections = collections or ALL_V2_COLLECTIONS
+    for name in target_collections:
         try:
             info = client.get_collection(name)
             schema = info.payload_schema or {}
-            if "content" in schema:
+            if "content" in schema and "source" in schema:
                 status[name] = "ready"
                 continue
-            client.create_payload_index(
-                collection_name=name,
-                field_name="content",
-                field_schema=PayloadSchemaType.TEXT,
-            )
-            # Також індексуємо source (заголовок документу) для title-based boost
-            try:
+            if "content" not in schema:
+                client.create_payload_index(
+                    collection_name=name,
+                    field_name="content",
+                    field_schema=PayloadSchemaType.TEXT,
+                )
+            if "source" not in schema:
                 client.create_payload_index(
                     collection_name=name,
                     field_name="source",
                     field_schema=PayloadSchemaType.TEXT,
                 )
-            except Exception:
-                pass
             status[name] = "building"
             print(f"🔍 Text index створюється для '{name}'...")
         except Exception as e:
@@ -453,15 +452,16 @@ def ensure_text_indexes() -> dict[str, str]:
     return status
 
 
-def get_text_index_status() -> dict[str, str]:
+def get_text_index_status(collections: list[str] | None = None) -> dict[str, str]:
     """Повертає статус full-text індексу для кожної колекції."""
     client = get_client()
     result: dict[str, str] = {}
-    for name in ALL_COLLECTIONS:
+    target_collections = collections or ALL_V2_COLLECTIONS
+    for name in target_collections:
         try:
             info = client.get_collection(name)
             schema = info.payload_schema or {}
-            result[name] = "ready" if "content" in schema else "building"
+            result[name] = "ready" if "content" in schema and "source" in schema else "building"
         except Exception:
             result[name] = "error"
     return result

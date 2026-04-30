@@ -3644,7 +3644,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
-    match_threshold = max(0.33, settings_cache.get_float("match_threshold_docs", 0.33))
+    match_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.33))
 
     # 3. Multi-query пошук: оригінал + rewrite → merge по max score
     def _merge_results(lists: list[list]) -> list:
@@ -3689,16 +3689,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ))
         logger.info("LOW CONFIDENCE: target_collections expanded → %s", target_collections)
     elif not results:
-        return {"early_answer": {
-            "answer": "На жаль, у базі знань не знайдено документів за вашим запитом. Спробуйте переформулювати або уточнити питання.",
-            "references": [],
-            "templates": [],
-            "_meta": {
-                "processing_time_ms": int((time.time() - start_time) * 1000),
-                "tokens_used": 0,
-                "category": "Загальне",
-            },
-        }}
+        logger.info("VECTOR: no hits above threshold %.2f → trying keyword/title fallback", match_threshold)
 
     # Diagnostic: log all found docs per collection
     _diag: dict[str, list] = {}
@@ -3807,16 +3798,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     )
 
     # Keyword search: завжди паралельно з vector — знаходить документи з поганим embedding
-    min_score = settings_cache.get_float("min_relevance_score", 0.55)
+    min_score = settings_cache.get_float("min_relevance_score", 0.35)
+    _existing_ids = {
+        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+        for r in results
+    }
     try:
         from qdrant_storage import search_qdrant_text
         # Для keyword search — оригінальне питання краще ніж HyDE (MatchText шукає точний збіг слів)
         _kw_query = search_question
         _kw_results = search_qdrant_text(_kw_query, target_collections, limit=15)
-        _existing_ids = {
-            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-            for r in results
-        }
         _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
         # Лематизація через pymorphy замість агресивного [:-2] обрізання
         _kw_stems = _kw_query_words | {_ua_lemma(w) for w in _kw_query_words if _ua_lemma(w)}
@@ -3935,8 +3926,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                                 if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
                                 not in _rr_protected_keys]
             _candidates = _open_candidates[:min(len(_open_candidates), 60)]
+            def _rr_candidate_text(i: int, c: dict) -> str:
+                meta = c["out_metadata"]
+                title = meta.get("source") or meta.get("title") or "Без назви"
+                law_id = meta.get("law_id", "")
+                doc_type = meta.get("rada_doc_type") or meta.get("doc_type", "")
+                collection = c.get("_collection", "")
+                return (
+                    f"[{i + 1}] collection={collection}; title={title}; "
+                    f"law_id={law_id}; doc_type={doc_type}\n"
+                    f"{c['out_content'][:700]}"
+                )
+
             _chunks_text = "\n\n".join(
-                f"[{i+1}] {c['out_content'][:350]}"
+                _rr_candidate_text(i, c)
                 for i, c in enumerate(_candidates)
             )
             # Cap: мін 8, до половини max_docs; з урахуванням protected slots
