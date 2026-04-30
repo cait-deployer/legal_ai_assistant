@@ -19,7 +19,16 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
+
+try:
+    from rada_opendata import BASE as RADA_BASE, HEADERS as RADA_HEADERS
+except Exception:
+    RADA_BASE = "https://data.rada.gov.ua"
+    RADA_HEADERS = {
+        "User-Agent": "Mozilla/5.0 URAI legal metadata checker",
+        "Accept": "application/json,text/plain,*/*",
+    }
 
 
 BACKEND = Path(__file__).parent
@@ -425,9 +434,10 @@ def run_extract(
 
 
 def _check_card(nreg: str) -> dict[str, Any]:
-    url = f"https://data.rada.gov.ua/laws/card/{nreg}.json"
+    encoded_nreg = quote(nreg, safe="")
+    url = f"{RADA_BASE}/laws/card/{encoded_nreg}.json"
     try:
-        res = requests.get(url, timeout=12)
+        res = requests.get(url, headers=RADA_HEADERS, timeout=12)
         if res.status_code == 200:
             try:
                 data = res.json()
@@ -515,10 +525,14 @@ def run_check_missing_opendata(
             if idx % log_every == 0 or idx == len(nregs):
                 elapsed = time.time() - started
                 speed = round(idx / elapsed, 1) if elapsed > 0 else 0
+                other_stats = " ".join(
+                    f"{k}:{v}" for k, v in sorted(stats.items())
+                    if k not in {"found", "not_found", "rate_limit", "timeout", "connection"}
+                ) or "0"
                 _log(
                     f"[missing opendata] {idx}/{len(nregs)} | found={stats['found']} "
                     f"not_found={stats['not_found']} retry={stats['rate_limit'] + stats['timeout'] + stats['connection']} "
-                    f"other={sum(v for k, v in stats.items() if k not in {'found','not_found','rate_limit','timeout','connection'})} "
+                    f"other={other_stats} "
                     f"| {speed} nreg/s"
                 )
 
@@ -545,7 +559,7 @@ def run_check_missing_opendata(
         _save_check_state(state)
         _log(
             f"[missing opendata] Done | checked={len(results)} found={len(found)} "
-            f"not_found={stats['not_found']} errors={sum(v for k, v in stats.items() if k not in {'found','not_found'})}"
+            f"not_found={stats['not_found']} statuses={dict(stats)}"
         )
         return payload
     except Exception as exc:
