@@ -3603,7 +3603,6 @@ def _authority_score(result: dict) -> float:
     }.get(doc_type, 0.0)
     return score + type_boost
 
-
 def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs: int) -> list[dict]:
     terms = _query_terms(query_text)
     if len(terms) < 2:
