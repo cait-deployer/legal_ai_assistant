@@ -523,7 +523,9 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
     """
     client = get_client()
     results: list = []
-    lowered_keywords = [kw.lower() for kw in keywords if len(kw) >= 5]
+    lowered_keywords = list(dict.fromkeys(kw.lower() for kw in keywords if len(kw) >= 5))
+    if not lowered_keywords:
+        return []
 
     def _chunk_keyword_score(point) -> tuple[int, int]:
         payload = point.payload or {}
@@ -535,7 +537,7 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
         return content_matches, matches
 
     for col in collections:
-        law_match_counts: dict[str, int] = {}
+        law_match_counts: dict[str, set[str]] = {}
         law_points: dict[str, dict[str, object]] = {}
 
         for kw in keywords:
@@ -561,10 +563,10 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                         if not lid:
                             continue
                         if lid not in law_match_counts:
-                            law_match_counts[lid] = 0
+                            law_match_counts[lid] = set()
                             law_points[lid] = {}
                         if lid not in seen_in_kw:
-                            law_match_counts[lid] += 1
+                            law_match_counts[lid].add(kw.lower())
                             seen_in_kw.add(lid)
                         law_points[lid][str(p.id)] = p
                     if not next_offset or len(law_match_counts) > 500:
@@ -576,7 +578,14 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
         # Sort docs by keyword match count desc → more relevant titles first.
         # For each matched document, fetch its chunks and prefer chunks that contain
         # the searched terms in content, not just the first title/preamble chunk.
-        for lid in sorted(law_match_counts, key=lambda l: -law_match_counts[l])[:40]:
+        min_title_matches = 2 if len(lowered_keywords) >= 3 else 1
+        ranked_law_ids = [
+            lid for lid, matches in law_match_counts.items()
+            if len(matches) >= min_title_matches
+        ]
+        ranked_law_ids.sort(key=lambda lid: -len(law_match_counts[lid]))
+
+        for lid in ranked_law_ids[:30]:
             pts_by_id = dict(law_points[lid])
             try:
                 pts, _ = client.scroll(
