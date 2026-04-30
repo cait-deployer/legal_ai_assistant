@@ -523,6 +523,16 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
     """
     client = get_client()
     results: list = []
+    lowered_keywords = [kw.lower() for kw in keywords if len(kw) >= 5]
+
+    def _chunk_keyword_score(point) -> tuple[int, int]:
+        payload = point.payload or {}
+        source = str(payload.get("source", "")).lower()
+        content = str(payload.get("content", "")).lower()
+        text = f"{source}\n{content}"
+        matches = sum(1 for kw in lowered_keywords if kw in text)
+        content_matches = sum(1 for kw in lowered_keywords if kw in content)
+        return content_matches, matches
 
     for col in collections:
         law_match_counts: dict[str, int] = {}
@@ -563,10 +573,34 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
             except Exception as e:
                 print(f"⚠️ search_qdrant_by_title [{col}]: {e}")
 
-        # Sort docs by keyword match count desc → more relevant titles first
-        for lid in sorted(law_match_counts, key=lambda l: -law_match_counts[l]):
-            pts_list = list(law_points[lid].values())
-            pts_list.sort(key=lambda p: p.payload.get("chunk_index", 0))
+        # Sort docs by keyword match count desc → more relevant titles first.
+        # For each matched document, fetch its chunks and prefer chunks that contain
+        # the searched terms in content, not just the first title/preamble chunk.
+        for lid in sorted(law_match_counts, key=lambda l: -law_match_counts[l])[:40]:
+            pts_by_id = dict(law_points[lid])
+            try:
+                pts, _ = client.scroll(
+                    collection_name=col,
+                    scroll_filter=Filter(
+                        must=[FieldCondition(key="law_id", match=MatchValue(value=lid))]
+                    ),
+                    limit=max(80, chunks_per_doc * 10),
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for p in pts:
+                    pts_by_id[str(p.id)] = p
+            except Exception as e:
+                print(f"⚠️ search_qdrant_by_title chunks [{col}:{lid}]: {e}")
+
+            pts_list = list(pts_by_id.values())
+            pts_list.sort(
+                key=lambda p: (
+                    -_chunk_keyword_score(p)[0],
+                    -_chunk_keyword_score(p)[1],
+                    p.payload.get("chunk_index", 0),
+                )
+            )
             for p in pts_list[:chunks_per_doc]:
                 results.append({
                     "out_content":  p.payload.get("content", ""),

@@ -3805,10 +3805,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     }
     try:
         from qdrant_storage import search_qdrant_text
-        # Для keyword search — оригінальне питання краще ніж HyDE (MatchText шукає точний збіг слів)
-        _kw_query = search_question
+        _kw_query = f"{search_question} {rewritten_query or ''}".strip()
         _kw_results = search_qdrant_text(_kw_query, target_collections, limit=15)
-        _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
+        _kw_query_words = {w.lower() for w in _kw_query.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
         # Лематизація через pymorphy замість агресивного [:-2] обрізання
         _kw_stems = _kw_query_words | {_ua_lemma(w) for w in _kw_query_words if _ua_lemma(w)}
         _kw_added = 0
@@ -3853,12 +3852,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "взагалі", "зокрема", "наприклад", "взагалі", "наразі", "зараз",
         "правда", "справді", "взнати", "дізнатись", "дізнатися", "пояснити",
         "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
+        "надай", "надайте", "інформацію", "інфо", "покажи", "покажіть",
     }
     try:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
-        _q_words = [_strip_punct(w) for w in search_question.split() if len(w) > 4]
+        _search_terms_text = f"{search_question} {rewritten_query or ''}".strip()
+        _q_words = [_strip_punct(w) for w in _search_terms_text.split() if len(w) > 4]
         _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
@@ -3873,18 +3874,21 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ))[:14]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=1)
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
-            _title_results = _title_results[:20]  # більший cap щоб охопити більше law_ids
+            _title_results = _title_results[:40]  # більший cap щоб охопити більше law_ids і релевантних чанків
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             _title_added = 0
             for r in _title_results:
                 _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
                 if _key not in _existing_ids:
                     # Динамічний score: скільки _title_kws є в назві документа (0.50–0.85)
-                    _tsrc = r["out_metadata"].get("source", "").lower()
+                    _tsrc = (
+                        r["out_metadata"].get("source", "") + " " +
+                        r.get("out_content", "")[:1500]
+                    ).lower()
                     _tmatched = sum(1 for kw in _title_kws if kw.lower() in _tsrc)
                     r["similarity"] = 0.50 + 0.35 * (_tmatched / max(len(_title_kws), 1))
                     results.append(r)
@@ -3957,6 +3961,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _rr_cfg_json = GenerationConfig(
                 temperature=0.0,
                 max_output_tokens=512,
+                response_mime_type="application/json",
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
