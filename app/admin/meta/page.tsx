@@ -49,6 +49,8 @@ type EnrichStatus = {
   qdrant_meta: EnrichSubState
   text_cancellations: EnrichSubState
   text_missing_check: EnrichSubState
+  text_missing_scrape: EnrichSubState
+  text_apply_cache: EnrichSubState
 }
 
 type TextReportItem = {
@@ -244,9 +246,11 @@ export default function MetaPage() {
     await fetchStatus()
   }
 
-  async function loadTextReport(kind = textReportKind) {
+  async function loadTextReport(kind = textReportKind, itemStatus?: string) {
     setTextReportKind(kind)
-    const res = await fetch(`/api/admin/enrich/text/report?kind=${kind}&limit=20&offset=0`)
+    const params = new URLSearchParams({ kind, limit: "20", offset: "0" })
+    if (itemStatus) params.set("status", itemStatus)
+    const res = await fetch(`/api/admin/enrich/text/report?${params}`)
     const json = await res.json()
     setTextReport(json)
   }
@@ -270,14 +274,55 @@ export default function MetaPage() {
     await fetchStatus()
   }
 
+  async function startScrapeFound() {
+    setStatusLoading(true)
+    try {
+      await fetch("/api/admin/enrich/text/scrape-found/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: false }),
+      })
+      await fetchStatus()
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  async function stopScrapeFound() {
+    await fetch("/api/admin/enrich/text/scrape-found/stop", { method: "POST" })
+    await fetchStatus()
+  }
+
+  async function applyTextCache() {
+    setStatusLoading(true)
+    try {
+      await fetch("/api/admin/enrich/text/apply-cache/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sources: ["rada", "kmu"] }),
+      })
+      await fetchStatus()
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  async function stopApplyTextCache() {
+    await fetch("/api/admin/enrich/text/apply-cache/stop", { method: "POST" })
+    await fetchStatus()
+  }
+
   const enrichRunning   = status?.enrich?.running ?? false
   const qdrantRunning   = status?.qdrant_meta?.running ?? false
   const textRunning     = status?.text_cancellations?.running ?? false
   const missingCheckRunning = status?.text_missing_check?.running ?? false
+  const scrapeFoundRunning = status?.text_missing_scrape?.running ?? false
+  const applyTextRunning = status?.text_apply_cache?.running ?? false
   const enrichState     = status?.enrich?.state ?? {}
   const qdrantState     = status?.qdrant_meta?.state ?? {}
   const textState       = status?.text_cancellations?.state ?? {}
   const missingCheckState = status?.text_missing_check?.state ?? {}
+  const scrapeFoundState = status?.text_missing_scrape?.state ?? {}
 
   return (
     <div className="min-h-screen bg-[#0A0E1A] text-[#E0E6ED] p-6 space-y-6">
@@ -391,14 +436,53 @@ export default function MetaPage() {
               >
                 Show checked
               </button>
+              <button
+                disabled={missingCheckRunning || statusLoading}
+                onClick={() => loadTextReport("opendata", "found")}
+                className="px-3 py-1.5 bg-[#1e2a3a] text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Show found only
+              </button>
+              <button
+                disabled={scrapeFoundRunning || statusLoading}
+                onClick={startScrapeFound}
+                className="px-3 py-1.5 bg-blue-700 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Scrape found missing
+              </button>
+              <button
+                disabled={!scrapeFoundRunning || statusLoading}
+                onClick={stopScrapeFound}
+                className="px-3 py-1.5 bg-red-800 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Stop scrape
+              </button>
+              <button
+                disabled={applyTextRunning || statusLoading}
+                onClick={applyTextCache}
+                className="px-3 py-1.5 bg-[#C9A84C] text-black rounded text-sm font-medium disabled:opacity-50"
+              >
+                Apply text cache
+              </button>
+              <button
+                disabled={!applyTextRunning || statusLoading}
+                onClick={stopApplyTextCache}
+                className="px-3 py-1.5 bg-red-800 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Stop apply
+              </button>
             </div>
             <LogsPanel logs={status?.text_cancellations?.live_logs ?? []} />
             <LogsPanel logs={status?.text_missing_check?.live_logs ?? []} />
+            <LogsPanel logs={status?.text_missing_scrape?.live_logs ?? []} />
+            <LogsPanel logs={status?.text_apply_cache?.live_logs ?? []} />
             <div className="text-xs text-zinc-400">
               OpenData found: {((missingCheckState.found_count as number | undefined) ?? 0)}
               {" | "}checked: {((missingCheckState.total_checked as number | undefined) ?? 0)}
               {" | "}not_found: {((missingCheckState.stats as Record<string, number> | undefined)?.not_found ?? 0)}
               {" | "}403: {((missingCheckState.stats as Record<string, number> | undefined)?.http_403 ?? 0)}
+              {" | "}scraped ok: {((scrapeFoundState.stats as Record<string, number> | undefined)?.ok ?? 0)}
+              {" | "}scrape skipped: {((scrapeFoundState.stats as Record<string, number> | undefined)?.skipped ?? 0)}
             </div>
           </div>
 

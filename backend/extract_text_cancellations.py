@@ -44,6 +44,7 @@ MISSING_REPORT_FILE = BACKEND / "text_cancellations_missing_report.json"
 PARTIAL_REPORT_FILE = BACKEND / "text_cancellations_partial_report.json"
 OPENDATA_REPORT_FILE = BACKEND / "text_cancellations_missing_opendata_report.json"
 OPENDATA_STATE_FILE = BACKEND / "text_cancellations_missing_opendata_state.json"
+SCRAPE_FOUND_STATE_FILE = BACKEND / "text_cancellations_scrape_found_state.json"
 
 SOURCES = ["rada", "kmu"]
 
@@ -107,6 +108,10 @@ def _save_state(state: dict[str, Any]) -> None:
 
 def _save_check_state(state: dict[str, Any]) -> None:
     OPENDATA_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _save_scrape_state(state: dict[str, Any]) -> None:
+    SCRAPE_FOUND_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _status_summary(stats: Counter) -> dict[str, int]:
@@ -591,6 +596,183 @@ def run_check_missing_opendata(
         state.update({"running": False, "phase": "error", "error": str(exc)})
         _save_check_state(state)
         _log(f"[missing opendata] CRITICAL: {exc}", "error")
+        raise
+
+
+def _scrape_source_for(item: dict[str, Any]) -> str:
+    nreg = str(item.get("nreg", ""))
+    title = str(item.get("title", "")).lower()
+    if nreg.endswith("-п") or "кабінет" in title or "кабінету міністрів" in title:
+        return "kmu"
+    return "rada"
+
+
+def _scrape_law_id(source: str, nreg: str) -> str:
+    return f"kmu_{nreg}" if source == "kmu" else nreg
+
+
+def _load_scrape_status() -> dict[str, Any]:
+    path = RAW_BASE / "scrape_status.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_scrape_status(status: dict[str, Any]) -> None:
+    RAW_BASE.mkdir(parents=True, exist_ok=True)
+    (RAW_BASE / "scrape_status.json").write_text(
+        json.dumps(status, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _fetch_and_save_found_item(item: dict[str, Any], force: bool = False) -> str:
+    nreg = str(item.get("nreg", "")).strip()
+    if not nreg:
+        return "error"
+    source = _scrape_source_for(item)
+    law_id = _scrape_law_id(source, nreg)
+    src_dir = RAW_BASE / source
+    txt_path = src_dir / f"{law_id}.txt"
+    meta_path = src_dir / f"{law_id}.meta.json"
+    if not force and txt_path.exists() and meta_path.exists():
+        return "skipped"
+
+    from scrape_all_v2 import _fetch_kmu, _fetch_rada
+
+    doc = {
+        "id": nreg,
+        "title": item.get("title", ""),
+        "category": "",
+        "list_date": "",
+    }
+    if source == "kmu":
+        fetched_law_id, text, meta = _fetch_kmu(doc)
+    else:
+        fetched_law_id, text, meta = _fetch_rada(doc)
+
+    if text == "__RESTRICTED__":
+        return "restricted"
+    if not text or len(text.strip()) < 50:
+        return "empty"
+
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / f"{fetched_law_id}.txt").write_text(text, encoding="utf-8")
+    (src_dir / f"{fetched_law_id}.meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return "ok"
+
+
+def run_scrape_found_missing(
+    log_callback=print,
+    stop_event: threading.Event | None = None,
+    limit: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Scrape only OpenData-found missing documents into local laws_raw."""
+    global _stop_event, _log_fn
+    _stop_event = stop_event
+    _log_fn = log_callback
+
+    state: dict[str, Any] = {
+        "running": True,
+        "phase": "scrape_found",
+        "started_at": datetime.utcnow().isoformat(),
+        "stats": {},
+    }
+    _save_scrape_state(state)
+
+    if not OPENDATA_REPORT_FILE.exists():
+        msg = f"OpenData report not found: {OPENDATA_REPORT_FILE}"
+        _log(f"[scrape found missing] {msg}", "error")
+        state.update({"running": False, "phase": "error", "error": msg})
+        _save_scrape_state(state)
+        raise FileNotFoundError(msg)
+
+    report = _read_json(OPENDATA_REPORT_FILE)
+    items = [r for r in report.get("results", []) if r.get("status") == "found" and r.get("nreg")]
+    seen = set()
+    deduped = []
+    for item in items:
+        nreg = str(item.get("nreg", ""))
+        if nreg and nreg not in seen:
+            seen.add(nreg)
+            deduped.append(item)
+    items = deduped[:limit] if limit and limit > 0 else deduped
+
+    stats = Counter()
+    status = _load_scrape_status()
+    started = time.time()
+    _log(f"[scrape found missing] Start | docs={len(items)} | force={force}")
+
+    try:
+        for idx, item in enumerate(items, start=1):
+            if stop_event and stop_event.is_set():
+                _log(f"[scrape found missing] Stop requested at {idx}/{len(items)}", "warning")
+                break
+            nreg = str(item.get("nreg", ""))
+            source = _scrape_source_for(item)
+            law_id = _scrape_law_id(source, nreg)
+            try:
+                result = _fetch_and_save_found_item(item, force=force)
+            except Exception as exc:
+                result = "error"
+                _log(f"[scrape found missing] ERROR {law_id}: {exc}", "error")
+
+            stats[result] += 1
+            status[law_id] = {
+                "source": source,
+                "status": result,
+                "scraped_at": datetime.utcnow().isoformat(),
+                "title": item.get("title", ""),
+                "effective_date": "",
+            }
+
+            if result == "ok":
+                _log(f"[scrape found missing] ok {idx}/{len(items)} | {source}/{law_id} | {str(item.get('title',''))[:80]}")
+            elif result != "skipped":
+                _log(f"[scrape found missing] {result} {idx}/{len(items)} | {source}/{law_id}", "warning")
+
+            if idx % 10 == 0 or idx == len(items):
+                elapsed = time.time() - started
+                speed = round(idx / elapsed, 2) if elapsed > 0 else 0
+                _save_scrape_status(status)
+                state.update({
+                    "running": True,
+                    "phase": "scrape_found",
+                    "stats": dict(stats),
+                    "total": len(items),
+                    "done": idx,
+                    "last_law_id": law_id,
+                    "updated_at": datetime.utcnow().isoformat(),
+                })
+                _save_scrape_state(state)
+                _log(
+                    f"[scrape found missing] {idx}/{len(items)} | ok={stats['ok']} "
+                    f"skip={stats['skipped']} empty={stats['empty']} restr={stats['restricted']} "
+                    f"err={stats['error']} | {speed} doc/s"
+                )
+
+        _save_scrape_status(status)
+        state.update({
+            "running": False,
+            "phase": "done",
+            "completed_at": datetime.utcnow().isoformat(),
+            "stats": dict(stats),
+            "total": len(items),
+        })
+        _save_scrape_state(state)
+        _log(f"[scrape found missing] Done | stats={dict(stats)}")
+        return {"stats": dict(stats), "total": len(items)}
+    except Exception as exc:
+        state.update({"running": False, "phase": "error", "error": str(exc)})
+        _save_scrape_state(state)
+        _log(f"[scrape found missing] CRITICAL: {exc}", "error")
         raise
 
 

@@ -717,6 +717,22 @@ def run_phase4_text_cancellations(sources: list[str]) -> dict:
     }
 
 
+def run_apply_text_cancellations(
+    log_callback=print,
+    stop_event: threading.Event | None = None,
+    sources: list[str] | None = None,
+) -> dict:
+    global _stop_event, _log_fn
+    _stop_event = stop_event
+    _log_fn = log_callback
+    if sources is None:
+        sources = SOURCES
+    _log(f"=== Apply text cancellation cache: {', '.join(sources)} ===")
+    result = run_phase4_text_cancellations(sources)
+    _log("=== Apply text cancellation cache done ===")
+    return result
+
+
 def run_enrich(
     log_callback=print,
     stop_event: threading.Event | None = None,

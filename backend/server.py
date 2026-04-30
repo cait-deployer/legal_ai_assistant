@@ -121,6 +121,8 @@ _SOURCES = (
     "enrich_opendata",    # збагачення метаданих Rada+KMU через OpenData API
     "extract_text_cancellations",
     "check_text_missing",
+    "scrape_text_missing_found",
+    "apply_text_cancellations",
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
 )
 _sync: dict[str, dict] = {
@@ -143,6 +145,8 @@ _v2_scrape_stop = {s: threading.Event() for s in V2_SCRAPE_SOURCES}
 _enrich_stop     = threading.Event()
 _text_cancel_stop = threading.Event()
 _text_missing_check_stop = threading.Event()
+_text_missing_scrape_stop = threading.Event()
+_apply_text_cancel_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
 
 
@@ -4720,6 +4724,45 @@ def _do_check_text_missing(session_id: str, limit: int | None = None) -> None:
             _sync[src]["pause_requested"] = False
 
 
+def _do_scrape_text_missing_found(session_id: str, limit: int | None = None, force: bool = False) -> None:
+    src = "scrape_text_missing_found"
+    log = _make_reindex_log_cb(src)
+    try:
+        _text_missing_scrape_stop.clear()
+        from extract_text_cancellations import run_scrape_found_missing
+        run_scrape_found_missing(
+            log_callback=log,
+            stop_event=_text_missing_scrape_stop,
+            limit=limit,
+            force=force,
+        )
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+def _do_apply_text_cancellations(session_id: str, sources: list) -> None:
+    src = "apply_text_cancellations"
+    log = _make_reindex_log_cb(src)
+    try:
+        _apply_text_cancel_stop.clear()
+        from enrich_opendata_meta import run_apply_text_cancellations
+        run_apply_text_cancellations(
+            log_callback=log,
+            stop_event=_apply_text_cancel_stop,
+            sources=sources,
+        )
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
 @app.post("/admin/enrich/start")
 async def enrich_start(body: dict = Body(default={})):
     sources = body.get("sources") or ["rada", "kmu"]
@@ -4798,9 +4841,65 @@ async def enrich_text_check_missing_stop():
     return {"ok": True}
 
 
+@app.post("/admin/enrich/text/scrape-found/start")
+async def enrich_text_scrape_found_start(body: dict = Body(default={})):
+    limit_raw = body.get("limit")
+    limit = int(limit_raw) if limit_raw else None
+    force = bool(body.get("force", False))
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync(
+            "scrape_text_missing_found",
+            _do_scrape_text_missing_found,
+            session_id,
+            limit=limit,
+            force=force,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id, "limit": limit, "force": force}
+
+
+@app.post("/admin/enrich/text/scrape-found/stop")
+async def enrich_text_scrape_found_stop():
+    with _lock:
+        if not _sync["scrape_text_missing_found"]["running"]:
+            raise HTTPException(400, "Scrape found missing is not running")
+        _text_missing_scrape_stop.set()
+        _sync["scrape_text_missing_found"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.post("/admin/enrich/text/apply-cache/start")
+async def enrich_text_apply_cache_start(body: dict = Body(default={})):
+    sources = body.get("sources") or ["rada", "kmu"]
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync(
+            "apply_text_cancellations",
+            _do_apply_text_cancellations,
+            session_id,
+            sources=sources,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/enrich/text/apply-cache/stop")
+async def enrich_text_apply_cache_stop():
+    with _lock:
+        if not _sync["apply_text_cancellations"]["running"]:
+            raise HTTPException(400, "Apply text cache is not running")
+        _apply_text_cancel_stop.set()
+        _sync["apply_text_cancellations"]["pause_requested"] = True
+    return {"ok": True}
+
+
 @app.get("/admin/enrich/text/report")
 async def enrich_text_report(
     kind: str = "missing",
+    status: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ):
@@ -4834,6 +4933,8 @@ async def enrich_text_report(
         return out
 
     records = [decode_report_item(item) for item in records]
+    if status:
+        records = [item for item in records if isinstance(item, dict) and item.get("status") == status]
     total = len(records)
     summary = {
         "generated_at": report.get("generated_at"),
@@ -4866,6 +4967,10 @@ async def enrich_status():
         text_cancel_logs = list(text_cancel.get("live_logs", []))
         text_missing = dict(_sync["check_text_missing"])
         text_missing_logs = list(text_missing.get("live_logs", []))
+        text_scrape = dict(_sync["scrape_text_missing_found"])
+        text_scrape_logs = list(text_scrape.get("live_logs", []))
+        text_apply = dict(_sync["apply_text_cancellations"])
+        text_apply_logs = list(text_apply.get("live_logs", []))
 
     state_file = Path(__file__).parent / "enrich_opendata_state.json"
     state = {}
@@ -4899,6 +5004,14 @@ async def enrich_status():
         except Exception:
             pass
 
+    text_scrape_state_file = Path(__file__).parent / "text_cancellations_scrape_found_state.json"
+    text_scrape_state = {}
+    if text_scrape_state_file.exists():
+        try:
+            text_scrape_state = json.loads(text_scrape_state_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
     return {
         "enrich": {
             "running":         s.get("running", False),
@@ -4923,6 +5036,18 @@ async def enrich_status():
             "pause_requested": text_missing.get("pause_requested", False),
             "live_logs":       text_missing_logs,
             "state":           text_missing_state,
+        },
+        "text_missing_scrape": {
+            "running":         text_scrape.get("running", False),
+            "pause_requested": text_scrape.get("pause_requested", False),
+            "live_logs":       text_scrape_logs,
+            "state":           text_scrape_state,
+        },
+        "text_apply_cache": {
+            "running":         text_apply.get("running", False),
+            "pause_requested": text_apply.get("pause_requested", False),
+            "live_logs":       text_apply_logs,
+            "state":           {},
         },
     }
 
