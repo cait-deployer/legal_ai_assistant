@@ -181,23 +181,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     // Collapsed sidebar: just show icon linking to overview
                     return (
                       <Tooltip key={item.name}>
-                        <TooltipTrigger>
-                          <div className="hidden lg:block">
-                            <Link href={item.href}>
-                              <Button
-                                variant="ghost"
-                                className={cn(
-                                  "w-full h-10 font-medium transition-all duration-200 lg:justify-center lg:px-0",
-                                  syncActive
-                                    ? "bg-[#C9A84C]/10 text-[#C9A84C] hover:bg-[#C9A84C]/15 hover:text-[#C9A84C] border border-[#C9A84C]/20"
-                                    : "hover:bg-[#C9A84C]/5 text-[#E0E6ED]/70 hover:text-[#E0E6ED]",
-                                )}
-                                onClick={() => setMobileOpen(false)}
-                              >
-                                <item.icon className={cn("shrink-0 lg:w-5 lg:h-5 w-4 h-4", syncActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/70")} />
-                              </Button>
-                            </Link>
-                          </div>
+                        <TooltipTrigger className="hidden lg:block w-full">
+                          <Link href={item.href} className="block w-full">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full h-10 font-medium transition-all duration-200 lg:justify-center lg:px-0",
+                                syncActive
+                                  ? "bg-[#C9A84C]/10 text-[#C9A84C] hover:bg-[#C9A84C]/15 hover:text-[#C9A84C] border border-[#C9A84C]/20"
+                                  : "hover:bg-[#C9A84C]/5 text-[#E0E6ED]/70 hover:text-[#E0E6ED]",
+                              )}
+                              onClick={() => setMobileOpen(false)}
+                            >
+                              <item.icon className={cn("shrink-0 lg:w-5 lg:h-5 w-4 h-4", syncActive ? "text-[#C9A84C]" : "text-[#E0E6ED]/70")} />
+                            </Button>
+                          </Link>
                         </TooltipTrigger>
                         <TooltipContent side="right" className="font-medium bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">{item.name}</TooltipContent>
                       </Tooltip>
@@ -289,8 +287,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 if (collapsed) {
                   return (
                     <Tooltip key={item.name}>
-                      <TooltipTrigger>
-                        <div className="hidden lg:block">{btn}</div>
+                      <TooltipTrigger className="hidden lg:block w-full">
+                        <div className="block w-full">{btn}</div>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="font-medium bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">{item.name}</TooltipContent>
                     </Tooltip>
@@ -304,7 +302,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {mounted && collapsed && (
               <div className="hidden lg:flex justify-center py-2 shrink-0">
                 <Tooltip>
-                  <TooltipTrigger>
+                  <TooltipTrigger className="block">
                     <Button
                       variant="ghost" size="icon"
                       className="h-9 w-9 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5"
@@ -325,7 +323,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             )}>
               {collapsed ? (
                 <Tooltip>
-                  <TooltipTrigger>
+                  <TooltipTrigger className="block w-full">
                     <Link href="/" className="flex items-center justify-center w-full h-10 rounded-xl text-[#C9A84C]/70 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 transition-colors">
                       <ChevronLeft className="w-4 h-4" />
                     </Link>
