@@ -21,10 +21,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from urllib.parse import unquote
 
 from qdrant_storage import (
-    RADA_COLLECTIONS, RADA_V2_COLLECTIONS,
+    RADA_V2_COLLECTIONS,
     get_client,
 )
 
@@ -36,8 +36,8 @@ SCROLL_BATCH     = 500 # точок за один scroll()
 SET_PAYLOAD_RETRIES = 3
 LOG_INTERVAL_SEC = 30
 
-_RADA_ALL = RADA_COLLECTIONS + RADA_V2_COLLECTIONS
-_KMU_ALL  = ["laws_kmu", "laws_kmu_v2"]
+_RADA_ALL = RADA_V2_COLLECTIONS
+_KMU_ALL  = ["laws_kmu_v2"]
 
 SOURCES_COLLECTIONS: dict[str, list[str]] = {
     "rada": _RADA_ALL,
@@ -141,7 +141,7 @@ def _patch_collection(
                 collection_name=coll,
                 limit=SCROLL_BATCH,
                 offset=offset,
-                with_payload=["law_id"],
+                with_payload=["law_id", "rada_nreg"],
                 with_vectors=False,
             )
         except Exception as e:
@@ -149,9 +149,23 @@ def _patch_collection(
             return {"coll": coll, "error": str(e)}
 
         for point in results:
-            lid = (point.payload or {}).get("law_id", "")
-            if lid and lid in enriched:
-                law_to_ids[lid].append(point.id)
+            payload = point.payload or {}
+            lid = payload.get("law_id", "")
+            # Primary match: direct key lookup (works for rada_* collections)
+            match_key = lid if lid in enriched else None
+            if match_key is None and lid:
+                # KMU v2: law_id stored as "kmu_663-99-%D0%BF" → decode → "kmu_663-99-п" → strip prefix → "663-99-п"
+                decoded = unquote(lid)
+                stripped = decoded[4:] if decoded.startswith("kmu_") else decoded
+                if stripped in enriched:
+                    match_key = stripped
+            if match_key is None:
+                # Last resort: use rada_nreg stored in payload (set by previous enrichment run)
+                nreg = payload.get("rada_nreg", "")
+                if nreg and nreg in enriched:
+                    match_key = nreg
+            if match_key:
+                law_to_ids[match_key].append(point.id)
             total_points += 1
 
         if offset is None:

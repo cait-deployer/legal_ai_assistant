@@ -3726,6 +3726,24 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] * _zir_boost, 1.0)
         elif abs(rada_boost - 1.0) > 0.001 and (col.startswith("rada_") or col == "laws_positions_v2"):
             r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
+
+    # Authority score: boost/penalize by document type to prefer current legislation
+    _DOC_TYPE_SCORE = {
+        "Кодекс": 1.15,
+        "Закон": 1.10,
+        "Постанова": 1.05,
+        "Наказ": 1.0,
+        "Розпорядження": 1.0,
+        "Лист": 0.75,
+        "Роз'яснення": 0.80,
+        "Інформаційний лист": 0.75,
+    }
+    for r in results:
+        doc_type = r["out_metadata"].get("rada_doc_type") or r["out_metadata"].get("doc_type", "")
+        factor = _DOC_TYPE_SCORE.get(doc_type, 1.0)
+        if factor != 1.0:
+            r["similarity"] = min(r["similarity"] * factor, 1.0)
+
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Dedup: max 2 chunks per law_id globally so one doc can't eat all slots
