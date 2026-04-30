@@ -4,6 +4,9 @@ import { createClient as createAdminClient } from "@supabase/supabase-js"
 
 const BACKEND = process.env.API_URL || "http://localhost:8000"
 
+export const runtime = "nodejs"
+export const maxDuration = 300
+
 const SOURCE_FEATURE_MAP: Record<string, string> = {
   source_rada:     "rada",
   source_legalaid: "wiki",

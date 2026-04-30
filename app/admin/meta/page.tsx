@@ -64,9 +64,16 @@ function StatusBadge({ item }: { item: MetaItem }) {
       </span>
     )
   }
+  if (item.status === 0) {
+    return (
+      <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-900/60 text-amber-300">
+        Не визначено
+      </span>
+    )
+  }
   return (
     <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-900/60 text-emerald-300">
-      Чинний
+      {item.status_name || "Чинний"}
     </span>
   )
 }

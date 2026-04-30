@@ -4403,16 +4403,55 @@ async def ask_stream(body: AskRequest):
     import threading as _threading
     from fastapi.responses import StreamingResponse as _SR
 
-    pipe = await _ask_pipeline(body)
-
-    if pipe.get("early_answer"):
-        ea = pipe["early_answer"]
-        async def _early_gen():
-            yield f"event: citations\ndata: {_json.dumps(ea, ensure_ascii=False)}\n\n"
-        return _SR(_early_gen(), media_type="text/event-stream",
-                   headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
     async def generate():
+        request_id = str(uuid.uuid4())
+
+        def _sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
+
+        yield _sse("status", {
+            "request_id": request_id,
+            "step": "started",
+            "message": "Прийняв питання. Готую пошук джерел.",
+        })
+
+        try:
+            yield _sse("status", {
+                "request_id": request_id,
+                "step": "retrieval",
+                "message": "Шукаю релевантні документи в базі.",
+            })
+            pipe = await _ask_pipeline(body)
+        except HTTPException as exc:
+            yield _sse("error", {
+                "request_id": request_id,
+                "error": exc.detail,
+                "status": exc.status_code,
+            })
+            return
+        except Exception as exc:
+            logger.exception("ASK_STREAM pipeline failed")
+            yield _sse("error", {
+                "request_id": request_id,
+                "error": "Backend pipeline failed",
+                "detail": str(exc),
+                "status": 500,
+            })
+            return
+
+        if pipe.get("early_answer"):
+            ea = pipe["early_answer"]
+            yield _sse("citations", ea)
+            return
+
+        yield _sse("status", {
+            "request_id": request_id,
+            "step": "generation",
+            "message": "Джерела знайдено. Формую відповідь.",
+            "n_docs": len(pipe.get("results", [])),
+            "low_confidence": bool(pipe.get("low_confidence")),
+        })
+
         from vertexai.generative_models import GenerationConfig as _GC
         loop = _asyncio.get_event_loop()
         token_queue: _asyncio.Queue = _asyncio.Queue()
@@ -4458,19 +4497,25 @@ async def ask_stream(body: AskRequest):
                     token_queue.get(), timeout=pipe["llm_timeout"]
                 )
             except _asyncio.TimeoutError:
-                yield f"event: error\ndata: {_json.dumps({'error': 'LLM timeout'})}\n\n"
+                yield _sse("error", {
+                    "request_id": request_id,
+                    "error": "LLM timeout",
+                })
                 clf_task.cancel()
                 return
 
             if event_type == "done":
                 break
             elif event_type == "error":
-                yield f"event: error\ndata: {_json.dumps({'error': data})}\n\n"
+                yield _sse("error", {
+                    "request_id": request_id,
+                    "error": data,
+                })
                 clf_task.cancel()
                 return
             else:
                 answer_parts.append(data)
-                yield f"data: {_json.dumps({'token': data}, ensure_ascii=False)}\n\n"
+                yield _sse("message", {"token": data})
 
         full_answer = "".join(answer_parts)
 
@@ -4505,7 +4550,8 @@ async def ask_stream(body: AskRequest):
                 **classification,
             },
         }
-        yield f"event: citations\ndata: {_json.dumps(citations_payload, ensure_ascii=False)}\n\n"
+        yield _sse("citations", citations_payload)
+        yield _sse("done", {"request_id": request_id})
 
     return _SR(generate(), media_type="text/event-stream",
                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

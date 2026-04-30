@@ -142,6 +142,7 @@ function ChatPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingStatus, setLoadingStatus] = useState('');
     const [loadingPhase, setLoadingPhase] = useState(0);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
@@ -231,7 +232,7 @@ function ChatPage() {
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }, [messages, isLoading]);
+    }, [messages, isLoading, loadingStatus]);
 
     useEffect(() => {
         if (!isLoading) { setLoadingPhase(0); return; }
@@ -304,6 +305,7 @@ function ChatPage() {
         if (!text.trim() || isLoading || limitExceeded) return;
         const questionText = text.trim();
         setInput('');
+        setLoadingStatus('Готую запит...');
 
         setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: questionText }]);
         setIsLoading(true);
@@ -392,6 +394,7 @@ function ChatPage() {
                                 if (firstToken) {
                                     firstToken = false;
                                     setIsLoading(false);
+                                    setLoadingStatus('');
                                     twDisplayRef.current = '';
                                     twQueueRef.current = '';
                                     twMsgIdRef.current = STREAMING_ID;
@@ -407,6 +410,7 @@ function ChatPage() {
                                     // early_answer path: no tokens were streamed
                                     firstToken = false;
                                     setIsLoading(false);
+                                    setLoadingStatus('');
                                     setMessages(prev => [...prev, {
                                         id: STREAMING_ID, role: 'ai', text: answer,
                                         references: finalPayload!.references ?? [],
@@ -420,6 +424,9 @@ function ChatPage() {
                                         templates: finalPayload!.templates ?? [],
                                     } : m));
                                 }
+                            } else if (currentEvent === 'status') {
+                                const message = typeof parsed.message === 'string' ? parsed.message : '';
+                                if (message) setLoadingStatus(message);
                             } else if (currentEvent === 'error') {
                                 toast.error('Помилка генерації відповіді.');
                             }
@@ -602,7 +609,7 @@ function ChatPage() {
                                     <Loader2 className="h-5 w-5 animate-spin text-[#C9A84C]" />
                                 </div>
                                 <p key={loadingPhase} className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
-                                    {LOADING_MESSAGES[loadingPhase]}
+                                    {loadingStatus || LOADING_MESSAGES[loadingPhase]}
                                 </p>
                             </div>
                         )}
