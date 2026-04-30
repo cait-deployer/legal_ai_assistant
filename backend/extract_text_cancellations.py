@@ -19,6 +19,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 
 BACKEND = Path(__file__).parent
@@ -135,13 +136,23 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s.lower()).strip()
 
 
+def _decode_nreg(nreg: str) -> str:
+    try:
+        return unquote(nreg)
+    except Exception:
+        return nreg
+
+
 def _candidate_aliases(source: str, nreg: str) -> set[str]:
-    aliases = {nreg}
+    decoded = _decode_nreg(nreg)
+    aliases = {nreg, decoded}
     if source == "kmu":
         if nreg.startswith("kmu_"):
             aliases.add(nreg[4:])
+            aliases.add(_decode_nreg(nreg[4:]))
         else:
             aliases.add(f"kmu_{nreg}")
+            aliases.add(f"kmu_{decoded}")
     return aliases
 
 
@@ -225,13 +236,14 @@ def _extract_from_file(
     sections = _find_cancellation_sections(text)
     found: list[dict[str, Any]] = []
     source_nreg = path.stem
+    source_display_nreg = _decode_nreg(path.stem)
 
     for sec_start, sec_end, marker in sections:
         section = text[sec_start:sec_end]
         for match in NREG_RE.finditer(section):
-            raw_cancelled = match.group(1).strip()
+            raw_cancelled = _decode_nreg(match.group(1).strip())
             cancelled = known_aliases.get(raw_cancelled, raw_cancelled)
-            if cancelled == source_nreg:
+            if cancelled == source_nreg or _decode_nreg(cancelled) == source_display_nreg:
                 continue
 
             absolute_start = sec_start + match.start()
@@ -248,7 +260,7 @@ def _extract_from_file(
             found.append({
                 "cancelled_nreg": cancelled,
                 "raw_cancelled_nreg": raw_cancelled,
-                "by": source_nreg,
+                "by": source_display_nreg,
                 "source": source,
                 "source_title": title,
                 "marker": marker,

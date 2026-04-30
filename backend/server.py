@@ -4822,6 +4822,18 @@ async def enrich_text_report(
     records = report.get("records")
     if records is None:
         records = report.get("results") or report.get("scrape_candidates") or []
+    from urllib.parse import unquote
+
+    def decode_report_item(item):
+        if not isinstance(item, dict):
+            return item
+        out = dict(item)
+        for key in ("cancelled_nreg", "raw_cancelled_nreg", "nreg", "by"):
+            if isinstance(out.get(key), str):
+                out[key] = unquote(out[key])
+        return out
+
+    records = [decode_report_item(item) for item in records]
     total = len(records)
     summary = {
         "generated_at": report.get("generated_at"),
