@@ -3429,9 +3429,9 @@ def _route_collections(
 # ── Intent classifier → вибір колекцій ───────────────────────────────────────
 
 async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "", query_vector: list | None = None) -> list[str]:
-    """Динамічний роутинг: паралельний vector pre-scan по всіх колекціях.
-    Кожна колекція отримує probe limit=1 — відбираємо ті де vector score > порогу.
-    Нульовий hardcoding: сам вектор вирішує які колекції релевантні."""
+    """Динамічний роутинг: probe по всіх доступних колекціях.
+    Rada має багато доменних колекцій, тому обмежуємо саме їх. Окремі джерела
+    (КМУ, wiki, суди, КСУ, MOD, ZIR) не повинні випадати лише через top-N cutoff."""
     import asyncio as _asyncio
     from qdrant_storage import _search_single as _qdrant_search_single
 
@@ -3439,8 +3439,12 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
         logger.info("ROUTING: no vector → all collections")
         return all_cols
 
-    _probe_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.4) - 0.10)
-    _always_include = {"laws_kmu_v2", "laws_positions_v2"}
+    _always_include = {"laws_kmu_v2", "laws_positions_v2", "laws_supreme_v2"}
+    _rada_prefix = "rada_"
+    _single_source_cols = {
+        "laws_kmu_v2", "laws_wiki_v2", "laws_ccu_v2", "laws_positions_v2",
+        "laws_supreme_v2", "laws_mod_v2", "laws_zir_v2",
+    }
 
     async def _probe(col: str) -> tuple[str, float]:
         try:
@@ -3461,14 +3465,35 @@ async def _classify_and_route(question: str, all_cols: list[str], model_name: st
     probes.sort(key=lambda x: x[1], reverse=True)
     logger.info("PROBE: %s", [(c, round(s, 3)) for c, s in probes])
 
-    chosen = [col for col, score in probes if score >= _probe_threshold]
-    if len(chosen) < 3:
-        chosen = [col for col, _ in probes[:3]]
-    chosen = chosen[:7]
+    max_score = probes[0][1] if probes else 0.0
+    aux_floor = max(0.50, max_score - 0.08)
+    rada_floor = max(0.50, max_score - 0.06)
+    max_rada_cols = int(settings_cache.get_float("routing_max_rada_cols", 5))
+
+    chosen: list[str] = []
+
+    rada_candidates = [
+        (col, score) for col, score in probes
+        if col.startswith(_rada_prefix) and score >= rada_floor
+    ]
+    if not rada_candidates:
+        rada_candidates = [
+            (col, score) for col, score in probes
+            if col.startswith(_rada_prefix)
+        ][:max(2, max_rada_cols)]
+    chosen.extend(col for col, _ in rada_candidates[:max_rada_cols])
+
+    for col, score in probes:
+        if col in _single_source_cols and score >= aux_floor:
+            chosen.append(col)
 
     for _always in _always_include:
         if _always in all_cols and _always not in chosen:
             chosen.append(_always)
+
+    chosen = [c for c in dict.fromkeys(chosen) if c in all_cols]
+    if len(chosen) < 3:
+        chosen = [col for col, _ in probes[:3]]
 
     logger.info("ROUTING → %s", chosen)
     return chosen
@@ -3541,6 +3566,56 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 logger.info("RU→UA: %s → %s", question[:60], search_question[:60])
             except Exception:
                 pass  # fallback — шукаємо оригінальним текстом
+
+        async def _resolve_followup(q: str) -> str:
+            if not body.history:
+                return q
+            try:
+                recent = body.history[-6:]
+                history_lines: list[str] = []
+                for turn in recent:
+                    role = turn.get("role", "")
+                    content = (turn.get("content") or "").strip()
+                    if not content:
+                        continue
+                    label = "Користувач" if role == "user" else "Асистент"
+                    history_lines.append(f"{label}: {content[:900]}")
+                if not history_lines:
+                    return q
+
+                _resolver_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
+                _resolver = GenerativeModel(
+                    _resolver_model_name,
+                    system_instruction=(
+                        "Ти перетворюєш уточнювальне питання в самостійний пошуковий запит "
+                        "українською мовою для пошуку в юридичній базі. "
+                        "Використовуй контекст попереднього діалогу лише якщо поточне питання без нього неоднозначне. "
+                        "Не відповідай на питання. Не додавай фактів, яких немає в діалозі. "
+                        "Поверни тільки один самостійний пошуковий запит без пояснень."
+                    ),
+                )
+                _resolver_prompt = (
+                    "Попередній діалог:\n"
+                    + "\n".join(history_lines)
+                    + f"\n\nПоточне питання: {q}\n\nСамостійний пошуковий запит:"
+                )
+                _resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        _resolver.generate_content,
+                        _resolver_prompt,
+                        generation_config=GenerationConfig(temperature=0.0, max_output_tokens=350),
+                    ),
+                    timeout=6.0,
+                )
+                resolved = (_resp.text or "").strip().split("\n")[0].strip()
+                if resolved and 8 <= len(resolved) <= 400:
+                    logger.info("FOLLOWUP: %s → %s", q[:100], resolved[:180])
+                    return resolved
+            except Exception as e:
+                logger.info("FOLLOWUP resolve failed: %s", e)
+            return q
+
+        search_question = await _resolve_followup(search_question)
 
         async def _rewrite_query(q: str) -> str | None:
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
@@ -4006,13 +4081,25 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    # Protected slots: laws_kmu і laws_positions з title match гарантовано виживають крізь reranker
-    # Причина: реранкер оптимізує "лінгвістичну очевидність", а КМУ/позиції мають сухий табличний текст
+    # Protected slots: key official chunks and one explanatory wiki chunk can survive reranker.
     _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
-    _rr_protected = [r for r in results
-                     if r.get("_collection") in _protected_colls
-                     and (r.get("_title_match") or r.get("_doc_expansion"))
-                     and r["out_metadata"].get("law_id") in _seen_laws_in_semantic][:3]
+    _rr_protected = [
+        r for r in results
+        if r.get("_collection") in _protected_colls
+        and (r.get("_title_match") or r.get("_doc_expansion"))
+        and r["out_metadata"].get("law_id") in _seen_laws_in_semantic
+    ][:3]
+    _wiki_keep = [
+        r for r in results
+        if r.get("_collection") == "laws_wiki_v2" and r.get("similarity", 0.0) >= 0.60
+    ][:1]
+    for _wk in _wiki_keep:
+        _wk_key = (_wk["out_metadata"].get("law_id"), _wk["out_metadata"].get("chunk_index"))
+        if _wk_key not in {
+            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            for r in _rr_protected
+        }:
+            _rr_protected.append(_wk)
     _rr_protected_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
