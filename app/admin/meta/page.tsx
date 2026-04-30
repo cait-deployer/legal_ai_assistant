@@ -48,6 +48,26 @@ type EnrichStatus = {
   enrich: EnrichSubState
   qdrant_meta: EnrichSubState
   text_cancellations: EnrichSubState
+  text_missing_check: EnrichSubState
+}
+
+type TextReportItem = {
+  cancelled_nreg?: string
+  nreg?: string
+  by?: string
+  source_title?: string
+  evidence?: string
+  status?: string
+  title?: string
+  mentions?: number
+}
+
+type TextReport = {
+  kind: string
+  exists: boolean
+  summary: Record<string, unknown>
+  items: TextReportItem[]
+  total: number
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -125,6 +145,8 @@ export default function MetaPage() {
 
   const [status, setStatus] = useState<EnrichStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
+  const [textReport, setTextReport] = useState<TextReport | null>(null)
+  const [textReportKind, setTextReportKind] = useState("missing")
 
   const LIMIT = 50
 
@@ -222,12 +244,40 @@ export default function MetaPage() {
     await fetchStatus()
   }
 
+  async function loadTextReport(kind = textReportKind) {
+    setTextReportKind(kind)
+    const res = await fetch(`/api/admin/enrich/text/report?kind=${kind}&limit=20&offset=0`)
+    const json = await res.json()
+    setTextReport(json)
+  }
+
+  async function startMissingCheck() {
+    setStatusLoading(true)
+    try {
+      await fetch("/api/admin/enrich/text/check-missing/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      await fetchStatus()
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  async function stopMissingCheck() {
+    await fetch("/api/admin/enrich/text/check-missing/stop", { method: "POST" })
+    await fetchStatus()
+  }
+
   const enrichRunning   = status?.enrich?.running ?? false
   const qdrantRunning   = status?.qdrant_meta?.running ?? false
   const textRunning     = status?.text_cancellations?.running ?? false
+  const missingCheckRunning = status?.text_missing_check?.running ?? false
   const enrichState     = status?.enrich?.state ?? {}
   const qdrantState     = status?.qdrant_meta?.state ?? {}
   const textState       = status?.text_cancellations?.state ?? {}
+  const missingCheckState = status?.text_missing_check?.state ?? {}
 
   return (
     <div className="min-h-screen bg-[#0A0E1A] text-[#E0E6ED] p-6 space-y-6">
@@ -313,8 +363,42 @@ export default function MetaPage() {
               >
                 Stop
               </button>
+              <button
+                disabled={textRunning || statusLoading}
+                onClick={() => loadTextReport("missing")}
+                className="px-3 py-1.5 bg-[#1e2a3a] text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Show missing
+              </button>
+              <button
+                disabled={missingCheckRunning || statusLoading}
+                onClick={startMissingCheck}
+                className="px-3 py-1.5 bg-blue-700 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Check OpenData
+              </button>
+              <button
+                disabled={!missingCheckRunning || statusLoading}
+                onClick={stopMissingCheck}
+                className="px-3 py-1.5 bg-red-800 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Stop check
+              </button>
+              <button
+                disabled={missingCheckRunning || statusLoading}
+                onClick={() => loadTextReport("opendata")}
+                className="px-3 py-1.5 bg-[#1e2a3a] text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Show checked
+              </button>
             </div>
             <LogsPanel logs={status?.text_cancellations?.live_logs ?? []} />
+            <LogsPanel logs={status?.text_missing_check?.live_logs ?? []} />
+            <div className="text-xs text-zinc-400">
+              OpenData found: {((missingCheckState.found_count as number | undefined) ?? 0)}
+              {" | "}checked: {((missingCheckState.total_checked as number | undefined) ?? 0)}
+              {" | "}not_found: {((missingCheckState.stats as Record<string, number> | undefined)?.not_found ?? 0)}
+            </div>
           </div>
 
           {/* Qdrant patch */}
@@ -352,6 +436,64 @@ export default function MetaPage() {
       </div>
 
       {/* ── Filters ── */}
+      {textReport && (
+        <div className="bg-[#111827] rounded-xl border border-[#1e2a3a] p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-[#C9A84C]">
+              Text report: {textReport.kind}
+            </h2>
+            <span className="text-sm text-zinc-400">
+              {textReport.exists ? `shown ${textReport.items.length} / ${textReport.total}` : "report not found"}
+            </span>
+            <button
+              onClick={() => loadTextReport(textReportKind)}
+              className="ml-auto px-3 py-1.5 bg-[#1e2a3a] rounded text-sm"
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="text-xs text-zinc-400">
+            unique: {(textReport.summary?.unique_nregs as number | undefined) ?? "—"}
+            {" | "}found: {(textReport.summary?.found_count as number | undefined) ?? "—"}
+            {" | "}generated: {(textReport.summary?.generated_at as string | undefined) ?? "—"}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[#1e2a3a] text-zinc-400">
+                  <th className="px-2 py-1 text-left">nreg</th>
+                  <th className="px-2 py-1 text-left">status</th>
+                  <th className="px-2 py-1 text-left">by</th>
+                  <th className="px-2 py-1 text-left">title / source</th>
+                  <th className="px-2 py-1 text-left">evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {textReport.items.map((item, idx) => (
+                  <tr key={`${item.cancelled_nreg || item.nreg}-${idx}`} className="border-b border-[#1e2a3a]/50">
+                    <td className="px-2 py-1 font-mono text-[#C9A84C] whitespace-nowrap">
+                      {item.cancelled_nreg || item.nreg || "—"}
+                    </td>
+                    <td className="px-2 py-1 text-zinc-300 whitespace-nowrap">
+                      {item.status || (item.mentions ? `${item.mentions} mentions` : "missing")}
+                    </td>
+                    <td className="px-2 py-1 font-mono text-zinc-300 whitespace-nowrap">{item.by || "—"}</td>
+                    <td className="px-2 py-1 text-zinc-300 max-w-[280px]">
+                      <div className="truncate" title={item.title || item.source_title}>
+                        {item.title || item.source_title || "—"}
+                      </div>
+                    </td>
+                    <td className="px-2 py-1 text-zinc-400 max-w-[520px]">
+                      <div className="truncate" title={item.evidence}>{item.evidence || "—"}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="bg-[#111827] rounded-xl border border-[#1e2a3a] p-4 flex flex-wrap gap-3 items-end">
         <div className="space-y-1">
           <label className="text-xs text-zinc-400">Джерело</label>

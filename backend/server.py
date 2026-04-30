@@ -120,6 +120,7 @@ _SOURCES = (
     "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions", "reindex_v2_mod", "reindex_v2_zir",
     "enrich_opendata",    # збагачення метаданих Rada+KMU через OpenData API
     "extract_text_cancellations",
+    "check_text_missing",
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
 )
 _sync: dict[str, dict] = {
@@ -141,6 +142,7 @@ _v2_stop = {
 _v2_scrape_stop = {s: threading.Event() for s in V2_SCRAPE_SOURCES}
 _enrich_stop     = threading.Event()
 _text_cancel_stop = threading.Event()
+_text_missing_check_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
 
 
@@ -4699,6 +4701,25 @@ def _do_extract_text_cancellations(session_id: str, sources: list, dry_run: bool
             _sync[src]["pause_requested"] = False
 
 
+def _do_check_text_missing(session_id: str, limit: int | None = None) -> None:
+    src = "check_text_missing"
+    log = _make_reindex_log_cb(src)
+    try:
+        _text_missing_check_stop.clear()
+        from extract_text_cancellations import run_check_missing_opendata
+        run_check_missing_opendata(
+            log_callback=log,
+            stop_event=_text_missing_check_stop,
+            limit=limit,
+        )
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
 @app.post("/admin/enrich/start")
 async def enrich_start(body: dict = Body(default={})):
     sources = body.get("sources") or ["rada", "kmu"]
@@ -4750,6 +4771,78 @@ async def enrich_text_stop():
     return {"ok": True}
 
 
+@app.post("/admin/enrich/text/check-missing/start")
+async def enrich_text_check_missing_start(body: dict = Body(default={})):
+    limit_raw = body.get("limit")
+    limit = int(limit_raw) if limit_raw else None
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync(
+            "check_text_missing",
+            _do_check_text_missing,
+            session_id,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id, "limit": limit}
+
+
+@app.post("/admin/enrich/text/check-missing/stop")
+async def enrich_text_check_missing_stop():
+    with _lock:
+        if not _sync["check_text_missing"]["running"]:
+            raise HTTPException(400, "Missing OpenData check is not running")
+        _text_missing_check_stop.set()
+        _sync["check_text_missing"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/enrich/text/report")
+async def enrich_text_report(
+    kind: str = "missing",
+    limit: int = 50,
+    offset: int = 0,
+):
+    allowed = {
+        "missing": "text_cancellations_missing_report.json",
+        "partial": "text_cancellations_partial_report.json",
+        "opendata": "text_cancellations_missing_opendata_report.json",
+    }
+    if kind not in allowed:
+        raise HTTPException(400, f"kind must be one of {list(allowed)}")
+    path = Path(__file__).parent / allowed[kind]
+    if not path.exists():
+        return {"kind": kind, "items": [], "total": 0, "summary": {}, "exists": False}
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"Cannot read report: {e}")
+
+    records = report.get("records")
+    if records is None:
+        records = report.get("results") or report.get("scrape_candidates") or []
+    total = len(records)
+    summary = {
+        "generated_at": report.get("generated_at"),
+        "kind": report.get("kind", kind),
+        "total_records": report.get("total_records", total),
+        "unique_nregs": report.get("unique_nregs"),
+        "stats": report.get("stats", {}),
+        "found_count": report.get("found_count"),
+        "top": report.get("top", [])[:20],
+    }
+    return {
+        "kind": kind,
+        "exists": True,
+        "summary": summary,
+        "items": records[offset: offset + limit],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
 @app.get("/admin/enrich/status")
 async def enrich_status():
     with _lock:
@@ -4759,6 +4852,8 @@ async def enrich_status():
         qdm_logs = list(qdm.get("live_logs", []))
         text_cancel = dict(_sync["extract_text_cancellations"])
         text_cancel_logs = list(text_cancel.get("live_logs", []))
+        text_missing = dict(_sync["check_text_missing"])
+        text_missing_logs = list(text_missing.get("live_logs", []))
 
     state_file = Path(__file__).parent / "enrich_opendata_state.json"
     state = {}
@@ -4784,6 +4879,14 @@ async def enrich_status():
         except Exception:
             pass
 
+    text_missing_state_file = Path(__file__).parent / "text_cancellations_missing_opendata_state.json"
+    text_missing_state = {}
+    if text_missing_state_file.exists():
+        try:
+            text_missing_state = json.loads(text_missing_state_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
     return {
         "enrich": {
             "running":         s.get("running", False),
@@ -4802,6 +4905,12 @@ async def enrich_status():
             "pause_requested": text_cancel.get("pause_requested", False),
             "live_logs":       text_cancel_logs,
             "state":           text_state,
+        },
+        "text_missing_check": {
+            "running":         text_missing.get("running", False),
+            "pause_requested": text_missing.get("pause_requested", False),
+            "live_logs":       text_missing_logs,
+            "state":           text_missing_state,
         },
     }
 

@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import requests
 import threading
 import time
 from collections import Counter, defaultdict
@@ -29,6 +30,10 @@ if not RAW_BASE.exists():
 
 CACHE_FILE = BACKEND / "text_cancellations_cache.json"
 STATE_FILE = BACKEND / "text_cancellations_state.json"
+MISSING_REPORT_FILE = BACKEND / "text_cancellations_missing_report.json"
+PARTIAL_REPORT_FILE = BACKEND / "text_cancellations_partial_report.json"
+OPENDATA_REPORT_FILE = BACKEND / "text_cancellations_missing_opendata_report.json"
+OPENDATA_STATE_FILE = BACKEND / "text_cancellations_missing_opendata_state.json"
 
 SOURCES = ["rada", "kmu"]
 
@@ -90,6 +95,10 @@ def _save_state(state: dict[str, Any]) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _save_check_state(state: dict[str, Any]) -> None:
+    OPENDATA_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -104,6 +113,22 @@ def _read_text(path: Path) -> str:
         except UnicodeDecodeError:
             continue
     return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _write_report(path: Path, records: list[dict[str, Any]], kind: str) -> dict[str, Any]:
+    counts: dict[str, int] = Counter(str(r.get("cancelled_nreg", "")) for r in records if r.get("cancelled_nreg"))
+    unique = len(counts)
+    top = [{"nreg": nreg, "count": count} for nreg, count in counts.most_common(100)]
+    payload = {
+        "generated_at": datetime.utcnow().isoformat(),
+        "kind": kind,
+        "total_records": len(records),
+        "unique_nregs": unique,
+        "top": top,
+        "records": records,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
 
 
 def _norm(s: str) -> str:
@@ -339,6 +364,13 @@ def run_extract(
             "examples": examples,
         }
 
+        missing_report = _write_report(MISSING_REPORT_FILE, missing, "missing")
+        partial_report = _write_report(PARTIAL_REPORT_FILE, partial, "partial")
+        _log(
+            f"[text cancellations] Reports written | missing_unique={missing_report['unique_nregs']} "
+            f"partial_unique={partial_report['unique_nregs']}"
+        )
+
         if not dry_run:
             CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             _log(f"[text cancellations] Cache written: {CACHE_FILE}")
@@ -351,6 +383,16 @@ def run_extract(
             "completed_at": datetime.utcnow().isoformat(),
             "stats": dict(stats),
             "unique_cancelled": len(cache),
+            "missing_report": {
+                "path": str(MISSING_REPORT_FILE),
+                "records": missing_report["total_records"],
+                "unique": missing_report["unique_nregs"],
+            },
+            "partial_report": {
+                "path": str(PARTIAL_REPORT_FILE),
+                "records": partial_report["total_records"],
+                "unique": partial_report["unique_nregs"],
+            },
             "examples": examples,
             "cache_file": str(CACHE_FILE),
         })
@@ -370,10 +412,146 @@ def run_extract(
         raise
 
 
+def _check_card(nreg: str) -> dict[str, Any]:
+    url = f"https://data.rada.gov.ua/laws/card/{nreg}.json"
+    try:
+        res = requests.get(url, timeout=12)
+        if res.status_code == 200:
+            try:
+                data = res.json()
+            except Exception:
+                return {"nreg": nreg, "status": "bad_json", "url": url}
+            if "nazva" not in data:
+                return {"nreg": nreg, "status": "not_found", "url": url}
+            return {
+                "nreg": nreg,
+                "status": "found",
+                "url": url,
+                "title": data.get("nazva", ""),
+                "doc_status": data.get("status"),
+                "dokid": data.get("dokid"),
+                "typ": data.get("typ"),
+                "orgid": data.get("orgid", data.get("org", "")),
+            }
+        if res.status_code == 404:
+            return {"nreg": nreg, "status": "not_found", "url": url}
+        if res.status_code == 429:
+            return {"nreg": nreg, "status": "rate_limit", "url": url}
+        return {"nreg": nreg, "status": f"http_{res.status_code}", "url": url}
+    except requests.exceptions.Timeout:
+        return {"nreg": nreg, "status": "timeout", "url": url}
+    except requests.exceptions.ConnectionError:
+        return {"nreg": nreg, "status": "connection", "url": url}
+    except Exception as exc:
+        return {"nreg": nreg, "status": f"error:{type(exc).__name__}", "error": str(exc), "url": url}
+
+
+def run_check_missing_opendata(
+    log_callback=print,
+    stop_event: threading.Event | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Check missing report nregs against Rada OpenData card API."""
+    global _stop_event, _log_fn
+    _stop_event = stop_event
+    _log_fn = log_callback
+
+    started = time.time()
+    state: dict[str, Any] = {
+        "running": True,
+        "phase": "check_opendata",
+        "started_at": datetime.utcnow().isoformat(),
+        "stats": {},
+    }
+    _save_check_state(state)
+
+    if not MISSING_REPORT_FILE.exists():
+        msg = f"Missing report not found: {MISSING_REPORT_FILE}"
+        _log(f"[missing opendata] {msg}", "error")
+        state.update({"running": False, "phase": "error", "error": msg})
+        _save_check_state(state)
+        raise FileNotFoundError(msg)
+
+    report = _read_json(MISSING_REPORT_FILE)
+    counts = Counter(str(r.get("cancelled_nreg", "")) for r in report.get("records", []) if r.get("cancelled_nreg"))
+    nregs = list(counts.keys())
+    if limit and limit > 0:
+        nregs = nregs[:limit]
+
+    _log(f"[missing opendata] Start | unique={len(nregs)} | report_records={report.get('total_records', 0)}")
+    results: list[dict[str, Any]] = []
+    stats = Counter()
+    log_every = max(20, len(nregs) // 50) if nregs else 20
+
+    try:
+        for idx, nreg in enumerate(nregs, start=1):
+            if stop_event and stop_event.is_set():
+                _log(f"[missing opendata] Stop requested at {idx}/{len(nregs)}", "warning")
+                break
+
+            item = _check_card(nreg)
+            item["mentions"] = counts.get(nreg, 0)
+            results.append(item)
+            stats[item["status"]] += 1
+
+            if item["status"] == "rate_limit":
+                _log("[missing opendata] Rate limit, sleeping 30s", "warning")
+                time.sleep(30)
+            else:
+                time.sleep(0.05)
+
+            if idx % log_every == 0 or idx == len(nregs):
+                elapsed = time.time() - started
+                speed = round(idx / elapsed, 1) if elapsed > 0 else 0
+                _log(
+                    f"[missing opendata] {idx}/{len(nregs)} | found={stats['found']} "
+                    f"not_found={stats['not_found']} retry={stats['rate_limit'] + stats['timeout'] + stats['connection']} "
+                    f"other={sum(v for k, v in stats.items() if k not in {'found','not_found','rate_limit','timeout','connection'})} "
+                    f"| {speed} nreg/s"
+                )
+
+        found = [r for r in results if r.get("status") == "found"]
+        payload = {
+            "generated_at": datetime.utcnow().isoformat(),
+            "source_report": str(MISSING_REPORT_FILE),
+            "stats": dict(stats),
+            "total_checked": len(results),
+            "found_count": len(found),
+            "scrape_candidates": found,
+            "results": results,
+        }
+        OPENDATA_REPORT_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        state.update({
+            "running": False,
+            "phase": "done",
+            "completed_at": datetime.utcnow().isoformat(),
+            "stats": dict(stats),
+            "total_checked": len(results),
+            "found_count": len(found),
+            "report_file": str(OPENDATA_REPORT_FILE),
+        })
+        _save_check_state(state)
+        _log(
+            f"[missing opendata] Done | checked={len(results)} found={len(found)} "
+            f"not_found={stats['not_found']} errors={sum(v for k, v in stats.items() if k not in {'found','not_found'})}"
+        )
+        return payload
+    except Exception as exc:
+        state.update({"running": False, "phase": "error", "error": str(exc)})
+        _save_check_state(state)
+        _log(f"[missing opendata] CRITICAL: {exc}", "error")
+        raise
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract text-based cancellation facts")
     parser.add_argument("--source", choices=["rada", "kmu", "all"], default="all")
     parser.add_argument("--apply", action="store_true", help="Write text_cancellations_cache.json")
+    parser.add_argument("--check-missing", action="store_true", help="Check missing report nregs in OpenData")
+    parser.add_argument("--limit", type=int, default=None, help="Limit OpenData missing check")
     args = parser.parse_args()
-    srcs = SOURCES if args.source == "all" else [args.source]
-    run_extract(sources=srcs, dry_run=not args.apply)
+    if args.check_missing:
+        run_check_missing_opendata(limit=args.limit)
+    else:
+        srcs = SOURCES if args.source == "all" else [args.source]
+        run_extract(sources=srcs, dry_run=not args.apply)
