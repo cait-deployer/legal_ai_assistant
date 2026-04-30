@@ -401,6 +401,63 @@ def search_qdrant_in_law(
         return []
 
 
+def search_law_chunks_by_terms(
+    collection_name: str,
+    law_id: str,
+    terms: list[str],
+    top_k: int = 5,
+) -> list:
+    client = get_client()
+    cleaned_terms = list(dict.fromkeys(t.lower() for t in terms if len(t) >= 4))
+    if not cleaned_terms:
+        return []
+    law_filter = Filter(
+        must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]
+    )
+    try:
+        points, _ = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=law_filter,
+            limit=250,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as e:
+        print(f"⚠️ search_law_chunks_by_terms [{collection_name}:{law_id}]: {e}")
+        return []
+
+    ranked: list[tuple[int, int, object]] = []
+    for p in points:
+        payload = p.payload or {}
+        source = str(payload.get("source", "")).lower()
+        content = str(payload.get("content", "")).lower()
+        text = f"{source}\n{content}"
+        content_matches = sum(1 for term in cleaned_terms if term in content)
+        all_matches = sum(1 for term in cleaned_terms if term in text)
+        if all_matches == 0:
+            continue
+        ranked.append((content_matches, all_matches, p))
+
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            item[2].payload.get("chunk_index", 0),
+        )
+    )
+    return [
+        {
+            "out_content":  p.payload.get("content", ""),
+            "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
+            "similarity":   min(0.70 + 0.03 * content_matches, 0.86),
+            "_collection":  collection_name,
+            "_doc_expansion": True,
+            "_term_expansion": True,
+        }
+        for content_matches, _, p in ranked[:top_k]
+    ]
+
+
 # ── СТАТИСТИКА ─────────────────────────────────────────────────────────────────
 
 def get_collection_stats() -> dict:

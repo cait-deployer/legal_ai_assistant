@@ -3801,7 +3801,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # If vector search found the right document, fetch the best sibling chunks inside
     # the same law_id. This avoids sending the whole law while fixing title/preamble hits.
     try:
-        from qdrant_storage import search_qdrant_in_law
+        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
         _expanded_keys = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
@@ -3826,9 +3826,26 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         _expanded_added = 0
         _expansion_vector = rw_vector or query_vector
+        _term_text = f"{search_question} {rewritten_query or ''}".strip()
+        _doc_stopwords = {
+            "надай", "надайте", "інформацію", "інформація", "інфо", "питання",
+            "щодо", "стосовно",
+        }
+        _doc_terms = []
+        for _raw in re.findall(r"[\w'-]+", _term_text.lower()):
+            if len(_raw) < 4 or _raw in _doc_stopwords:
+                continue
+            _doc_terms.append(_raw)
+            _lemma = _ua_lemma(_raw)
+            if _lemma and _lemma not in _doc_stopwords:
+                _doc_terms.append(_lemma)
+        _doc_terms = list(dict.fromkeys(_doc_terms))[:14]
         for _col, _lid in _seed_docs:
             _doc_chunks = search_qdrant_in_law(
                 _col, _lid, _expansion_vector, top_k=4, threshold=0.0
+            )
+            _doc_chunks += search_law_chunks_by_terms(
+                _col, _lid, _doc_terms, top_k=4
             )
             for _chunk in _doc_chunks:
                 _key = (
@@ -3860,9 +3877,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _kw_query_words = {w.lower() for w in _kw_query.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
         _kw_stopwords = {
             "надай", "надайте", "інформацію", "інформація", "інфо", "питання",
-            "порядок", "витрат", "витрати", "калькуляції", "калькуляція",
-            "розрахунок", "розрахунку", "законодавство", "законодавству",
-            "норми", "норма", "суми", "сума", "щодо", "стосовно",
+            "щодо", "стосовно",
         }
         _kw_query_words = {w for w in _kw_query_words if w not in _kw_stopwords}
         # Лематизація через pymorphy замість агресивного [:-2] обрізання
@@ -3917,9 +3932,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "правда", "справді", "взнати", "дізнатись", "дізнатися", "пояснити",
         "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
         "надай", "надайте", "інформацію", "інфо", "покажи", "покажіть",
-        "порядок", "витрат", "витрати", "калькуляції", "калькуляція",
-        "розрахунок", "розрахунку", "законодавство", "законодавству",
-        "норми", "норма", "суми", "сума",
     }
     try:
         from qdrant_storage import search_qdrant_by_title
@@ -4054,6 +4066,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 import json, re as _re
                 # Strip markdown code fences (```json ... ```) before parsing
                 _rr_clean = _re.sub(r'^```(?:json)?\s*|\s*```\s*$', '', _rr_raw.strip(), flags=_re.DOTALL)
+                _rr_clean = _rr_clean.replace("'", '"')
                 _parsed = json.loads(_rr_clean)
                 _raw_indices = _parsed.get("indices", [])
             except Exception as e:
@@ -4274,8 +4287,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_instructions.append(
             "ПРАВИЛО ЦИТУВАННЯ (обов'язкове): кожне юридичне твердження МУСИТЬ мати посилання [N]. "
             "Якщо не можеш процитувати конкретний пункт із наданих документів — НЕ пиши це твердження взагалі. "
-            "Використовуй точні юридичні терміни з документу: 'аванс' — це аванс, 'ліміт' — ліміт, "
-            "'добові' — лише якщо документ прямо вживає це слово. НЕ перефразовуй поняття."
+            "Використовуй точні юридичні терміни з документа і не підміняй одне поняття іншим."
         )
 
         # Retrieval quality guardrail — якщо пошук слабкий, чіткий вердикт замість домислів
