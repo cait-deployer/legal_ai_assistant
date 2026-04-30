@@ -3936,20 +3936,17 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _rr_select = min(body.max_docs, max(8, body.max_docs // 2))
             _rr_slots = max(1, _rr_select - len(_rr_protected))
             _rerank_prompt = (
-                f"Питання: {search_question}\n\n"
-                f"Нижче {len(_candidates)} фрагментів юридичних документів.\n"
-                "Пріоритет: закони і кодекси > постанови КМУ > правові позиції ВС > вікі. Правові позиції корисні для тлумачення, але якщо є пряма норма закону — вибирай її першою.\n"
-                f"ОБОВ'ЯЗКОВО вибери рівно {_rr_slots} найкорисніших фрагментів.\n"
-                f"Якщо знайшов хоча б {_rr_slots} підходящих — вибери всі {_rr_slots}.\n"
-                "Відповідь має бути СТРОГО у форматі JSON:\n"
-                '{"indices": [3, 7, 1, 12]}\n'
-                f"Індекси — це номери фрагментів (від 1 до {len(_candidates)}).\n\n"
+                f"Respond ONLY with a JSON object, no other text.\n"
+                f"Format: {{\"indices\": [3, 7, 1, 12]}}\n\n"
+                f"Task: select the {_rr_slots} most relevant fragments for the question below.\n"
+                f"Priority: laws/codes > KMU resolutions > Supreme Court positions > wiki.\n"
+                f"Indices are fragment numbers from 1 to {len(_candidates)}.\n\n"
+                f"Question: {search_question}\n\n"
                 f"{_chunks_text}"
             )
             _rr_cfg_json = GenerationConfig(
-                temperature=0.0, 
-                max_output_tokens=200, 
-                response_mime_type="application/json"
+                temperature=0.0,
+                max_output_tokens=200,
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
@@ -3977,6 +3974,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 _raw_indices = _parsed.get("indices", [])
             except Exception as e:
                 logger.warning(f"Reranker JSON parse error: {e} | Raw: {_rr_raw[:100]}")
+                # Regex fallback: extract numbers even from non-JSON response
+                import re as _re
+                _found_nums = _re.findall(r'\b(\d+)\b', _rr_raw)
+                _raw_indices = [int(n) for n in _found_nums if 1 <= int(n) <= len(_candidates)]
 
             _indices = []
             for num in _raw_indices:
