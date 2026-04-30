@@ -3523,131 +3523,6 @@ class GenerateUserPromptRequest(BaseModel):
 _CLF_FALLBACK = {"sentiment": "neutral", "complexity_score": 1, "user_intent": "консультація"}
 
 
-_QUERY_STOPWORDS = {
-    "дай", "дайте", "надай", "надайте", "інфо", "інформацію", "інформація",
-    "щодо", "стосовно", "про", "по", "для", "при", "або", "или", "та", "і",
-    "й", "в", "у", "на", "з", "із", "від", "до", "як", "які", "який", "яка",
-    "это", "це", "ця", "цей", "вони", "воно", "там", "так", "само", "тому",
-}
-
-
-def _query_terms(text: str, limit: int = 24) -> list[str]:
-    terms: list[str] = []
-    for raw in re.findall(r"[\w'-]+", (text or "").lower()):
-        if len(raw) < 4 or raw in _QUERY_STOPWORDS:
-            continue
-        terms.append(raw)
-        lemma = _ua_lemma(raw)
-        if lemma and lemma not in _QUERY_STOPWORDS:
-            terms.append(lemma)
-    return list(dict.fromkeys(terms))[:limit]
-
-
-def _last_user_question(history: list[dict] | None) -> str:
-    if not history:
-        return ""
-    for turn in reversed(history):
-        if turn.get("role") == "user":
-            content = (turn.get("content") or "").strip()
-            if content:
-                return content[:600]
-    return ""
-
-
-def _looks_like_followup(text: str) -> bool:
-    q = (text or "").strip().lower()
-    if not q:
-        return False
-    words = re.findall(r"[\w'-]+", q)
-    if len(words) <= 7:
-        return True
-    return any(marker in q for marker in (" це ", " цей ", " ця ", " ті ", " вони ", " так само", "а для "))
-
-
-def _term_overlap_score(result: dict, terms: list[str]) -> int:
-    meta = result.get("out_metadata", {})
-    haystack = (
-        (meta.get("source") or "") + " " +
-        (meta.get("title") or "") + " " +
-        (result.get("out_content") or "")
-    ).lower()
-    return sum(1 for term in terms if term in haystack)
-
-
-def _authority_score(result: dict) -> float:
-    col = result.get("_collection", "")
-    meta = result.get("out_metadata", {})
-    doc_type = meta.get("rada_doc_type") or meta.get("doc_type", "")
-
-    score = 1.0
-    if col == "laws_kmu_v2":
-        score = 1.18
-    elif col.startswith("rada_"):
-        score = 1.12
-    elif col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2"):
-        score = 1.03
-    elif col == "laws_zir_v2":
-        score = 0.96
-    elif col == "laws_wiki_v2":
-        score = 0.90
-
-    type_boost = {
-        "Кодекс": 0.08,
-        "Закон": 0.07,
-        "Постанова": 0.06,
-        "Наказ": 0.04,
-        "Розпорядження": 0.03,
-        "Лист": -0.08,
-        "Роз'яснення": -0.05,
-        "Інформаційний лист": -0.08,
-    }.get(doc_type, 0.0)
-    return score + type_boost
-
-def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs: int) -> list[dict]:
-    terms = _query_terms(query_text)
-    if len(terms) < 2:
-        return results[:max_docs]
-
-    scored = [(_term_overlap_score(r, terms), r) for r in results]
-    matched = [(score, r) for score, r in scored if score > 0]
-    if len(matched) < 2:
-        return results[:max_docs]
-
-    matched.sort(
-        key=lambda item: (
-            item[0],
-            _authority_score(item[1]),
-            item[1].get("similarity", 0.0),
-        ),
-        reverse=True,
-    )
-    matched_rows = [r for _, r in matched]
-    matched_keys = {
-        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-        for r in matched_rows
-    }
-    remainder = [
-        r for _, r in scored
-        if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) not in matched_keys
-    ]
-    reranked = (matched_rows + remainder)[:max_docs]
-    logger.info(
-        "TERM RERANK: matched=%d total=%d terms=%s",
-        len(matched_rows),
-        len(reranked),
-        terms[:10],
-    )
-    return reranked
-
-
-def _citations_used_in_answer(answer: str, citations: list[dict]) -> list[dict]:
-    used = {int(n) for n in re.findall(r"\[(\d+)\]", answer or "")}
-    if not used:
-        return citations
-    filtered = [c for c in citations if int(c.get("num", 0) or 0) in used]
-    return filtered or citations
-
-
 async def _ask_pipeline(body: AskRequest) -> dict:
     """Retrieval → rerank → context → prompt building. Повертає dict для /ask і /ask_stream."""
     import asyncio as _asyncio
@@ -3740,12 +3615,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 logger.info("FOLLOWUP resolve failed: %s", e)
             return q
 
-        _question_before_followup = search_question
         search_question = await _resolve_followup(search_question)
-        _previous_user_question = _last_user_question(body.history)
-        if _previous_user_question and _looks_like_followup(_question_before_followup):
-            search_question = f"{search_question}\nКонтекст попереднього питання: {_previous_user_question}"
-            logger.info("FOLLOWUP CONTEXT MERGE: %s", search_question[:220])
 
         async def _rewrite_query(q: str) -> str | None:
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
@@ -4016,76 +3886,56 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ) or "NONE",
     )
 
-    # Document-set expansion: first select several relevant documents, then fetch
-    # only the best sibling chunks inside each law_id. This avoids both extremes:
-    # one-document tunnel vision and sending entire large laws to the model.
+    # If vector search found the right document, fetch the best sibling chunks inside
+    # the same law_id. This avoids sending the whole law while fixing title/preamble hits.
     try:
         from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
         _expanded_keys = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
         }
-        _term_text = f"{search_question} {rewritten_query or ''}".strip()
-        _doc_terms = _query_terms(_term_text, limit=18)
+        _seed_docs: list[tuple[str, str]] = []
+        _seen_seed_docs: set[tuple[str, str]] = set()
         _expand_min_score = max(match_threshold, 0.55)
-
-        _seed_candidates: dict[tuple[str, str], dict] = {}
-        _seed_pool = list(raw_semantic_results[: max(20, body.max_docs * 3)]) + list(results)
-        for r in _seed_pool:
-            sim = r.get("similarity", 0.0)
-            if sim < _expand_min_score:
+        for r in raw_semantic_results[:12]:
+            if r.get("similarity", 0.0) < _expand_min_score:
                 continue
             _col = r.get("_collection", "")
             _lid = r["out_metadata"].get("law_id", "")
             if not _col or not _lid:
                 continue
             _doc_key = (_col, _lid)
-            _overlap = _term_overlap_score(r, _doc_terms)
-            _authority = _authority_score(r)
-            _score = (sim * 0.70) + (min(_overlap, 6) * 0.035) + (_authority * 0.22)
-            prev = _seed_candidates.get(_doc_key)
-            if not prev or _score > prev["score"]:
-                _seed_candidates[_doc_key] = {
-                    "score": _score,
-                    "overlap": _overlap,
-                    "similarity": sim,
-                    "authority": _authority,
-                }
+            if _doc_key in _seen_seed_docs:
+                continue
+            _seed_docs.append(_doc_key)
+            _seen_seed_docs.add(_doc_key)
+            if len(_seed_docs) >= 8:
+                break
 
         _expanded_added = 0
         _expansion_vector = rw_vector or query_vector
-        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", min(8, max(4, body.max_docs // 2))))
-        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", 3))
-        _seed_docs = sorted(
-            _seed_candidates.items(),
-            key=lambda item: (
-                item[1]["score"],
-                item[1]["authority"],
-                item[1]["overlap"],
-                item[1]["similarity"],
-            ),
-            reverse=True,
-        )[:_seed_limit]
-
-        for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
+        _term_text = f"{search_question} {rewritten_query or ''}".strip()
+        _doc_stopwords = {
+            "надай", "надайте", "інформацію", "інформація", "інфо", "питання",
+            "щодо", "стосовно",
+        }
+        _doc_terms = []
+        for _raw in re.findall(r"[\w'-]+", _term_text.lower()):
+            if len(_raw) < 4 or _raw in _doc_stopwords:
+                continue
+            _doc_terms.append(_raw)
+            _lemma = _ua_lemma(_raw)
+            if _lemma and _lemma not in _doc_stopwords:
+                _doc_terms.append(_lemma)
+        _doc_terms = list(dict.fromkeys(_doc_terms))[:14]
+        for _col, _lid in _seed_docs:
             _doc_chunks = search_qdrant_in_law(
-                _col, _lid, _expansion_vector, top_k=_per_doc_limit, threshold=0.0
+                _col, _lid, _expansion_vector, top_k=4, threshold=0.0
             )
             _doc_chunks += search_law_chunks_by_terms(
-                _col, _lid, _doc_terms, top_k=_per_doc_limit
+                _col, _lid, _doc_terms, top_k=4
             )
-            _doc_chunks = sorted(
-                _doc_chunks,
-                key=lambda c: (
-                    _term_overlap_score(c, _doc_terms),
-                    c.get("similarity", 0.0),
-                ),
-                reverse=True,
-            )
-            _taken_for_doc = 0
             for _chunk in _doc_chunks:
-                if _taken_for_doc >= _per_doc_limit:
-                    break
                 _key = (
                     _chunk["out_metadata"].get("law_id"),
                     _chunk["out_metadata"].get("chunk_index"),
@@ -4093,20 +3943,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 if _key in _expanded_keys:
                     continue
                 _chunk["similarity"] = max(_chunk.get("similarity", 0.0), 0.68)
-                _chunk["_docset_rank"] = _doc_rank
-                _chunk["_docset_overlap"] = _seed_info["overlap"]
                 results.append(_chunk)
                 _expanded_keys.add(_key)
                 _expanded_added += 1
-                _taken_for_doc += 1
         if _expanded_added:
             results.sort(key=lambda x: x["similarity"], reverse=True)
-            logger.info(
-                "DOC SET EXPANSION: додано %d чанків із %d документів: %s",
-                _expanded_added,
-                len(_seed_docs),
-                [f"{col}:{lid}:s={info['score']:.3f}:ov={info['overlap']}:a={info['authority']:.2f}" for (col, lid), info in _seed_docs[:8]],
-            )
+            logger.info("DOC EXPANSION: додано %d чанків із %d документів", _expanded_added, len(_seed_docs))
     except Exception as _de_err:
         logger.warning("Doc expansion error: %s", _de_err)
 
@@ -4239,8 +4081,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    # Protected slots: keep the strongest chunk from several expanded documents so
-    # reranker cannot collapse a multi-document answer back to one law_id.
+    # Protected slots: key official chunks and one explanatory wiki chunk can survive reranker.
     _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
     _rr_protected = [
         r for r in results
@@ -4248,35 +4089,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         and (r.get("_title_match") or r.get("_doc_expansion"))
         and r["out_metadata"].get("law_id") in _seen_laws_in_semantic
     ][:3]
-    _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
-    _docset_keep: list[dict] = []
-    _docset_seen: set[tuple[str, str]] = set()
-    for _r in sorted(
-        (r for r in results if r.get("_doc_expansion")),
-        key=lambda r: (
-            -int(r.get("_docset_rank") or 999),
-            _authority_score(r),
-            _term_overlap_score(r, _docset_terms),
-            r.get("similarity", 0.0),
-        ),
-        reverse=True,
-    ):
-        _doc_key = (_r.get("_collection", ""), _r["out_metadata"].get("law_id", ""))
-        if _doc_key in _docset_seen:
-            continue
-        if _term_overlap_score(_r, _docset_terms) <= 0:
-            continue
-        _docset_keep.append(_r)
-        _docset_seen.add(_doc_key)
-        if len(_docset_keep) >= max(3, min(6, body.max_docs // 2)):
-            break
-    for _dk in _docset_keep:
-        _dk_key = (_dk["out_metadata"].get("law_id"), _dk["out_metadata"].get("chunk_index"))
-        if _dk_key not in {
-            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-            for r in _rr_protected
-        }:
-            _rr_protected.append(_dk)
     _wiki_keep = [
         r for r in results
         if r.get("_collection") == "laws_wiki_v2" and r.get("similarity", 0.0) >= 0.60
@@ -4326,9 +4138,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 f"Respond ONLY with a JSON object, no other text.\n"
                 f"Format: {{\"indices\": [3, 7, 1, 12]}}\n\n"
                 f"Task: select the {_rr_slots} most relevant fragments for the question below.\n"
-                f"Priority: direct normative acts and official procedures first "
-                f"(laws/codes, KMU resolutions, ministry orders/instructions), then official tax explanations, "
-                f"then court positions, then wiki/background materials.\n"
+                f"Priority: laws/codes > KMU resolutions > Supreme Court positions > wiki.\n"
                 f"Indices are fragment numbers from 1 to {len(_candidates)}.\n\n"
                 f"Question: {search_question}\n\n"
                 f"{_chunks_text}"
@@ -4406,12 +4216,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             results = results[:body.max_docs]
     else:
         results = results[:body.max_docs]
-
-    results = _prefer_term_matched_results(
-        results,
-        f"{search_question} {rewritten_query or ''}",
-        body.max_docs,
-    )
 
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
@@ -4804,11 +4608,9 @@ async def ask(body: AskRequest):
     category = max(set(cats), key=cats.count) if cats else "Загальне"
     elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
-    answer_citations = _citations_used_in_answer(answer, pipe["citations"])
-
     return {
         "answer": answer,
-        "references": answer_citations,
+        "references": pipe["citations"],
         "templates": [],
         "_meta": {
             "processing_time_ms": elapsed_ms,
@@ -4963,11 +4765,9 @@ async def ask_stream(body: AskRequest):
         category = max(set(cats), key=cats.count) if cats else "Загальне"
         elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
-        answer_citations = _citations_used_in_answer(full_answer, pipe["citations"])
-
         citations_payload = {
             "answer": full_answer,
-            "references": answer_citations,
+            "references": pipe["citations"],
             "templates": [],
             "_meta": {
                 "processing_time_ms": elapsed_ms,
