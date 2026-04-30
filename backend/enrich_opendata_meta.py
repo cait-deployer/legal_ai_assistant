@@ -68,6 +68,7 @@ def _fetch_card(nreg: str) -> tuple[dict | None, str]:
 
 CARDS_CACHE = BACKEND / "enrich_opendata_cards_cache.json"
 STATE_FILE  = BACKEND / "enrich_opendata_state.json"
+TEXT_CANCELLATIONS_CACHE = BACKEND / "text_cancellations_cache.json"
 
 SLEEP_SEC      = 0.05
 RETRY_SLEEP    = 30
@@ -506,6 +507,15 @@ def run_phase3(
                     pass
 
             enriched = _build_enriched(api_key, card, reverse_dead, dokid_to_nreg)
+            if existing.get("rada_is_dead_by_text"):
+                enriched["rada_is_dead"] = True
+                enriched["rada_is_dead_by_text"] = True
+                if existing.get("rada_cancelled_by_text"):
+                    enriched["rada_cancelled_by_text"] = existing.get("rada_cancelled_by_text")
+                if existing.get("rada_cancelled_by_text_details"):
+                    enriched["rada_cancelled_by_text_details"] = existing.get("rada_cancelled_by_text_details")
+                if existing.get("rada_text_dead_confidence"):
+                    enriched["rada_text_dead_confidence"] = existing.get("rada_text_dead_confidence")
             existing.update(enriched)
             meta_path.write_text(
                 json.dumps(existing, ensure_ascii=False, indent=2),
@@ -567,6 +577,145 @@ def run_phase3(
 
 
 # ── Головна функція ────────────────────────────────────────────────────────────
+
+def _local_meta_lookup(sources: list[str]) -> dict[str, tuple[str, str, Path]]:
+    lookup: dict[str, tuple[str, str, Path]] = {}
+    for src, nreg in _get_all_nregs(sources):
+        meta_path = RAW_BASE / src / f"{nreg}.meta.json"
+        lookup[nreg] = (src, nreg, meta_path)
+        api_key = _api_nreg(src, nreg)
+        lookup[api_key] = (src, nreg, meta_path)
+        if src == "kmu" and not nreg.startswith("kmu_"):
+            lookup[f"kmu_{nreg}"] = (src, nreg, meta_path)
+    return lookup
+
+
+def _uniq_list(values: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def run_phase4_text_cancellations(sources: list[str]) -> dict:
+    """Apply text_cancellations_cache.json to local .meta.json files."""
+    if not TEXT_CANCELLATIONS_CACHE.exists():
+        _log(f"[Phase 4] text cancellation cache not found: {TEXT_CANCELLATIONS_CACHE}", "warning")
+        return {"updated": 0, "skipped": 0, "errors": 0, "cache_found": False}
+
+    try:
+        payload = json.loads(TEXT_CANCELLATIONS_CACHE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log(f"[Phase 4] Cannot read text cancellation cache: {exc}", "error")
+        return {"updated": 0, "skipped": 0, "errors": 1, "cache_found": True}
+
+    cancellations = payload.get("cancellations") or {}
+    lookup = _local_meta_lookup(sources)
+    updated = skipped = errors = already = 0
+    examples = 0
+    t0 = time.time()
+    total = len(cancellations)
+    _log(f"[Phase 4] Text cancellations: cache_targets={total} | local_aliases={len(lookup)}")
+
+    for idx, (cancelled_nreg, entries) in enumerate(cancellations.items(), start=1):
+        if _stop_event and _stop_event.is_set():
+            _log(f"[Phase 4] Stopped at {idx}/{total}", "warning")
+            break
+
+        target = lookup.get(cancelled_nreg)
+        if not target:
+            skipped += 1
+            continue
+
+        _, nreg, meta_path = target
+        full_entries = [
+            e for e in entries
+            if e.get("kind") == "full" and e.get("confidence") == "high"
+        ]
+        if not full_entries:
+            skipped += 1
+            continue
+
+        try:
+            existing: dict = {}
+            if meta_path.exists():
+                try:
+                    existing = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    existing = {}
+
+            old_by = existing.get("rada_cancelled_by_text") or []
+            new_by = _uniq_list(old_by + [str(e.get("by", "")) for e in full_entries])
+            details = existing.get("rada_cancelled_by_text_details") or []
+            detail_keys = {
+                (
+                    str(d.get("by", "")),
+                    str(d.get("raw_cancelled_nreg", "")),
+                    str(d.get("evidence", ""))[:120],
+                )
+                for d in details if isinstance(d, dict)
+            }
+            for entry in full_entries:
+                detail = {
+                    "by": entry.get("by"),
+                    "source": entry.get("source"),
+                    "source_title": entry.get("source_title"),
+                    "raw_cancelled_nreg": entry.get("raw_cancelled_nreg"),
+                    "marker": entry.get("marker"),
+                    "kind": entry.get("kind"),
+                    "confidence": entry.get("confidence"),
+                    "evidence": entry.get("evidence"),
+                }
+                key = (
+                    str(detail.get("by", "")),
+                    str(detail.get("raw_cancelled_nreg", "")),
+                    str(detail.get("evidence", ""))[:120],
+                )
+                if key not in detail_keys:
+                    detail_keys.add(key)
+                    details.append(detail)
+
+            was_text_dead = bool(existing.get("rada_is_dead_by_text"))
+            existing["rada_is_dead"] = True
+            existing["rada_is_dead_by_text"] = True
+            existing["rada_cancelled_by_text"] = new_by
+            existing["rada_cancelled_by_text_details"] = details[:50]
+            existing["rada_text_dead_confidence"] = "high"
+            existing["rada_text_dead_applied_at"] = datetime.utcnow().isoformat()
+
+            meta_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+            if was_text_dead:
+                already += 1
+            else:
+                updated += 1
+                if examples < 5:
+                    examples += 1
+                    _log(f"[Phase 4] text-dead: {nreg} <- {', '.join(new_by[:3])}")
+        except Exception as exc:
+            errors += 1
+            _log(f"[Phase 4] ERROR {nreg}: {exc}", "error")
+
+        if idx % max(100, total // 25 or 100) == 0 or idx == total:
+            elapsed = time.time() - t0
+            speed = round(idx / elapsed, 1) if elapsed > 0 else 0
+            _log(
+                f"[Phase 4] {idx}/{total} | updated={updated} already={already} "
+                f"skip={skipped} err={errors} | {speed} target/s"
+            )
+
+    _log(f"[Phase 4] Done | updated={updated} already={already} skipped={skipped} errors={errors}")
+    return {
+        "updated": updated,
+        "already": already,
+        "skipped": skipped,
+        "errors": errors,
+        "cache_found": True,
+        "cache_targets": total,
+    }
+
 
 def run_enrich(
     log_callback=print,
@@ -633,6 +782,20 @@ def run_enrich(
         _save_state(state)
         p3 = run_phase3(sources, cards_cache, p2["reverse_dead"], p2["dokid_to_nreg"])
         state["phase3_stats"] = p3
+        _save_state(state)
+
+        if _stop_event and _stop_event.is_set():
+            _log("Stopped after Phase 3", "warning")
+            state.update({"running": False, "phase": "stopped"})
+            _save_state(state)
+            return
+
+        # Phase 4
+        _log("--- Phase 4: Apply text cancellation cache ---")
+        state["phase"] = "phase4_text"
+        _save_state(state)
+        p4 = run_phase4_text_cancellations(sources)
+        state["phase4_text_stats"] = p4
         _save_state(state)
 
         state.update({

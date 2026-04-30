@@ -119,6 +119,7 @@ _SOURCES = (
     "reindex_v2_rada", "reindex_v2_kmu", "reindex_v2_ccu",
     "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions", "reindex_v2_mod", "reindex_v2_zir",
     "enrich_opendata",    # збагачення метаданих Rada+KMU через OpenData API
+    "extract_text_cancellations",
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
 )
 _sync: dict[str, dict] = {
@@ -139,6 +140,7 @@ _v2_stop = {
 }
 _v2_scrape_stop = {s: threading.Event() for s in V2_SCRAPE_SOURCES}
 _enrich_stop     = threading.Event()
+_text_cancel_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
 
 
@@ -4682,6 +4684,21 @@ def _do_update_qdrant_meta(session_id: str, sources: list) -> None:
             _sync[src]["pause_requested"] = False
 
 
+def _do_extract_text_cancellations(session_id: str, sources: list, dry_run: bool = True) -> None:
+    src = "extract_text_cancellations"
+    log = _make_reindex_log_cb(src)
+    try:
+        _text_cancel_stop.clear()
+        from extract_text_cancellations import run_extract
+        run_extract(log_callback=log, stop_event=_text_cancel_stop, sources=sources, dry_run=dry_run)
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
 @app.post("/admin/enrich/start")
 async def enrich_start(body: dict = Body(default={})):
     sources = body.get("sources") or ["rada", "kmu"]
@@ -4705,13 +4722,43 @@ async def enrich_stop_route():
     return {"ok": True}
 
 
+@app.post("/admin/enrich/text/start")
+async def enrich_text_start(body: dict = Body(default={})):
+    sources = body.get("sources") or ["rada", "kmu"]
+    dry_run = bool(body.get("dry_run", True))
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync(
+            "extract_text_cancellations",
+            _do_extract_text_cancellations,
+            session_id,
+            sources=sources,
+            dry_run=dry_run,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id, "dry_run": dry_run}
+
+
+@app.post("/admin/enrich/text/stop")
+async def enrich_text_stop():
+    with _lock:
+        if not _sync["extract_text_cancellations"]["running"]:
+            raise HTTPException(400, "Text cancellation extraction is not running")
+        _text_cancel_stop.set()
+        _sync["extract_text_cancellations"]["pause_requested"] = True
+    return {"ok": True}
+
+
 @app.get("/admin/enrich/status")
 async def enrich_status():
     with _lock:
         s = dict(_sync["enrich_opendata"])
         logs = list(s.get("live_logs", []))
-    qdm = dict(_sync["update_qdrant_meta"])
-    qdm_logs = list(qdm.get("live_logs", []))
+        qdm = dict(_sync["update_qdrant_meta"])
+        qdm_logs = list(qdm.get("live_logs", []))
+        text_cancel = dict(_sync["extract_text_cancellations"])
+        text_cancel_logs = list(text_cancel.get("live_logs", []))
 
     state_file = Path(__file__).parent / "enrich_opendata_state.json"
     state = {}
@@ -4729,6 +4776,14 @@ async def enrich_status():
         except Exception:
             pass
 
+    text_state_file = Path(__file__).parent / "text_cancellations_state.json"
+    text_state = {}
+    if text_state_file.exists():
+        try:
+            text_state = json.loads(text_state_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
     return {
         "enrich": {
             "running":         s.get("running", False),
@@ -4741,6 +4796,12 @@ async def enrich_status():
             "pause_requested": qdm.get("pause_requested", False),
             "live_logs":       qdm_logs,
             "state":           qdrant_state,
+        },
+        "text_cancellations": {
+            "running":         text_cancel.get("running", False),
+            "pause_requested": text_cancel.get("pause_requested", False),
+            "live_logs":       text_cancel_logs,
+            "state":           text_state,
         },
     }
 
@@ -4817,12 +4878,14 @@ async def meta_list(
             "is_dead":       meta.get("rada_is_dead", False),
             "dead_by_status":meta.get("rada_is_dead_by_status", False),
             "dead_by_link":  meta.get("rada_is_dead_by_link", False),
+            "dead_by_text":  meta.get("rada_is_dead_by_text", False),
             "no_text":       meta.get("rada_no_text", False),
             "adopted_date":  meta.get("rada_adopted_date", ""),
             "last_edition":  meta.get("rada_last_edition", ""),
             "dead_since":    meta.get("rada_dead_since", ""),
             "replaced_by":   meta.get("rada_replaced_by", []),
             "cancelled_by":  meta.get("rada_cancelled_by", []),
+            "cancelled_by_text": meta.get("rada_cancelled_by_text", []),
             "theme":         meta.get("rada_theme", ""),
             "classifiers":   meta.get("rada_classifiers", []),
             "org":           meta.get("rada_org", ""),

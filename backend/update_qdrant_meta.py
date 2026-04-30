@@ -47,6 +47,8 @@ SOURCES_COLLECTIONS: dict[str, list[str]] = {
 ENRICH_FIELDS = [
     "rada_status", "rada_status_name",
     "rada_is_dead", "rada_is_dead_by_status", "rada_is_dead_by_link",
+    "rada_is_dead_by_text", "rada_cancelled_by_text",
+    "rada_text_dead_confidence",
     "rada_no_text", "rada_tags", "rada_dokid", "rada_nreg", "rada_minjust",
     "rada_n_vlas", "rada_doc_type", "rada_doc_types", "rada_org", "rada_org_id",
     "rada_adopted_date", "rada_last_edition", "rada_replaced_by",

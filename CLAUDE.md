@@ -115,3 +115,10 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - Never run two v2 reindex processes simultaneously — enforced by backend 409, but don't bypass
 - Never ignore return value of `upload_to_qdrant()` — silent False = chunk lost
 - Never store zero vectors in Qdrant — embed_v2 raises on failure, caller must handle (skip chunk)
+
+## Text Cancellation Mining
+- `backend/extract_text_cancellations.py` scans local `/root/laws_raw/{rada,kmu}/*.txt` files for cancellation evidence sections and builds `backend/text_cancellations_cache.json`.
+- Runtime state is stored in `backend/text_cancellations_state.json`; backend admin endpoints are `POST /admin/enrich/text/start` and `POST /admin/enrich/text/stop`.
+- Admin control and detailed live logs are in `app/admin/meta/page.tsx` alongside OpenData enrichment and Qdrant payload patching.
+- New meta/Qdrant fields: `rada_is_dead_by_text`, `rada_cancelled_by_text`, `rada_cancelled_by_text_details`, `rada_text_dead_confidence`, `rada_text_dead_applied_at`.
+- Text evidence is monotonic: it may set `rada_is_dead=True`, but enrichment must never downgrade a text-proven dead document back to live.

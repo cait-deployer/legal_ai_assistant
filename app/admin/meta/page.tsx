@@ -13,12 +13,14 @@ type MetaItem = {
   is_dead: boolean
   dead_by_status: boolean
   dead_by_link: boolean
+  dead_by_text: boolean
   no_text: boolean
   adopted_date: string
   last_edition: string
   dead_since: string
   replaced_by: string[]
   cancelled_by: string[]
+  cancelled_by_text: string[]
   theme: string
   classifiers: string[]
   org: string
@@ -45,12 +47,23 @@ type EnrichSubState = {
 type EnrichStatus = {
   enrich: EnrichSubState
   qdrant_meta: EnrichSubState
+  text_cancellations: EnrichSubState
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function StatusBadge({ item }: { item: MetaItem }) {
   if (item.is_dead) {
+    if (item.dead_by_text) {
+      return (
+        <span
+          className="px-2 py-0.5 rounded text-xs font-medium bg-amber-900/60 text-amber-300"
+          title={item.cancelled_by_text?.length ? `by: ${item.cancelled_by_text.join(", ")}` : undefined}
+        >
+          Скасовано (текст)
+        </span>
+      )
+    }
     return (
       <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-900/60 text-red-300">
         {item.dead_by_link ? "Скасовано (зв'язок)" : "Втратив чинність"}
@@ -190,10 +203,31 @@ export default function MetaPage() {
     await fetchStatus()
   }
 
+  async function startTextExtraction(dryRun = true) {
+    setStatusLoading(true)
+    try {
+      await fetch("/api/admin/enrich/text/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sources: ["rada", "kmu"], dry_run: dryRun }),
+      })
+      await fetchStatus()
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  async function stopTextExtraction() {
+    await fetch("/api/admin/enrich/text/stop", { method: "POST" })
+    await fetchStatus()
+  }
+
   const enrichRunning   = status?.enrich?.running ?? false
   const qdrantRunning   = status?.qdrant_meta?.running ?? false
+  const textRunning     = status?.text_cancellations?.running ?? false
   const enrichState     = status?.enrich?.state ?? {}
   const qdrantState     = status?.qdrant_meta?.state ?? {}
+  const textState       = status?.text_cancellations?.state ?? {}
 
   return (
     <div className="min-h-screen bg-[#0A0E1A] text-[#E0E6ED] p-6 space-y-6">
@@ -203,7 +237,7 @@ export default function MetaPage() {
       <div className="bg-[#111827] rounded-xl border border-[#1e2a3a] p-5 space-y-4">
         <h2 className="text-lg font-semibold text-[#C9A84C]">Збагачення метаданих (OpenData API)</h2>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           {/* Enrich */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -241,6 +275,46 @@ export default function MetaPage() {
               </button>
             </div>
             <LogsPanel logs={status?.enrich?.live_logs ?? []} />
+          </div>
+
+          {/* Text cancellation extraction */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-zinc-400">Text cancellations: evidence cache</span>
+              <span className={`ml-auto px-2 py-0.5 rounded text-xs font-medium ${textRunning ? "bg-emerald-900/60 text-emerald-300" : "bg-zinc-800 text-zinc-400"}`}>
+                {textRunning ? "Running" : "Stopped"}
+              </span>
+            </div>
+            <div className="text-xs text-zinc-400">
+              full: {((textState.stats as Record<string, number> | undefined)?.full_high_hits ?? 0)}
+              {" | "}partial: {((textState.stats as Record<string, number> | undefined)?.partial_hits ?? 0)}
+              {" | "}missing: {((textState.stats as Record<string, number> | undefined)?.missing_locally ?? 0)}
+              {" | "}unique: {((textState.unique_cancelled as number | undefined) ?? 0)}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                disabled={textRunning || statusLoading}
+                onClick={() => startTextExtraction(true)}
+                className="px-3 py-1.5 bg-amber-700 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Dry-run
+              </button>
+              <button
+                disabled={textRunning || statusLoading}
+                onClick={() => startTextExtraction(false)}
+                className="px-3 py-1.5 bg-[#C9A84C] text-black rounded text-sm font-medium disabled:opacity-50"
+              >
+                Build cache
+              </button>
+              <button
+                disabled={!textRunning || statusLoading}
+                onClick={stopTextExtraction}
+                className="px-3 py-1.5 bg-red-800 text-white rounded text-sm font-medium disabled:opacity-50"
+              >
+                Stop
+              </button>
+            </div>
+            <LogsPanel logs={status?.text_cancellations?.live_logs ?? []} />
           </div>
 
           {/* Qdrant patch */}
