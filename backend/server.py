@@ -3585,12 +3585,23 @@ def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs:
         return results[:max_docs]
 
     matched.sort(key=lambda item: (item[0], item[1].get("similarity", 0.0)), reverse=True)
-    filtered = [r for _, r in matched[:max_docs]]
-    if len(filtered) < len(results[:max_docs]):
-        logger.info("TERM FILTER: %d→%d chunks (terms=%s)", len(results[:max_docs]), len(filtered), terms[:10])
-    else:
-        logger.info("TERM RERANK: %d chunks (terms=%s)", len(filtered), terms[:10])
-    return filtered
+    matched_rows = [r for _, r in matched]
+    matched_keys = {
+        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+        for r in matched_rows
+    }
+    remainder = [
+        r for _, r in scored
+        if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) not in matched_keys
+    ]
+    reranked = (matched_rows + remainder)[:max_docs]
+    logger.info(
+        "TERM RERANK: matched=%d total=%d terms=%s",
+        len(matched_rows),
+        len(reranked),
+        terms[:10],
+    )
+    return reranked
 
 
 def _citations_used_in_answer(answer: str, citations: list[dict]) -> list[dict]:
