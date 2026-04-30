@@ -355,6 +355,52 @@ def search_qdrant(
     return all_results[:top_k]
 
 
+def search_qdrant_in_law(
+    collection_name: str,
+    law_id: str,
+    query_vector: list,
+    top_k: int = 5,
+    threshold: float = 0.0,
+) -> list:
+    client = get_client()
+    law_filter = Filter(
+        must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]
+    )
+    try:
+        if hasattr(client, "query_points"):
+            response = client.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                query_filter=law_filter,
+                limit=top_k,
+                score_threshold=threshold,
+                with_payload=True,
+            )
+            points = response.points
+        else:
+            points = client.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                query_filter=law_filter,
+                limit=top_k,
+                score_threshold=threshold,
+                with_payload=True,
+            )
+        return [
+            {
+                "out_content":  r.payload.get("content", ""),
+                "out_metadata": {k: v for k, v in r.payload.items() if k != "content"},
+                "similarity":   r.score,
+                "_collection":  collection_name,
+                "_doc_expansion": True,
+            }
+            for r in points
+        ]
+    except Exception as e:
+        print(f"⚠️ search_qdrant_in_law [{collection_name}:{law_id}]: {e}")
+        return []
+
+
 # ── СТАТИСТИКА ─────────────────────────────────────────────────────────────────
 
 def get_collection_stats() -> dict:

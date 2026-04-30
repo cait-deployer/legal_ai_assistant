@@ -3655,6 +3655,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 seen[key] = r
         return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
 
+    rw_vector = None
     try:
         if rewritten_query:
             rw_vector, orig_results = await _asyncio.gather(
@@ -3797,6 +3798,55 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ) or "NONE",
     )
 
+    # If vector search found the right document, fetch the best sibling chunks inside
+    # the same law_id. This avoids sending the whole law while fixing title/preamble hits.
+    try:
+        from qdrant_storage import search_qdrant_in_law
+        _expanded_keys = {
+            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            for r in results
+        }
+        _seed_docs: list[tuple[str, str]] = []
+        _seen_seed_docs: set[tuple[str, str]] = set()
+        _expand_min_score = max(match_threshold, 0.55)
+        for r in results[:20]:
+            if r.get("similarity", 0.0) < _expand_min_score:
+                continue
+            _col = r.get("_collection", "")
+            _lid = r["out_metadata"].get("law_id", "")
+            if not _col or not _lid:
+                continue
+            _doc_key = (_col, _lid)
+            if _doc_key in _seen_seed_docs:
+                continue
+            _seed_docs.append(_doc_key)
+            _seen_seed_docs.add(_doc_key)
+            if len(_seed_docs) >= 8:
+                break
+
+        _expanded_added = 0
+        _expansion_vector = rw_vector or query_vector
+        for _col, _lid in _seed_docs:
+            _doc_chunks = search_qdrant_in_law(
+                _col, _lid, _expansion_vector, top_k=4, threshold=0.0
+            )
+            for _chunk in _doc_chunks:
+                _key = (
+                    _chunk["out_metadata"].get("law_id"),
+                    _chunk["out_metadata"].get("chunk_index"),
+                )
+                if _key in _expanded_keys:
+                    continue
+                _chunk["similarity"] = max(_chunk.get("similarity", 0.0), 0.68)
+                results.append(_chunk)
+                _expanded_keys.add(_key)
+                _expanded_added += 1
+        if _expanded_added:
+            results.sort(key=lambda x: x["similarity"], reverse=True)
+            logger.info("DOC EXPANSION: додано %d чанків із %d документів", _expanded_added, len(_seed_docs))
+    except Exception as _de_err:
+        logger.warning("Doc expansion error: %s", _de_err)
+
     # Keyword search: завжди паралельно з vector — знаходить документи з поганим embedding
     min_score = settings_cache.get_float("min_relevance_score", 0.35)
     _existing_ids = {
@@ -3808,10 +3858,22 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _kw_query = f"{search_question} {rewritten_query or ''}".strip()
         _kw_results = search_qdrant_text(_kw_query, target_collections, limit=15)
         _kw_query_words = {w.lower() for w in _kw_query.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
+        _kw_stopwords = {
+            "надай", "надайте", "інформацію", "інформація", "інфо", "питання",
+            "порядок", "витрат", "витрати", "калькуляції", "калькуляція",
+            "розрахунок", "розрахунку", "законодавство", "законодавству",
+            "норми", "норма", "суми", "сума", "щодо", "стосовно",
+        }
+        _kw_query_words = {w for w in _kw_query_words if w not in _kw_stopwords}
         # Лематизація через pymorphy замість агресивного [:-2] обрізання
         _kw_stems = _kw_query_words | {_ua_lemma(w) for w in _kw_query_words if _ua_lemma(w)}
+        _kw_stems = {w for w in _kw_stems if w and w not in _kw_stopwords}
         _kw_added = 0
+        _kw_cap = max(12, body.max_docs * 3)
+        _kw_min_matches = 2 if len(_kw_stems) >= 3 else 1
         for r in _kw_results:
+            if _kw_added >= _kw_cap:
+                break
             _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             if _key in _existing_ids:
                 continue
@@ -3827,6 +3889,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 continue
             # Динамічний score: більше збіглих стемів → вищий score (0.25–0.60)
             _matched = sum(1 for s in _kw_stems if s in _src)
+            if _matched < _kw_min_matches:
+                continue
             _bm25_score = 0.25 + 0.35 * (_matched / max(len(_kw_stems), 1))
             # KMU і positions keyword matches буст: ці колекції часто мають табличний текст
             # що погано матчиться векторно, але точно відповідає по ключових словах
@@ -3916,8 +3980,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
     _rr_protected = [r for r in results
                      if r.get("_collection") in _protected_colls
-                     and r.get("_title_match")
-                     and r["out_metadata"].get("law_id") in _seen_laws_in_semantic][:2]
+                     and (r.get("_title_match") or r.get("_doc_expansion"))
+                     and r["out_metadata"].get("law_id") in _seen_laws_in_semantic][:3]
     _rr_protected_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
