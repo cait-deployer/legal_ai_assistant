@@ -3686,6 +3686,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         results = await _asyncio.to_thread(
             search_qdrant, query_vector, fetch_k, target_collections, match_threshold
         )
+    raw_semantic_results = list(results)
 
     # LOW CONFIDENCE: якщо найкращий сирий score слабкий — не зупиняємось, не обрізаємо
     # Letting BM25 + title boost run fully — вони можуть витягнути релевантні документи
@@ -3821,7 +3822,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _seed_docs: list[tuple[str, str]] = []
         _seen_seed_docs: set[tuple[str, str]] = set()
         _expand_min_score = max(match_threshold, 0.55)
-        for r in results[:20]:
+        for r in raw_semantic_results[:12]:
             if r.get("similarity", 0.0) < _expand_min_score:
                 continue
             _col = r.get("_collection", "")
@@ -3885,7 +3886,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     try:
         from qdrant_storage import search_qdrant_text
         _kw_query = f"{search_question} {rewritten_query or ''}".strip()
-        _kw_results = search_qdrant_text(_kw_query, target_collections, limit=15)
+        _kw_results = (
+            search_qdrant_text(_kw_query, target_collections, limit=15)
+            if settings_cache.get_bool("lexical_fallback_enabled", False)
+            else []
+        )
         _kw_query_words = {w.lower() for w in _kw_query.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
         _kw_stopwords = {
             "надай", "надайте", "інформацію", "інформація", "інфо", "питання",
@@ -3964,6 +3969,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             ]
         ))[:14]
         logger.info("TITLE BOOST kws: %s", _title_kws)
+        if not settings_cache.get_bool("title_boost_enabled", False):
+            _title_kws = []
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
