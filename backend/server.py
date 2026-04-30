@@ -3886,17 +3886,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ) or "NONE",
     )
 
-    # If vector search found the right document, fetch the best sibling chunks inside
-    # the same law_id. This avoids sending the whole law while fixing title/preamble hits.
+    # Doc expansion: для законів що потрапили у вибірку — підтягуємо додаткові чанки.
+    # Малі закони (≤ 40 чанків): беремо всі — це вирішує проблему таблиць і переліків
+    # з поганими векторами. Великі закони: vector + term search як раніше.
     try:
-        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
+        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law, get_all_law_chunks
         _expanded_keys = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
         }
         _seed_docs: list[tuple[str, str]] = []
         _seen_seed_docs: set[tuple[str, str]] = set()
-        _expand_min_score = max(match_threshold, 0.55)
+        _expand_min_score = max(match_threshold, 0.40)
         for r in raw_semantic_results[:12]:
             if r.get("similarity", 0.0) < _expand_min_score:
                 continue
@@ -3920,21 +3921,32 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "щодо", "стосовно",
         }
         _doc_terms = []
-        for _raw in re.findall(r"[\w'-]+", _term_text.lower()):
-            if len(_raw) < 4 or _raw in _doc_stopwords:
+        for _raw_orig in re.findall(r"[\w'-]+", _term_text):
+            _raw = _raw_orig.lower()
+            _is_short_upper = len(_raw_orig) >= 2 and _raw_orig.isupper()
+            if (len(_raw) < 4 and not _is_short_upper) or _raw in _doc_stopwords:
                 continue
             _doc_terms.append(_raw)
             _lemma = _ua_lemma(_raw)
             if _lemma and _lemma not in _doc_stopwords:
                 _doc_terms.append(_lemma)
         _doc_terms = list(dict.fromkeys(_doc_terms))[:14]
+
+        _SMALL_LAW_THRESHOLD = 40
         for _col, _lid in _seed_docs:
-            _doc_chunks = search_qdrant_in_law(
-                _col, _lid, _expansion_vector, top_k=4, threshold=0.0
-            )
-            _doc_chunks += search_law_chunks_by_terms(
-                _col, _lid, _doc_terms, top_k=4
-            )
+            all_law = get_all_law_chunks(_col, _lid, max_chunks=_SMALL_LAW_THRESHOLD + 1)
+            if 0 < len(all_law) <= _SMALL_LAW_THRESHOLD:
+                # Малий закон — беремо всі чанки без векторного фільтру
+                _doc_chunks = all_law
+                logger.info("DOC EXPANSION small law %s/%s: всі %d чанків", _col, _lid, len(all_law))
+            else:
+                # Великий закон — vector + term search
+                _doc_chunks = search_qdrant_in_law(
+                    _col, _lid, _expansion_vector, top_k=6, threshold=0.0
+                )
+                _doc_chunks += search_law_chunks_by_terms(
+                    _col, _lid, _doc_terms, top_k=6
+                )
             for _chunk in _doc_chunks:
                 _key = (
                     _chunk["out_metadata"].get("law_id"),
@@ -3948,7 +3960,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 _expanded_added += 1
         if _expanded_added:
             results.sort(key=lambda x: x["similarity"], reverse=True)
-            logger.info("DOC EXPANSION: додано %d чанків із %d документів", _expanded_added, len(_seed_docs))
+            logger.info("DOC EXPANSION: +%d чанків із %d документів", _expanded_added, len(_seed_docs))
     except Exception as _de_err:
         logger.warning("Doc expansion error: %s", _de_err)
 
