@@ -3815,7 +3815,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
         }
-        _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4}
+        _kw_query_words = {w.lower() for w in search_question.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
         # Лематизація через pymorphy замість агресивного [:-2] обрізання
         _kw_stems = _kw_query_words | {_ua_lemma(w) for w in _kw_query_words if _ua_lemma(w)}
         _kw_added = 0
