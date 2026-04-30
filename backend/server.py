@@ -3810,7 +3810,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         from qdrant_storage import search_qdrant_text
         # Для keyword search — оригінальне питання краще ніж HyDE (MatchText шукає точний збіг слів)
         _kw_query = search_question
-        _kw_results = search_qdrant_text(_kw_query, target_collections, limit=6)
+        _kw_results = search_qdrant_text(_kw_query, target_collections, limit=15)
         _existing_ids = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
@@ -3946,7 +3946,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             )
             _rr_cfg_json = GenerationConfig(
                 temperature=0.0,
-                max_output_tokens=200,
+                max_output_tokens=512,
             )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
@@ -3969,11 +3969,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             
             _raw_indices = []
             try:
-                import json
-                _parsed = json.loads(_rr_raw)
+                import json, re as _re
+                # Strip markdown code fences (```json ... ```) before parsing
+                _rr_clean = _re.sub(r'^```(?:json)?\s*|\s*```\s*$', '', _rr_raw.strip(), flags=_re.DOTALL)
+                _parsed = json.loads(_rr_clean)
                 _raw_indices = _parsed.get("indices", [])
             except Exception as e:
-                logger.warning(f"Reranker JSON parse error: {e} | Raw: {_rr_raw[:100]}")
+                logger.warning(f"Reranker JSON parse error: {e} | Raw: {_rr_raw[:120]}")
                 # Regex fallback: extract numbers even from non-JSON response
                 import re as _re
                 _found_nums = _re.findall(r'\b(\d+)\b', _rr_raw)

@@ -485,7 +485,7 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
 
     for col in collections:
         try:
-            col_limit = limit * 2 if col == "laws_kmu" else limit
+            col_limit = limit * 3 if "kmu" in col else limit
             # Шукаємо кожне ключове слово окремо (OR логіка) — MatchText шукає точний збіг
             _seen_ids: set = set()
             for term in key_terms[:4]:  # топ-4 терміни
