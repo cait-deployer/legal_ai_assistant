@@ -287,7 +287,7 @@ export default function MetaPage() {
       <div className="bg-[#111827] rounded-xl border border-[#1e2a3a] p-5 space-y-4">
         <h2 className="text-lg font-semibold text-[#C9A84C]">Збагачення метаданих (OpenData API)</h2>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           {/* Enrich */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
