@@ -346,7 +346,7 @@ function ChatPage() {
     }, []);
 
     const handleSend = async (text: string) => {
-        if (!text.trim() || isLoading || isSummarizing || limitExceeded) return;
+        if (!text.trim() || isLoading || limitExceeded) return;
         const questionText = text.trim();
         setInput('');
         setLoadingStatus('Готую запит...');
@@ -675,6 +675,16 @@ function ChatPage() {
                                 </p>
                             </div>
                         )}
+                        {!historyLoading && isSummarizing && !isLoading && (
+                            <div className="flex gap-4 items-center">
+                                <div className="h-10 w-10 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/20 flex items-center justify-center">
+                                    <Loader2 className="h-5 w-5 animate-spin text-[#C9A84C]" />
+                                </div>
+                                <p className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
+                                    Оновлюю контекст діалогу...
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -707,13 +717,13 @@ function ChatPage() {
                                 value={input}
                                 onChange={e => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                disabled={limitExceeded || isSummarizing}
+                                disabled={limitExceeded}
                                 className="bg-transparent border-none focus-visible:ring-0 text-[#E0E6ED] placeholder:text-[#C9A84C]/20 text-sm min-h-[50px] max-h-32 resize-none py-3 px-4 font-medium disabled:cursor-not-allowed"
                                 rows={1}
                             />
                             <button
                                 onClick={() => handleSend(input)}
-                                disabled={!input.trim() || isLoading || isSummarizing || limitExceeded}
+                                disabled={!input.trim() || isLoading || limitExceeded}
                                 className="bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] rounded-2xl h-12 w-12 flex items-center justify-center shrink-0 shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
                             >
                                 <Send className="h-5 w-5" />

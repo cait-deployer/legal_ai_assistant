@@ -4763,7 +4763,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         # Build summary block (compressed older turns, generated every 3rd turn on frontend)
         summary_block = ""
         if body.context_summary and body.context_summary.strip():
-            summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:1200]}\n\n"
+            summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:4000]}\n\n"
 
         # Build conversation history block — last 3 turns (6 messages) only
         # Older turns are already covered by context_summary
@@ -4850,11 +4850,11 @@ async def summarize_history_endpoint(body: SummarizeHistoryBody):
     try:
         from vertexai.generative_models import ThinkingConfig as _SumThinkingConfig
         _sum_gen_cfg = GenerationConfig(
-            temperature=0.0, max_output_tokens=1200,
+            temperature=0.0, max_output_tokens=4000,
             thinking_config=_SumThinkingConfig(thinking_budget=0),
         )
     except Exception:
-        _sum_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=1200)
+        _sum_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=4000)
 
     lines: list[str] = []
     if body.existing_summary:
@@ -4907,7 +4907,7 @@ async def summarize_history_endpoint(body: SummarizeHistoryBody):
         return {"summary": summary}
     except Exception as e:
         logger.warning("summarize_history failed: %s", e)
-        fallback = dialogue_text[:1200].strip()
+        fallback = dialogue_text[:4000].strip()
         return {"summary": fallback}
 
 

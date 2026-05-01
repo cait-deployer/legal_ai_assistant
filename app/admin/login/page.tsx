@@ -146,7 +146,7 @@ export default function AdminLoginPage() {
         </Suspense>
 
         <p className="text-center mt-6">
-          <a href="/" className="text-[10px] font-black text-[#C9A84C]/70 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-colors inline-flex items-center gap-1.5">
+          <a href="/chat" className="text-[10px] font-black text-[#C9A84C]/70 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-colors inline-flex items-center gap-1.5">
             ← Назад до чату
           </a>
         </p>

@@ -331,7 +331,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <TooltipContent side="right" className="bg-[#0d1120] border-[#C9A84C]/20 text-[#E0E6ED]">До чату</TooltipContent>
                 </Tooltip>
               ) : (
-                <Link href="/">
+                <Link href="/chat">
                   <Button variant="ghost" className="w-full justify-start gap-3 h-10 font-medium text-sm text-[#C9A84C]/60 hover:text-[#C9A84C] hover:bg-[#C9A84C]/5 border border-[#C9A84C]/10 hover:border-[#C9A84C]/20 rounded-xl transition-all duration-200">
                     <ChevronLeft className="w-4 h-4" />
                     До чату
