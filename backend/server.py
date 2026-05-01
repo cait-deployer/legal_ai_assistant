@@ -3723,7 +3723,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 except Exception:
                     pass
                 search_question = _tr_text or question
-                logger.info("RU→UA: %s → %s", question[:80], search_question[:120])
+                logger.info("RU→UA: %s → %s", question[:80], search_question)
             except Exception:
                 pass  # fallback — шукаємо оригінальним текстом
 
