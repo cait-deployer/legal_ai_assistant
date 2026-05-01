@@ -54,9 +54,8 @@ function SortableBenefit({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border transition-all group ${
-        isDragging ? "border-[#C9A84C]/40 bg-[#0d1120] shadow-xl" : "border-[#C9A84C]/10 bg-[#0A0E1A]/40 hover:border-[#C9A84C]/20"
-      }`}
+      className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border transition-all group ${isDragging ? "border-[#C9A84C]/40 bg-[#0d1120] shadow-xl" : "border-[#C9A84C]/10 bg-[#0A0E1A]/40 hover:border-[#C9A84C]/20"
+        }`}
     >
       <button {...attributes} {...listeners} className="text-[#C9A84C]/20 hover:text-[#C9A84C]/50 cursor-grab active:cursor-grabbing shrink-0">
         <GripVertical className="w-4 h-4" />
@@ -207,7 +206,7 @@ export default function PlanEditPage() {
       } catch { toast.error("Не вдалося додати benefit") }
     } else if (!newVal && existing) {
       setBenefits(prev => prev.filter(b => b.id !== existing.id))
-      fetch(`/api/admin/plans/benefits/${existing.id}`, { method: "DELETE" }).catch(() => {})
+      fetch(`/api/admin/plans/benefits/${existing.id}`, { method: "DELETE" }).catch(() => { })
       toast.success(`Benefit "${def.label}" видалено`)
     }
   }
@@ -314,7 +313,7 @@ export default function PlanEditPage() {
   }, {} as Record<string, Benefit[]>)
 
   return (
-    <div className="space-y-6 py-2 max-w-3xl">
+    <div className="space-y-6 py-2 max-w-5xl">
       {/* Header */}
       <div className="flex items-center gap-4 pb-6 border-b border-[#C9A84C]/10">
         <button onClick={() => router.push("/admin/plans")} className="p-2 rounded-xl text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors">
@@ -337,11 +336,10 @@ export default function PlanEditPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-[0.15em] transition-all ${
-              activeTab === tab
+            className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-[0.15em] transition-all ${activeTab === tab
                 ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/30"
                 : "text-[#C9A84C]/50 hover:text-[#C9A84C]/70"
-            }`}
+              }`}
           >
             {tab === "general" ? "Загальне" : tab === "features" ? "Фічі" : "Benefits"}
           </button>

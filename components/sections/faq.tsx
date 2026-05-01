@@ -39,7 +39,7 @@ export function FaqSection() {
 
   return (
     <section id="faq" className="py-24 px-4 sm:px-6 lg:px-8 bg-[#0d1120]">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <h2 className="font-serif text-3xl sm:text-4xl font-bold text-center text-[#E0E6ED] mb-14 text-balance">
           Часті <span className="text-[#C9A84C]">запитання</span>
         </h2>

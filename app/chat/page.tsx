@@ -86,9 +86,8 @@ function StatusBadge({ status }: { status?: string }) {
     if (!status || status === 'Невідомо') return null;
     const isActive = status.toLowerCase().includes('чинний') && !status.toLowerCase().includes('втратив');
     return (
-        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest mt-2 ${
-            isActive ? 'bg-[#0A0E1A] text-emerald-400' : 'bg-[#0A0E1A] text-red-400'
-        }`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest mt-2 ${isActive ? 'bg-[#0A0E1A] text-emerald-400' : 'bg-[#0A0E1A] text-red-400'
+            }`}>
             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-emerald-400' : 'bg-red-400'}`} />
             <span className="whitespace-nowrap mt-0.5">{status}</span>
         </span>
@@ -162,25 +161,25 @@ function ChatPage() {
     const summaryPromiseRef = useRef<Promise<string | null> | null>(null);
 
     // Typewriter effect refs
-    const twQueueRef    = useRef('');   // chars waiting to be shown
-    const twDisplayRef  = useRef('');   // chars already shown
-    const twTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const twMsgIdRef    = useRef<number | string | null>(null);
+    const twQueueRef = useRef('');   // chars waiting to be shown
+    const twDisplayRef = useRef('');   // chars already shown
+    const twTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const twMsgIdRef = useRef<number | string | null>(null);
 
     // drainQueue: виводить символи з черги по 1 (або по кілька при відставанні)
     // useCallback з [] — стабільна функція, всі залежності через refs
     const drainQueue = useCallback(() => {
         if (!twQueueRef.current) { twTimerRef.current = null; return; }
         const lag = twQueueRef.current.length;
-        const n   = lag > 120 ? 6 : lag > 40 ? 3 : 1;   // catch-up if queue is large
+        const n = lag > 120 ? 6 : lag > 40 ? 3 : 1;   // catch-up if queue is large
         twDisplayRef.current += twQueueRef.current.slice(0, n);
-        twQueueRef.current    = twQueueRef.current.slice(n);
+        twQueueRef.current = twQueueRef.current.slice(n);
         setMessages(prev => prev.map(m =>
             m.id === twMsgIdRef.current ? { ...m, text: twDisplayRef.current } : m
         ));
         const delay = twQueueRef.current.length > 120 ? 6 : 18;
         twTimerRef.current = setTimeout(drainQueue, delay);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // flushTypewriter: миттєво виводить залишок черги (викликається коли citations прийшли)
@@ -193,7 +192,7 @@ function ChatPage() {
                 m.id === twMsgIdRef.current ? { ...m, text: twDisplayRef.current } : m
             ));
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const LOADING_MESSAGES = [
@@ -231,7 +230,7 @@ function ChatPage() {
                     setShowTour(true);
                 }
             })
-            .catch(() => {});
+            .catch(() => { });
     }, []);
 
     useEffect(() => {
@@ -242,13 +241,13 @@ function ChatPage() {
         if (!isLoading) { setLoadingPhase(0); return; }
         const t = setInterval(() => setLoadingPhase(p => (p + 1) % LOADING_MESSAGES.length), 2500);
         return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoading]);
 
     useEffect(() => {
         const id = searchParams.get('chat');
         if (id !== currentChatId) setCurrentChatId(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
     useEffect(() => {
@@ -306,7 +305,7 @@ function ChatPage() {
                     setLimitExceeded(true);
                 }
             })
-            .catch(() => {});
+            .catch(() => { });
     };
 
     const runSummary = useCallback(async (chatId: string): Promise<string | null> => {
@@ -528,7 +527,7 @@ function ChatPage() {
 
                     // Compress context after every 2nd user turn, then reuse it for the next question.
                     if (currentUserTurnCount % 2 === 0) {
-                        runSummary(activeChatId).catch(() => {});
+                        runSummary(activeChatId).catch(() => { });
                     }
                 }).catch(() => { });
 
@@ -556,7 +555,7 @@ function ChatPage() {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tour_completed: true }),
-        }).catch(() => {});
+        }).catch(() => { });
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -600,7 +599,7 @@ function ChatPage() {
 
                 {/* Chat Area */}
                 <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-8 scroll-smooth">
-                    <div className="max-w-3xl mx-auto">
+                    <div className="max-w-5xl mx-auto">
                         {historyLoading ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 pt-20">
                                 <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]" />
@@ -689,8 +688,8 @@ function ChatPage() {
                 </div>
 
                 {/* Input Area */}
-                <footer className="p-3 md:p-6 lg:p-8 bg-[#0A0E1A]/80 backdrop-blur-md border-t border-[#C9A84C]/10 shrink-0 safe-area-pb">
-                    <div className="max-w-3xl mx-auto space-y-3">
+                <footer className="p-3 md:p-4 bg-[#0A0E1A]/80 backdrop-blur-md border-t border-[#C9A84C]/10 shrink-0 safe-area-pb">
+                    <div className="max-w-5xl mx-auto space-y-3">
                         {limitExceeded && (
                             <div className="flex items-center gap-4 px-5 py-4 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/30 shadow-lg shadow-[#C9A84C]/5">
                                 <div className="w-9 h-9 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center shrink-0">

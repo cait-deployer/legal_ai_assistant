@@ -535,8 +535,9 @@ function UsageTab({ profile }: { profile: Profile }) {
   const bonus = profile.bonus_requests ?? 0
   const effectiveLimit = baseLimit !== null ? baseLimit + bonus : null
   const isUnlim = effectiveLimit === null
+  const isFree = profile.subscription_tier === "free"
   const pct = effectiveLimit ? Math.min(Math.round((used / effectiveLimit) * 100), 100) : 0
-  const resetAt = profile.limit_reset_at ? new Date(profile.limit_reset_at) : null
+  const resetAt = (!isFree && profile.limit_reset_at) ? new Date(profile.limit_reset_at) : null
   const resetLabel = resetAt ? resetAt.toLocaleDateString("uk-UA", { day: "numeric", month: "long" }) : "—"
   const now = new Date()
   const daysLeft = resetAt ? Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 86400000)) : null
@@ -555,7 +556,7 @@ function UsageTab({ profile }: { profile: Profile }) {
           <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] mb-4 text-center">Місячний ліміт</p>
           <div className="flex flex-col items-center gap-1">
             <span className="text-5xl font-serif font-bold text-[#C9A84C]">{isUnlim ? "∞" : effectiveLimit}</span>
-            <span className="text-[10px] text-[#C9A84C]/50 font-bold uppercase">{isUnlim ? "необмежено" : "запитів на 30 днів"}</span>
+            <span className="text-[10px] text-[#C9A84C]/50 font-bold uppercase">{isUnlim ? "необмежено" : isFree ? "одноразово" : "запитів на 30 днів"}</span>
           </div>
         </div>
       </div>

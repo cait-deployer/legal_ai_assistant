@@ -28,19 +28,19 @@ const SECTION_TO_COLLECTION: Record<string, string> = {
 }
 
 const COLLECTION_COLOR: Record<string, string> = {
-  rada_finance:   "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
-  rada_state:     "bg-blue-500/15 text-blue-400 border-blue-500/20",
+  rada_finance: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
+  rada_state: "bg-blue-500/15 text-blue-400 border-blue-500/20",
   rada_personnel: "bg-purple-500/15 text-purple-400 border-purple-500/20",
-  rada_court:     "bg-red-500/15 text-red-400 border-red-500/20",
-  rada_intl:      "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
-  rada_labor:     "bg-green-500/15 text-green-400 border-green-500/20",
-  rada_civil:     "bg-pink-500/15 text-pink-400 border-pink-500/20",
-  rada_criminal:  "bg-orange-500/15 text-orange-400 border-orange-500/20",
-  rada_admin:     "bg-slate-500/15 text-slate-400 border-slate-500/20",
-  rada_housing:   "bg-teal-500/15 text-teal-400 border-teal-500/20",
-  rada_land:      "bg-lime-500/15 text-lime-400 border-lime-500/20",
-  rada_industry:  "bg-indigo-500/15 text-indigo-400 border-indigo-500/20",
-  rada_other:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/20",
+  rada_court: "bg-red-500/15 text-red-400 border-red-500/20",
+  rada_intl: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
+  rada_labor: "bg-green-500/15 text-green-400 border-green-500/20",
+  rada_civil: "bg-pink-500/15 text-pink-400 border-pink-500/20",
+  rada_criminal: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  rada_admin: "bg-slate-500/15 text-slate-400 border-slate-500/20",
+  rada_housing: "bg-teal-500/15 text-teal-400 border-teal-500/20",
+  rada_land: "bg-lime-500/15 text-lime-400 border-lime-500/20",
+  rada_industry: "bg-indigo-500/15 text-indigo-400 border-indigo-500/20",
+  rada_other: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20",
 }
 
 type SyncRun = {
@@ -199,10 +199,10 @@ const SOURCES = [
 ]
 
 const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
-  rada:      { label: "РАДА",    color: "text-blue-400" },
-  supreme:   { label: "ВС",     color: "text-purple-400" },
-  wiki:      { label: "Wiki",   color: "text-emerald-400" },
-  ccu:       { label: "КСУ",    color: "text-amber-400" },
+  rada: { label: "РАДА", color: "text-blue-400" },
+  supreme: { label: "ВС", color: "text-purple-400" },
+  wiki: { label: "Wiki", color: "text-emerald-400" },
+  ccu: { label: "КСУ", color: "text-amber-400" },
   templates: { label: "Шаблони", color: "text-amber-400" },
 }
 
@@ -218,10 +218,10 @@ function SourceBadge({ source }: { source?: string }) {
 
 function logColor(level: string) {
   switch (level) {
-    case "error":   return "text-red-400"
+    case "error": return "text-red-400"
     case "success": return "text-emerald-400"
     case "warning": return "text-amber-400"
-    default:        return "text-[#E0E6ED]/70"
+    default: return "text-[#E0E6ED]/70"
   }
 }
 
@@ -301,15 +301,15 @@ const QDRANT_MAP: { col: string; label: string; color: string; sections: { code:
 
 const OTHER_COLLECTIONS = [
   { col: "laws_supreme", label: "Верховний суд", color: "bg-purple-500/15 text-purple-400 border-purple-500/20", desc: "PDF-огляди supreme.court.gov.ua" },
-  { col: "laws_wiki",    label: "Wiki",           color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20", desc: "Роз'яснення legalaid.wiki" },
-  { col: "laws_ccu",    label: "КСУ",             color: "bg-amber-500/15 text-amber-400 border-amber-500/20", desc: "Рішення та висновки ccu.gov.ua" },
+  { col: "laws_wiki", label: "Wiki", color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20", desc: "Роз'яснення legalaid.wiki" },
+  { col: "laws_ccu", label: "КСУ", color: "bg-amber-500/15 text-amber-400 border-amber-500/20", desc: "Рішення та висновки ccu.gov.ua" },
 ]
 
 function QdrantMapModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-3xl bg-[#0d1120] border border-[#C9A84C]/30 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-5xl bg-[#0d1120] border border-[#C9A84C]/30 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#C9A84C]/10 shrink-0">
           <div className="flex items-center gap-3">
@@ -412,12 +412,12 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
     } catch { /* silently ignore network errors */ }
   }
 
-  useEffect(() => { 
+  useEffect(() => {
     const fetchData = async () => {
       return await fetchLogs()
     }
     fetchData()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -515,15 +515,14 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
 
   return (
     <div
-      className={`bg-[#0d1120]/60 border rounded-2xl transition-all duration-200 ${
-        state.running
+      className={`bg-[#0d1120]/60 border rounded-2xl transition-all duration-200 ${state.running
           ? state.pause_requested
             ? "border-blue-500/30"
             : "border-amber-500/30"
           : state.can_resume
-          ? "border-blue-500/20"
-          : "border-[#C9A84C]/10 hover:border-[#C9A84C]/20"
-      }`}
+            ? "border-blue-500/20"
+            : "border-[#C9A84C]/10 hover:border-[#C9A84C]/20"
+        }`}
     >
       <div className="p-5">
         {/* Top row: icon + name + actions */}
@@ -779,11 +778,11 @@ export default function SettingsPage() {
             size="sm"
             onClick={fetchHistory}
             disabled={historyLoading}
-          className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl shrink-0"
-        >
-          {historyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          <span className="hidden sm:inline">Оновити</span>
-        </Button>
+            className="gap-2 border border-[#C9A84C]/20 hover:border-[#C9A84C]/40 hover:bg-[#C9A84C]/5 text-[#C9A84C]/60 hover:text-[#C9A84C] rounded-xl shrink-0"
+          >
+            {historyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            <span className="hidden sm:inline">Оновити</span>
+          </Button>
         </div>
       </div>
 
@@ -809,14 +808,13 @@ export default function SettingsPage() {
             <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-4">
               {/* Alerts */}
               {syncStats.alerts.map((a, i) => (
-                <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${
-                  a.level === "error"   ? "bg-red-500/10 border-red-500/20 text-red-400"
-                  : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                  : "bg-[#C9A84C]/5 border-[#C9A84C]/15 text-[#C9A84C]/80"
-                }`}>
-                  {a.level === "error"   && <XCircle className="w-4 h-4 shrink-0" />}
+                <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${a.level === "error" ? "bg-red-500/10 border-red-500/20 text-red-400"
+                    : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                      : "bg-[#C9A84C]/5 border-[#C9A84C]/15 text-[#C9A84C]/80"
+                  }`}>
+                  {a.level === "error" && <XCircle className="w-4 h-4 shrink-0" />}
                   {a.level === "warning" && <AlertTriangle className="w-4 h-4 shrink-0" />}
-                  {a.level === "info"    && <Info className="w-4 h-4 shrink-0" />}
+                  {a.level === "info" && <Info className="w-4 h-4 shrink-0" />}
                   {a.message}
                 </div>
               ))}
@@ -827,12 +825,11 @@ export default function SettingsPage() {
                   <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3" /> Надійність / 30 дн
                   </p>
-                  <p className={`text-xl font-bold mt-1 ${
-                    syncStats.reliability_30d.pct == null ? "text-[#E0E6ED]/30"
-                    : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
-                    : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
-                    : "text-red-400"
-                  }`}>
+                  <p className={`text-xl font-bold mt-1 ${syncStats.reliability_30d.pct == null ? "text-[#E0E6ED]/30"
+                      : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
+                        : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
+                          : "text-red-400"
+                    }`}>
                     {syncStats.reliability_30d.pct != null ? `${syncStats.reliability_30d.pct}%` : "—"}
                   </p>
                   <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
@@ -929,17 +926,17 @@ export default function SettingsPage() {
                           <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs">
                             {h.started_at
                               ? new Date(h.started_at).toLocaleString("uk-UA", {
-                                  dateStyle: "short",
-                                  timeStyle: "short",
-                                })
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })
                               : "—"}
                           </td>
                           <td className="px-4 py-3 text-[#E0E6ED]/70 text-xs hidden sm:table-cell">
                             {h.finished_at
                               ? new Date(h.finished_at).toLocaleString("uk-UA", {
-                                  dateStyle: "short",
-                                  timeStyle: "short",
-                                })
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })
                               : "—"}
                           </td>
                           <td className="px-4 py-3">

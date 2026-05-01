@@ -6,7 +6,7 @@ export function CtaSection() {
       <div className="absolute inset-0 bg-[#C9A84C]/5 pointer-events-none" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] rounded-full bg-[#C9A84C] opacity-[0.04] blur-[100px] pointer-events-none" />
 
-      <div className="relative max-w-3xl mx-auto text-center">
+      <div className="relative max-w-5xl mx-auto text-center">
         <h2 className="font-serif text-4xl sm:text-5xl font-bold text-[#E0E6ED] mb-5 text-balance leading-tight">
           Твоє питання вже чекає відповіді.
         </h2>

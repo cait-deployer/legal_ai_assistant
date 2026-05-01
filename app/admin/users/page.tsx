@@ -6,6 +6,7 @@ import {
   Users, Search, X, ChevronLeft, ChevronRight,
   ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Loader2,
   Check, Mail, Globe, MessageSquare, ArrowLeft,
+  Pencil, Ban, ShieldCheck, Trash2, AlertTriangle, Save,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -225,16 +226,38 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
 type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string; context_summary: string | null }
 type MsgRow  = { id: string; role: string; content: string; created_at: string }
 
-function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void; labels: Record<string, string> }) {
+type EditForm = { subscription_tier: string; monthly_limit: string; bonus_requests: string }
+
+function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose: () => void; onRefresh: () => void; labels: Record<string, string> }) {
   const rel = formatRelative(user.last_active_at)
   const effectiveLimit = user.monthly_limit !== null ? user.monthly_limit + (user.bonus_requests ?? 0) : null
   const pct = effectiveLimit ? Math.min(100, Math.round((user.requests_this_month / effectiveLimit) * 100)) : 0
+
   const [chats, setChats]               = useState<ChatRow[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
   const [openChat, setOpenChat]         = useState<ChatRow | null>(null)
   const [messages, setMessages]         = useState<MsgRow[]>([])
   const [msgsLoading, setMsgsLoading]   = useState(false)
   const msgsEndRef = useRef<HTMLDivElement>(null)
+
+  const [isBanned, setIsBanned]         = useState(false)
+  const [editOpen, setEditOpen]         = useState(false)
+  const [editForm, setEditForm]         = useState<EditForm>({
+    subscription_tier: user.subscription_tier,
+    monthly_limit: user.monthly_limit !== null ? String(user.monthly_limit) : "",
+    bonus_requests: String(user.bonus_requests ?? 0),
+  })
+  const [actionLoading, setActionLoading] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmBan, setConfirmBan]       = useState(false)
+  const [actionError, setActionError]   = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/admin/users/${user.id}`)
+      .then(r => r.json())
+      .then(d => { if (typeof d.is_banned === "boolean") setIsBanned(d.is_banned) })
+      .catch(() => {})
+  }, [user.id])
 
   useEffect(() => {
     setChatsLoading(true)
@@ -260,10 +283,63 @@ function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void
     if (!msgsLoading) msgsEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, msgsLoading])
 
+  const handleSaveEdit = async () => {
+    setActionLoading(true)
+    setActionError(null)
+    try {
+      const r = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscription_tier: editForm.subscription_tier,
+          monthly_limit: editForm.monthly_limit,
+          bonus_requests: editForm.bonus_requests,
+        }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setActionError(d.error ?? "Помилка"); return }
+      setEditOpen(false)
+      onRefresh()
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleToggleBan = async () => {
+    setActionLoading(true)
+    setActionError(null)
+    try {
+      const r = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ban: !isBanned }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setActionError(d.error ?? "Помилка"); return }
+      setIsBanned(!isBanned)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setActionLoading(true)
+    setActionError(null)
+    try {
+      const r = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" })
+      const d = await r.json()
+      if (!r.ok) { setActionError(d.error ?? "Помилка"); setConfirmDelete(false); return }
+      onRefresh()
+      onClose()
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[420px] bg-[#0d1120] border-l border-[#C9A84C]/20 h-full shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-2xl bg-[#0d1120] border-l border-[#C9A84C]/20 h-full shadow-2xl flex flex-col overflow-hidden">
 
         {/* ── Chat conversation panel (slides in from right) ── */}
         <AnimatePresence>
@@ -505,6 +581,210 @@ function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void
             )}
           </section>
         </div>
+
+        {/* ── Action footer ── */}
+        <div className="shrink-0 border-t border-[#C9A84C]/10 px-6 py-4 space-y-3 bg-[#0d1120]">
+          {actionError && (
+            <p className="text-xs text-red-400 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {actionError}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setEditOpen(true); setActionError(null) }}
+              className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border border-[#C9A84C]/25 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:border-[#C9A84C]/50 hover:bg-[#C9A84C]/5 text-[10px] font-bold uppercase tracking-wider transition-all"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Редагувати
+            </button>
+            <button
+              onClick={() => { setConfirmBan(true); setActionError(null) }}
+              className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                isBanned
+                  ? "border-emerald-500/30 text-emerald-400/70 hover:text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/5"
+                  : "border-amber-500/30 text-amber-400/70 hover:text-amber-400 hover:border-amber-500/60 hover:bg-amber-500/5"
+              }`}
+            >
+              {isBanned ? <ShieldCheck className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+              {isBanned ? "Розблокувати" : "Заблокувати"}
+            </button>
+            <button
+              onClick={() => { setConfirmDelete(true); setActionError(null) }}
+              className="w-9 h-9 flex items-center justify-center rounded-xl border border-red-500/25 text-red-400/50 hover:text-red-400 hover:border-red-500/50 hover:bg-red-500/5 transition-all"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Ban confirm overlay ── */}
+        <AnimatePresence>
+          {confirmBan && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex items-end"
+            >
+              <motion.div
+                initial={{ y: 80, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 80, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 360, damping: 32 }}
+                className={`w-full bg-[#0d1120] border-t p-6 space-y-4 ${isBanned ? "border-emerald-500/30" : "border-amber-500/30"}`}
+              >
+                <div className={`flex items-center gap-2 ${isBanned ? "text-emerald-400" : "text-amber-400"}`}>
+                  {isBanned ? <ShieldCheck className="w-5 h-5 shrink-0" /> : <Ban className="w-5 h-5 shrink-0" />}
+                  <p className="font-bold text-sm">
+                    {isBanned ? "Розблокувати" : "Заблокувати"} {user.full_name || user.email}?
+                  </p>
+                </div>
+                <p className="text-xs text-[#E0E6ED]/40 leading-relaxed">
+                  {isBanned
+                    ? "Користувач зможе знову входити в систему."
+                    : "Користувач не зможе входити в систему. Дію можна скасувати."}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmBan(false)}
+                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[10px] font-bold uppercase tracking-wider transition-all"
+                  >
+                    Скасувати
+                  </button>
+                  <button
+                    onClick={() => { setConfirmBan(false); handleToggleBan() }}
+                    disabled={actionLoading}
+                    className={`flex-1 h-10 rounded-xl text-white text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5 ${isBanned ? "bg-emerald-600 hover:bg-emerald-700" : "bg-amber-600 hover:bg-amber-700"}`}
+                  >
+                    {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isBanned ? "Розблокувати" : "Заблокувати"}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Delete confirm overlay ── */}
+        <AnimatePresence>
+          {confirmDelete && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex items-end"
+            >
+              <motion.div
+                initial={{ y: 80, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 80, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 360, damping: 32 }}
+                className="w-full bg-[#0d1120] border-t border-red-500/30 p-6 space-y-4"
+              >
+                <div className="flex items-center gap-2 text-red-400">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p className="font-bold text-sm">Видалити {user.full_name || user.email}?</p>
+                </div>
+                <p className="text-xs text-[#E0E6ED]/40 leading-relaxed">Акаунт буде видалено з Supabase Auth та всіх таблиць. Дія незворотна.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[10px] font-bold uppercase tracking-wider transition-all"
+                  >
+                    Скасувати
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={actionLoading}
+                    className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+                  >
+                    {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Trash2 className="w-3.5 h-3.5" /> Видалити</>}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Edit panel (slides in) ── */}
+        <AnimatePresence>
+          {editOpen && (
+            <motion.div
+              key="edit-panel"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 320, damping: 32 }}
+              className="absolute inset-0 z-20 bg-[#0d1120] flex flex-col"
+            >
+              <div className="shrink-0 bg-[#0d1120]/95 backdrop-blur-sm border-b border-[#C9A84C]/10 px-4 py-3 flex items-center gap-3">
+                <button
+                  onClick={() => setEditOpen(false)}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-[#C9A84C]/50 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-all shrink-0"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <p className="text-sm font-semibold text-[#E0E6ED] flex-1 truncate">Редагування — {user.full_name || user.email}</p>
+                <button onClick={onClose} className="text-[#C9A84C]/30 hover:text-[#C9A84C] transition-colors shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+                {actionError && (
+                  <p className="text-xs text-red-400 flex items-center gap-1.5 p-3 rounded-xl bg-red-500/5 border border-red-500/20">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {actionError}
+                  </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Тариф</label>
+                  <select
+                    value={editForm.subscription_tier}
+                    onChange={e => setEditForm(f => ({ ...f, subscription_tier: e.target.value }))}
+                    className="w-full h-10 rounded-xl bg-[#0A0E1A] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs px-3 focus:outline-none focus:border-[#C9A84C]/50"
+                  >
+                    <option value="free">free</option>
+                    <option value="basic">basic</option>
+                    <option value="pro">pro</option>
+                    <option value="unlimited">unlimited</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Місячний ліміт</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editForm.monthly_limit}
+                    onChange={e => setEditForm(f => ({ ...f, monthly_limit: e.target.value }))}
+                    placeholder="Порожньо = безліміт"
+                    className="w-full h-10 rounded-xl bg-[#0A0E1A] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs px-3 focus:outline-none focus:border-[#C9A84C]/50 placeholder:text-[#E0E6ED]/20"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Бонусні запити</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editForm.bonus_requests}
+                    onChange={e => setEditForm(f => ({ ...f, bonus_requests: e.target.value }))}
+                    className="w-full h-10 rounded-xl bg-[#0A0E1A] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs px-3 focus:outline-none focus:border-[#C9A84C]/50"
+                  />
+                </div>
+              </div>
+
+              <div className="shrink-0 border-t border-[#C9A84C]/10 px-6 py-4">
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={actionLoading}
+                  className="w-full h-10 rounded-xl bg-[#C9A84C] hover:bg-[#C9A84C]/90 text-[#0A0E1A] text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+                >
+                  {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Save className="w-3.5 h-3.5" /> Зберегти</>}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )
@@ -818,6 +1098,7 @@ export default function UsersPage() {
                 ) : (
                   users.map((u) => {
                     const rel = formatRelative(u.last_active_at)
+                    const rowLimit = u.monthly_limit !== null ? u.monthly_limit + (u.bonus_requests ?? 0) : null
                     return (
                       <tr
                         key={u.id}
@@ -854,14 +1135,14 @@ export default function UsersPage() {
                                 {u.requests_this_month}
                               </span>
                               <span className="text-[10px] text-[#E0E6ED]/30">
-                                /{u.monthly_limit ?? "∞"}
+                                /{rowLimit ?? "∞"}
                               </span>
                             </div>
-                            {u.monthly_limit ? (
+                            {rowLimit ? (
                               <div className="w-14 h-1 bg-[#C9A84C]/10 rounded-full overflow-hidden">
                                 <div
                                   className="h-full rounded-full bg-[#C9A84C]/60"
-                                  style={{ width: `${Math.min(100, (u.requests_this_month / u.monthly_limit) * 100)}%` }}
+                                  style={{ width: `${Math.min(100, (u.requests_this_month / rowLimit) * 100)}%` }}
                                 />
                               </div>
                             ) : null}
@@ -967,7 +1248,7 @@ export default function UsersPage() {
       </div>{/* end flex-1 table section */}
 
       {/* Drawer */}
-      {selected && <UserDrawer user={selected} onClose={() => setSelected(null)} labels={onboardingLabels} />}
+      {selected && <UserDrawer user={selected} onClose={() => setSelected(null)} onRefresh={fetchUsers} labels={onboardingLabels} />}
     </div>
   )
 }
