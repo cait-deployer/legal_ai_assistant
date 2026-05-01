@@ -11,8 +11,8 @@ function admin() {
 }
 
 const BACKEND_URL = process.env.API_URL ?? "http://localhost:8001"
-// Keep last N messages unsummarized (= last 3 turns)
-const KEEP_LAST_N = 6
+// Keep last N messages unsummarized (= last 1 turn), the AI also sees last 6 via body.history
+const KEEP_LAST_N = 2
 
 // POST /api/chats/[id]/summarize
 // Reads all messages, summarizes everything except last 6, saves to chats.context_summary
