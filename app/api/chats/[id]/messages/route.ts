@@ -76,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Increment requests_this_month with 30-day rolling window
     const { data: usageProfile } = await admin()
       .from("profiles")
-      .select("requests_this_month, total_requests, limit_reset_at, monthly_limit, subscription_tier")
+      .select("requests_this_month, total_requests, limit_reset_at, monthly_limit, subscription_tier, browser_fingerprint, has_received_review_reward")
       .eq("id", user.id)
       .single()
 
@@ -113,7 +113,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }
       if (newResetAt) usageUpdate.limit_reset_at = newResetAt
       // Mark trial as used on first ever AI interaction
-      if (isFirstRequest) usageUpdate.trial_used = true
+      if (isFirstRequest) {
+        usageUpdate.trial_used = true
+
+        // If any sibling account with the same fingerprint already got a review reward,
+        // mark this account too — prevents double-dipping bonus via new registrations.
+        if (profile.browser_fingerprint && !profile.has_received_review_reward) {
+          const { data: reviewedSibling } = await admin()
+            .from("profiles")
+            .select("id")
+            .eq("browser_fingerprint", profile.browser_fingerprint)
+            .eq("has_received_review_reward", true)
+            .neq("id", user.id)
+            .limit(1)
+            .single()
+
+          if (reviewedSibling) usageUpdate.has_received_review_reward = true
+        }
+      }
 
       await admin().from("profiles").update(usageUpdate).eq("id", user.id)
     }

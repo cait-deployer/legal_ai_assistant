@@ -45,9 +45,31 @@ export async function POST(request: Request) {
 
   const { data: profile } = await admin()
     .from("profiles")
-    .select("subscription_tier, role, sub_role, segment, ai_personal_prompt, response_length_pref, response_lang_style")
+    .select("subscription_tier, role, sub_role, segment, ai_personal_prompt, response_length_pref, response_lang_style, browser_fingerprint, requests_this_month, monthly_limit, bonus_requests")
     .eq("id", user.id)
     .single()
+
+  // Fingerprint abuse guard: for free users, find the oldest OTHER FREE account
+  // with the same browser_fingerprint. Paid accounts are ignored — a user who
+  // upgraded should not penalise a genuinely new free user on the same device.
+  if ((profile?.subscription_tier ?? "free") === "free" && profile?.browser_fingerprint) {
+    const { data: oldestFreeSibling } = await admin()
+      .from("profiles")
+      .select("requests_this_month, monthly_limit, bonus_requests")
+      .eq("browser_fingerprint", profile.browser_fingerprint)
+      .eq("subscription_tier", "free")
+      .neq("id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .single()
+
+    if (oldestFreeSibling) {
+      const siblingLimit = (oldestFreeSibling.monthly_limit ?? 10) + (oldestFreeSibling.bonus_requests ?? 0)
+      if ((oldestFreeSibling.requests_this_month ?? 0) >= siblingLimit) {
+        return NextResponse.json({ error: "Ліміт запитів вичерпано" }, { status: 429 })
+      }
+    }
+  }
 
   let filter_sources: string[] | null = null
   let response_features: string[] = []
