@@ -354,9 +354,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
                   <p className="text-[11px] text-[#E0E6ED]/40 mt-0.5">{opt.desc}</p>
                 </div>
                 <div className="shrink-0">
-                  {opt.lock
-                    ? <span className="text-[9px] font-black text-[#C9A84C]/40 border border-[#C9A84C]/20 rounded-full px-2 py-0.5 uppercase tracking-wider">🔒 {opt.plan}</span>
-                    : responseLang === opt.value
+                  {responseLang === opt.value
                     ? <CheckCircle2 className="w-4 h-4 text-[#C9A84C]" />
                     : null
                   }
