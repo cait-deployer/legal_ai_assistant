@@ -124,6 +124,7 @@ _SOURCES = (
     "scrape_text_missing_found",
     "apply_text_cancellations",
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
+    "pipeline",           # повний автоматичний пайплайн (6 кроків)
 )
 _sync: dict[str, dict] = {
     src: {
@@ -148,6 +149,10 @@ _text_missing_check_stop = threading.Event()
 _text_missing_scrape_stop = threading.Event()
 _apply_text_cancel_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
+_pipeline_stop    = threading.Event()
+
+_PIPELINE_LAST_RUN_FILE = BASE_DIR / "pipeline_last_run.json"
+_PIPELINE_SOURCES = list(V2_SCRAPE_SOURCES)  # all 8 sources
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -805,10 +810,25 @@ _ALL_SCHEDULE_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "
 
 
 def _scheduled_sync() -> None:
-    """Викликається щодня о schedule_hour UTC. Запускає всі ввімкнені джерела."""
+    """Викликається щодня о schedule_hour UTC. Запускає пайплайн або окремі джерела."""
     print("⏰ [scheduler] Перевірка авто-синхронізації...")
 
-    # Рада — використовує legacy _do_rada (V1 flow)
+    # Pipeline mode — якщо увімкнено, запускає повний 6-крокований пайплайн
+    if settings_cache.get_bool("schedule_pipeline_enabled", False):
+        with _lock:
+            if _sync["pipeline"]["running"]:
+                print("⏰ [scheduler] Пайплайн вже виконується — пропускаємо")
+                return
+        session_id = str(uuid.uuid4())
+        print(f"⏰ [scheduler] Pipeline: {session_id[:8]}")
+        try:
+            _start_sync("pipeline", _do_pipeline, session_id)
+            _schedule_last_sync["pipeline"] = datetime.utcnow().isoformat() + "Z"
+        except Exception as e:
+            print(f"⏰ [scheduler] Pipeline помилка: {e}")
+        return  # pipeline mode: don't also run individual scrapers
+
+    # Legacy Рада — V1 flow
     if settings_cache.get_bool("schedule_enabled", False):
         with _lock:
             if not _sync["rada"]["running"]:
@@ -1063,9 +1083,20 @@ async def get_sync_status():
             "running":   running,
             "last_sync": _schedule_last_sync.get(src),
         }
+    with _lock:
+        pipeline_running = _sync["pipeline"]["running"]
+    last_run = None
+    if _PIPELINE_LAST_RUN_FILE.exists():
+        try:
+            last_run = json.loads(_PIPELINE_LAST_RUN_FILE.read_text("utf-8")).get("ts")
+        except Exception:
+            pass
     return {
-        "schedule_hour": schedule_hour,
-        "sources": sources,
+        "schedule_hour":     schedule_hour,
+        "sources":           sources,
+        "pipeline_enabled":  settings_cache.get_bool("schedule_pipeline_enabled", False),
+        "pipeline_running":  pipeline_running,
+        "pipeline_last_run": last_run,
     }
 
 
@@ -1093,6 +1124,12 @@ async def patch_sync_settings(body: dict = Body(default={})):
         await asyncio.to_thread(_sb_patch, "?key=eq.schedule_hour", {"value_text": str(new_hour)})
         _reschedule(new_hour)
         updated.append(f"schedule_hour={new_hour}")
+
+    # Оновити pipeline_enabled
+    pipeline_enabled = body.get("pipeline_enabled")
+    if pipeline_enabled is not None:
+        await asyncio.to_thread(_sb_patch, "?key=eq.schedule_pipeline_enabled", {"value_bool": bool(pipeline_enabled)})
+        updated.append(f"schedule_pipeline_enabled={pipeline_enabled}")
 
     # Оновити per-source enabled flags
     sources_patch = body.get("sources", {})
@@ -1990,6 +2027,24 @@ async def v2_reindex_resume(body: dict = Body(default={})):
     _start_sync(slot, _do_reindex_v2, session_id,
                 source=source, init_only=init_only, reset=False)
     return {"ok": True, "session_id": session_id}
+
+
+@app.get("/admin/v2/reindex/last-completed")
+async def v2_reindex_last_completed():
+    """Timestamp of last successful reindex per source (from reindex_v2_{source}_last_completed.json)."""
+    from reindex_v2 import SOURCES as _V2_SRC
+    result: dict[str, str | None] = {}
+    for src in _V2_SRC:
+        f = BASE_DIR / f"reindex_v2_{src}_last_completed.json"
+        if f.exists():
+            try:
+                ts = float(json.loads(f.read_text("utf-8")).get("ts", 0))
+                result[src] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            except Exception:
+                result[src] = None
+        else:
+            result[src] = None
+    return result
 
 
 @app.get("/admin/v2/analytics")
@@ -5115,6 +5170,208 @@ def _do_apply_text_cancellations(session_id: str, sources: list) -> None:
         with _lock:
             _sync[src]["running"] = False
             _sync[src]["pause_requested"] = False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pipeline — повний автоматичний цикл оновлення (6 кроків)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PIPELINE_STEP_NAMES = [
+    "Скрапінг (нові документи)",
+    "Реіндекс (тільки нові)",
+    "Збагачення метаданих OpenData",
+    "Видобування текстових скасувань",
+    "Застосування текстового кешу",
+    "Патч Qdrant payload",
+]
+
+
+def _pipeline_log(msg: str, level: str = "info") -> None:
+    entry = {"ts": datetime.now(timezone.utc).isoformat(), "message": msg, "level": level}
+    with _lock:
+        _sync["pipeline"]["live_logs"].append(entry)
+        if len(_sync["pipeline"]["live_logs"]) > MAX_LIVE_LOGS:
+            _sync["pipeline"]["live_logs"] = _sync["pipeline"]["live_logs"][-MAX_LIVE_LOGS:]
+
+
+def _do_pipeline(session_id: str) -> None:
+    """6-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
+    src = "pipeline"
+    sources = list(_PIPELINE_SOURCES)
+    step = 0
+
+    def _step_log(msg: str, level: str = "info") -> None:
+        _pipeline_log(f"[{step}/{len(_PIPELINE_STEP_NAMES)}] {msg}", level)
+
+    def _stopped() -> bool:
+        return _pipeline_stop.is_set()
+
+    try:
+        _pipeline_stop.clear()
+        _pipeline_log(f"🚀 Пайплайн розпочато: {session_id[:8]}", "info")
+
+        # ── Step 1: Scrape (force=False → skip existing OK files) ──────────────
+        step = 1
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[0]}")
+        for scrape_src in sources:
+            if _stopped():
+                _step_log("⏸ Зупинено", "warning")
+                return
+            try:
+                stop_ev = _v2_scrape_stop[scrape_src]
+                stop_ev.clear()
+                if scrape_src == "mod":
+                    from scrape_mod_v2 import run_scrape_mod
+                    run_scrape_mod(log_callback=_pipeline_log, stop_event=stop_ev, force=False)
+                elif scrape_src == "zir":
+                    from scrape_zir_v2 import run_scrape_zir
+                    run_scrape_zir(log_callback=_pipeline_log, stop_event=stop_ev, force=False)
+                else:
+                    from scrape_all_v2 import run_scrape_all
+                    run_scrape_all(source=scrape_src, rada_collection=None,
+                                   log_callback=_pipeline_log, stop_event=stop_ev, force=False)
+            except Exception as e:
+                _step_log(f"⚠️ Scrape {scrape_src}: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[0]} завершено")
+
+        # ── Step 2: Reindex new only ────────────────────────────────────────────
+        step = 2
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[1]}")
+        if _stopped():
+            _step_log("⏸ Зупинено", "warning")
+            return
+        for reindex_src in sources:
+            if _stopped():
+                _step_log("⏸ Зупинено", "warning")
+                return
+            stop_key = reindex_src
+            try:
+                _v2_stop[stop_key].clear()
+                from reindex_v2 import run_reindex_v2
+                run_reindex_v2(source=reindex_src, log_callback=_pipeline_log,
+                               stop_event=_v2_stop[stop_key], new_only=True)
+            except Exception as e:
+                _step_log(f"⚠️ Reindex {reindex_src}: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[1]} завершено")
+
+        # ── Step 3: Enrich OpenData metadata ───────────────────────────────────
+        step = 3
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[2]}")
+        if _stopped():
+            _step_log("⏸ Зупинено", "warning")
+            return
+        try:
+            _enrich_stop.clear()
+            from enrich_opendata_meta import run_enrich
+            run_enrich(log_callback=_pipeline_log, stop_event=_enrich_stop,
+                       sources=["rada", "kmu"], force=False)
+        except Exception as e:
+            _step_log(f"⚠️ Enrich OpenData: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[2]} завершено")
+
+        # ── Step 4: Extract text cancellations ─────────────────────────────────
+        step = 4
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[3]}")
+        if _stopped():
+            _step_log("⏸ Зупинено", "warning")
+            return
+        try:
+            _text_cancel_stop.clear()
+            from extract_text_cancellations import run_extract
+            run_extract(log_callback=_pipeline_log, stop_event=_text_cancel_stop,
+                        sources=["rada", "kmu"], dry_run=False)
+        except Exception as e:
+            _step_log(f"⚠️ Text extract: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[3]} завершено")
+
+        # ── Step 5: Apply text cache ────────────────────────────────────────────
+        step = 5
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[4]}")
+        if _stopped():
+            _step_log("⏸ Зупинено", "warning")
+            return
+        try:
+            _apply_text_cancel_stop.clear()
+            from enrich_opendata_meta import run_apply_text_cancellations
+            run_apply_text_cancellations(log_callback=_pipeline_log,
+                                         stop_event=_apply_text_cancel_stop,
+                                         sources=["rada", "kmu"])
+        except Exception as e:
+            _step_log(f"⚠️ Apply text cache: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[4]} завершено")
+
+        # ── Step 6: Qdrant metadata patch ──────────────────────────────────────
+        step = 6
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[5]}")
+        if _stopped():
+            _step_log("⏸ Зупинено", "warning")
+            return
+        try:
+            _qdrant_meta_stop.clear()
+            from update_qdrant_meta import run_update_qdrant
+            run_update_qdrant(log_callback=_pipeline_log, stop_event=_qdrant_meta_stop,
+                              sources=["rada", "kmu"])
+        except Exception as e:
+            _step_log(f"⚠️ Qdrant patch: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[5]} завершено")
+
+        # ── Done ────────────────────────────────────────────────────────────────
+        run_ts = datetime.now(timezone.utc).isoformat()
+        try:
+            _PIPELINE_LAST_RUN_FILE.write_text(
+                json.dumps({"ts": run_ts, "session_id": session_id}, ensure_ascii=False), "utf-8"
+            )
+        except Exception:
+            pass
+        _pipeline_log(f"🎉 Пайплайн завершено: {run_ts}", "info")
+
+    except Exception as e:
+        _pipeline_log(f"❌ Критична помилка пайплайну: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+            _sync[src]["pause_requested"] = False
+
+
+@app.post("/admin/pipeline/trigger")
+async def pipeline_trigger():
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("pipeline", _do_pipeline, session_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/pipeline/stop")
+async def pipeline_stop_route():
+    with _lock:
+        if not _sync["pipeline"]["running"]:
+            raise HTTPException(400, "Пайплайн не виконується")
+        _pipeline_stop.set()
+        _sync["pipeline"]["pause_requested"] = True
+    return {"ok": True}
+
+
+@app.get("/admin/pipeline/status")
+async def pipeline_status():
+    with _lock:
+        running   = _sync["pipeline"]["running"]
+        pause_req = _sync["pipeline"]["pause_requested"]
+        logs      = list(_sync["pipeline"]["live_logs"])
+    last_run = None
+    if _PIPELINE_LAST_RUN_FILE.exists():
+        try:
+            last_run = json.loads(_PIPELINE_LAST_RUN_FILE.read_text("utf-8")).get("ts")
+        except Exception:
+            pass
+    return {
+        "running":         running,
+        "pause_requested": pause_req,
+        "live_logs":       logs,
+        "last_run":        last_run,
+        "step_names":      _PIPELINE_STEP_NAMES,
+    }
 
 
 @app.post("/admin/enrich/start")

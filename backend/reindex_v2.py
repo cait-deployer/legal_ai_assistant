@@ -98,6 +98,29 @@ def _state_file(source: str | None) -> str:
     return os.path.join(STATE_DIR, f"reindex_v2_{tag}_state.json")
 
 
+def _last_completed_file(source: str | None) -> str:
+    tag = source if source else "all"
+    return os.path.join(STATE_DIR, f"reindex_v2_{tag}_last_completed.json")
+
+
+def _load_last_completed_ts(source: str | None) -> float:
+    path = _last_completed_file(source)
+    if os.path.exists(path):
+        try:
+            data = json.loads(Path(path).read_text("utf-8"))
+            return float(data.get("ts", 0))
+        except Exception:
+            pass
+    return 0.0
+
+
+def _save_last_completed_ts(source: str | None) -> None:
+    Path(_last_completed_file(source)).write_text(
+        json.dumps({"ts": datetime.now(timezone.utc).timestamp()}, ensure_ascii=False),
+        "utf-8",
+    )
+
+
 def _load_state(source: str | None) -> dict:
     path = _state_file(source)
     if os.path.exists(path):
@@ -251,7 +274,7 @@ def _process_law(source: str, law_id: str, meta_path: str) -> dict:
 
 
 # ── Internal run logic ─────────────────────────────────────────────────────────
-def _run_main(source: str | None = None, init_only: bool = False, reset: bool = False) -> None:
+def _run_main(source: str | None = None, init_only: bool = False, reset: bool = False, new_only: bool = False) -> None:
     from qdrant_storage import init_v2_collections
     init_v2_collections(vector_size=3072)
 
@@ -277,12 +300,50 @@ def _run_main(source: str | None = None, init_only: bool = False, reset: bool = 
 
     # Discover files once (fresh count of files on disk)
     all_files = _discover_files(sources_to_run)
+
+    if new_only:
+        last_ts = _load_last_completed_ts(source)
+        if last_ts > 0:
+            age_days = (datetime.now(timezone.utc).timestamp() - last_ts) / 86400
+            if age_days > 7:
+                _log(
+                    f"⚠️ Кеш new_only застарілий ({age_days:.1f} дн > 7 дн) — "
+                    f"виконуємо повний реіндекс замість фільтрації по новизні", "warning"
+                )
+                # last_ts = 0 → не фільтруємо, індексуємо все
+            else:
+                before = len(all_files)
+                all_files = [
+                    (src, lid, mp)
+                    for (src, lid, mp) in all_files
+                    if os.path.getmtime(Path(mp).with_suffix("").with_suffix(".txt")) > last_ts
+                ]
+                _log(
+                    f"🔍 new_only: {len(all_files)}/{before} нових файлів "
+                    f"(після {datetime.fromtimestamp(last_ts).strftime('%Y-%m-%d %H:%M')}, "
+                    f"кеш {age_days:.1f} дн)"
+                )
+        else:
+            _log("🔍 new_only: попередній запуск не знайдено — індексуємо все")
+        # new_only runs always start from index 0 (fresh filtered list, no resume)
+        state["file_idx"] = 0
+
     total     = len(all_files)
     start_idx = state.get("file_idx", 0)
 
     _log(f"\n{'='*60}")
     _log(f"РЕІНДЕКС V2 [{', '.join(sources_to_run)}]: {total} файлів (старт з {start_idx})")
     _log(f"{'='*60}")
+
+    if total == 0:
+        _log("✅ Нових файлів для індексування немає — пропускаємо. База Qdrant актуальна.", "success")
+        _save_last_completed_ts(source)
+        _log(
+            f"💾 last_completed збережено для [{source or 'all'}] — "
+            f"наступний new_only реіндекс оброблятиме тільки файли новіші за цю мітку",
+            "success"
+        )
+        return
 
     if start_idx >= total and total > 0:
         _log(f"⚠️ file_idx={start_idx} >= total={total}. Скинь стан (reset) якщо хочеш переіндексувати заново.", "warning")
@@ -373,6 +434,12 @@ def _run_main(source: str | None = None, init_only: bool = False, reset: bool = 
     path = _state_file(source)
     if os.path.exists(path):
         os.unlink(path)
+    _save_last_completed_ts(source)
+    _log(
+        f"💾 last_completed збережено для [{source or 'all'}] — "
+        f"наступний new_only реіндекс оброблятиме тільки файли новіші за цю мітку",
+        "success"
+    )
     _log("\n▶ Запусти python repair_missing_v2.py для перевірки пропущених чанків")
 
 
@@ -382,13 +449,14 @@ def run_reindex_v2(
     stop_event: threading.Event | None = None,
     init_only: bool = False,
     reset: bool = False,
+    new_only: bool = False,
 ) -> None:
     """Called from server.py. Runs in a daemon thread."""
     global _stop_ext, _log_cb
     _stop_ext = stop_event
     _log_cb   = log_callback
     try:
-        _run_main(source=source, init_only=init_only, reset=reset)
+        _run_main(source=source, init_only=init_only, reset=reset, new_only=new_only)
     finally:
         _log_cb   = None
         _stop_ext = None
