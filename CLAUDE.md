@@ -66,15 +66,80 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - `app/admin/meta/page.tsx` — Браузер збагачених метаданих (Rada + KMU): фільтри, таблиця, контроль збагачення
 - `app/admin/feedback/page.tsx` — Перегляд inline відгуків (👍👎) та рейтингів застосунку (⭐), пагінація, статистика
 
+## Chat flow (end-to-end)
+
+### 1. User submits message (`app/chat/page.tsx` → `handleSend()`)
+1. Frontend checks `limitExceeded` (= `requests_this_month >= monthly_limit + bonus_requests`) — aborts if true.
+2. If no active chat exists, creates one via `POST /api/chats`.
+3. Saves user message to DB: `POST /api/chats/[chatId]/messages` (non-blocking).
+4. Fetches `/api/ask/stream` — SSE stream.
+
+### 2. SSE proxy (`app/api/ask/stream/route.ts`)
+- Authenticates user; fetches profile (`subscription_tier`, `role`, `sub_role`, `segment`, `ai_personal_prompt`, `response_length_pref`, `response_lang_style`).
+- Queries `subscription_plans` for `max_docs_retrieved` and `plan_features` (controls which sources are searched).
+- Silently downgrades preferences if plan doesn't allow: `full`/`detailed` → `standard` for free; `plain` → `legal` for free.
+- Source gating via `filter_sources[]` from `SOURCE_FEATURE_MAP`: `radar`→`rada`, `source_legalaid`→`wiki`, `source_supreme`→`supreme`, etc. `mod` and `zir` always included.
+- Proxies to backend `/ask_stream` as `new Response(res.body, ...)` — raw stream passthrough.
+
+### 3. Backend pipeline (`backend/server.py` → `_ask_pipeline()`)
+1. **Query rewrite** — detects Russian, translates to Ukrainian; resolves follow-ups from history; rewrites to formal legal terminology via flash model.
+2. **Parallel embedding** — embeds both original and rewritten query.
+3. **Collection routing** — `_classify_and_route()` narrows to 2–3 most relevant collections from `filter_sources`.
+4. **Multi-query retrieval** — searches both query vectors; merges by max similarity per `law_id`; fetches `fetch_k = max_docs × 5` candidates.
+5. **Boosting** — `rada_boost=1.15`, `supreme_penalty=0.88`, `zir_boost=1.3` (tax queries), `_DOC_TYPE_SCORE` (Codes > Laws > Resolutions > Orders).
+6. **Deduplication** — max 2 chunks/law globally; guaranteed slots per collection; court results capped at `max_docs/4`.
+7. **Document expansion** — top seed (score ≥0.75) gets all chunks (up to 20); others get 3 best chunks via vector + keyword per doc.
+8. **Keyword fallback** — parallel lexical search fills gaps from vector search.
+9. **LLM generation** — Gemini model with context (last 6 messages + `context_summary` + retrieved docs + user profile). Classification model runs in parallel.
+10. **Citation extraction** — `_citations_used_in_answer()` returns only refs cited as `[N]` in answer text.
+
+### 4. SSE event format (backend → frontend)
+```
+event: status\ndata: {"step": "started"|"retrieval"|"generation", ...}
+event: message\ndata: {"token": "word"}        ← one per streaming token
+event: citations\ndata: {"answer": "...", "references": [...], "templates": [], "_meta": {...}}
+event: done\ndata: {"request_id": "..."}
+```
+Early-answer path skips `message` events and emits `citations` directly.
+
+### 5. Frontend stream consumption
+- Reads with `ReadableStream` / `getReader()` — manual `event:`/`data:` parsing (not `EventSource`).
+- **Typewriter effect**: tokens queued in `twQueueRef`, drained at 18ms/tick (6ms if backlog), 1–6 chars per tick.
+- On `citations` event: flushes typewriter instantly, updates message with final answer + references.
+- `[1]`, `[2,3]` inline markers parsed by `MarkdownText` into clickable citation buttons.
+- Citation dialog shows enriched metadata: `rada_adopted_date`, `rada_last_edition`, `rada_dead_since`, `rada_theme`, `rada_org`, `rada_replaced_by`, `rada_cancelled_by`, `rada_doc_type`.
+
+### 6. Message save & usage counter (`app/api/chats/[id]/messages/route.ts`)
+- Saves assistant message + citations to `messages` table.
+- **FREE plan**: `isFree = (subscription_tier === "free")` → increments `requests_this_month` only, never sets `limit_reset_at` (one-time 10 requests, no reset).
+- **Paid plans**: 30-day rolling window — sets `limit_reset_at = now + 30d` on first request; resets `requests_this_month = 0` when window expires.
+- Marks `trial_used = true` on first ever interaction.
+- Saves analytics row to `query_analytics` (category, sentiment, complexity, intent, tokens_used, processing_time_ms).
+
+### 7. Post-response actions
+- Every 2nd user turn: context summarization via `POST /api/chats/[chatId]/summarize` → backend `/summarize_history` → stored in `chats.context_summary`. Summarizes all messages except last 2 (= last complete turn). Passed to backend on next request.
+- After first message: chat title generated via `PATCH /api/chats/[chatId]/name` (Vertex AI parses first Q&A → `{title, category}`).
+- `refreshLimit()` called after each response to re-check `limitExceeded` state.
+
+### Plan gating summary
+| What | Where gated | How |
+|------|-------------|-----|
+| Request count limit | Frontend UX only | `requests_this_month >= monthly_limit + bonus_requests` |
+| Source access | SSE proxy | `filter_sources[]` from `plan_features` |
+| Retrieval depth | SSE proxy | `max_docs_retrieved` from `subscription_plans` |
+| Response features | SSE proxy + backend | `response_features[]` (detailed, steps, scenarios, vs_position) |
+| Response style | SSE proxy (silent downgrade) | `response_length_pref`, `response_lang_style` |
+| 429 handling | Frontend | Backend doesn't block — frontend catches 429 and sets `limitExceeded` |
+
 ## Key patterns
 - Settings (AI model, thresholds) — Supabase `app_settings` table, read via `settings_cache`
-- All Qdrant collections v1: `RADA_COLLECTIONS` (13) + `laws_supreme`, `laws_wiki`, `laws_ccu`, `laws_positions`, `laws_kmu` (768 dims)
-- V2 Qdrant collections: same names with `_v2` suffix (18 collections, 3072 dims) — shadow, not yet live in production
+- Qdrant V2 collections (production): `RADA_V2_COLLECTIONS` (13) + `OTHER_V2_COLLECTIONS` (7) = 20 total, 3072 dims (`gemini-embedding-001`)
+- V1 collections (`rada_finance`, `laws_kmu`, etc.) are no longer used in any live code path — all init/search/stats use V2 only
 - `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini (full JSON response)
 - `/ask_stream` endpoint: same pipeline via `_ask_pipeline()` helper → SSE streaming. Events: `data: {"token":"..."}` per chunk, `event: citations\ndata: {...}` at end (full answer + references + _meta). Early-answer path also uses `event: citations`.
 - Response style preferences: `response_length_pref` (short/standard/detailed/full) and `response_lang_style` (legal/plain) stored in `profiles` table. Gated by plan tier — downgraded silently in Next.js route. Word limits: short=200, standard=400, detailed=900, full=2000.
 - Next.js SSE proxy: `app/api/ask/stream/route.ts` — same auth + plan gating as `/api/ask`, proxies stream from backend via `new Response(res.body, ...)`. Chat page reads stream with `ReadableStream` / `getReader()`, appends tokens live, finalizes on `event: citations`.
-- Auto-sync scheduler: APScheduler `daily_sync` cron job at `schedule_hour` UTC. Per-source flags: `schedule_enabled` (Rada legacy V1), `schedule_{source}_enabled` for V2 sources. `schedule_hour` key (int, stored as value_text). UI: `/admin/sync` → ScheduleWidget. Endpoints: `GET /admin/sync/status`, `PATCH /admin/sync/settings`.
+- Auto-sync scheduler: APScheduler `daily_sync` cron job at `schedule_hour` UTC. Per-source flags: `schedule_enabled` (Rada legacy — deprecated, `_do_rada` is a no-op stub), `schedule_{source}_enabled` for V2 sources. `schedule_hour` key (int, stored as value_text). UI: `/admin/sync` → ScheduleWidget. Endpoints: `GET /admin/sync/status`, `PATCH /admin/sync/settings`.
 - Scraper `force=True` mode: bypasses skip logic (re-downloads existing files). Available in `run_scrape_all`, `run_scrape_mod`, `run_scrape_zir`. Trigger via `/admin/v2/scrape/trigger` with `{"force": true}`.
 - Scraper pause/resume: JSON state files in `backend/` (`sync_state.json`, `wiki_state.json`, `ccu_state.json`)
 - V2 scraper pause/resume: `scrape_v2_{source}_state.json` (per source)
@@ -113,8 +178,11 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - Settings floats stored as `value_text` in Supabase (parsed via `get_float()`)
 - New settings keys must be added to BOTH `SETTINGS_SCHEMA` in `app/api/admin/ai-settings/route.ts` AND inserted into `app_settings` table via SQL
 - Never run two v2 reindex processes simultaneously — enforced by backend 409, but don't bypass
+- Never reference V1 Qdrant collection names (`rada_finance`, `laws_kmu`, etc.) in new code — all init/search/stats use V2 (`*_v2`) only. `_do_rada` in server.py is a deprecated no-op stub.
 - Never ignore return value of `upload_to_qdrant()` — silent False = chunk lost
 - Never store zero vectors in Qdrant — embed_v2 raises on failure, caller must handle (skip chunk)
+- Never set `limit_reset_at` for FREE plan users — free is a one-time 10-request allowance with no rolling window
+- Limit check must always use `monthly_limit + bonus_requests` (not `monthly_limit` alone) — bonus is additive, not separate
 
 ## Text Cancellation Mining
 - `backend/extract_text_cancellations.py` scans local `/root/laws_raw/{rada,kmu}/*.txt` files for cancellation evidence sections and builds `backend/text_cancellations_cache.json`.

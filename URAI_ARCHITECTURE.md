@@ -115,30 +115,37 @@
 
 ## 2. Qdrant — структура бази
 
-### 2.1 Всі колекції (18 штук)
+### 2.1 Всі колекції
 
-| Колекція | Джерело | Що зберігається | Chunk (старий → новий) |
-|----------|---------|-----------------|------------------------|
-| `rada_finance` | zakon.rada.gov.ua | Фінанси, банки, ПДВ, митниця (h2, h3, h26, h23) | 1500 → **3000** |
-| `rada_state` | zakon.rada.gov.ua | Держустрій, громадянство (h4) — 25K+ документів | 1500 → **3000** |
-| `rada_personnel` | zakon.rada.gov.ua | Кадрові питання, нагородження (h27) | 1500 → **3000** |
-| `rada_court` | zakon.rada.gov.ua | Суд, прокуратура, господарський процес (h22, h30, h1) | 1500 → **3000** |
-| `rada_intl` | zakon.rada.gov.ua | Міжнародні відносини, договори (h11) | 1500 → **3000** |
-| `rada_labor` | zakon.rada.gov.ua | Трудові відносини, соціальне страхування (h19, h20) | 1500 → **3000** |
-| `rada_civil` | zakon.rada.gov.ua | Цивільне, сімейне, охорона здоров'я (h5, h16, h13) | 1500 → **3000** |
-| `rada_criminal` | zakon.rada.gov.ua | Кримінальне та процесуальне (h25) | 1500 → **3000** |
-| `rada_admin` | zakon.rada.gov.ua | Адм. відповідальність, ліцензування (h8, h10, h31) | 1500 → **3000** |
-| `rada_housing` | zakon.rada.gov.ua | Житлове, ЖКГ, будівництво (h6, h21) | 1500 → **3000** |
-| `rada_land` | zakon.rada.gov.ua | Земельне, сільське господарство (h9, h18) | 1500 → **3000** |
-| `rada_industry` | zakon.rada.gov.ua | Транспорт, промисловість, підприємства (h7, h17, h15) | 1500 → **3000** |
-| `rada_other` | zakon.rada.gov.ua | Освіта, наука, культура, ЗСУ (h12, h14, h24, h28, h29, h32) | 1500 → **3000** |
-| `laws_kmu` | zakon.rada.gov.ua/laws/main/o2 | НПА Кабінету Міністрів (постанови, розпорядження) | 1500 → **4000** |
-| `laws_supreme` | supreme.court.gov.ua | Квартальні PDF-огляди практики Верховного Суду | ~1500 |
+**V1 (15 штук, 768 вимірів, `text-embedding-004`) — продакшн:**
+
+| Колекція | Джерело | Що зберігається | Chunk |
+|----------|---------|-----------------|-------|
+| `rada_finance` | zakon.rada.gov.ua | Фінанси, банки, ПДВ, митниця | 3000 |
+| `rada_state` | zakon.rada.gov.ua | Держустрій, громадянство | 3000 |
+| `rada_personnel` | zakon.rada.gov.ua | Кадрові питання, нагородження | 3000 |
+| `rada_court` | zakon.rada.gov.ua | Суд, прокуратура, господарський процес | 3000 |
+| `rada_intl` | zakon.rada.gov.ua | Міжнародні відносини, договори | 3000 |
+| `rada_labor` | zakon.rada.gov.ua | Трудові відносини, соціальне страхування | 3000 |
+| `rada_civil` | zakon.rada.gov.ua | Цивільне, сімейне, охорона здоров'я | 3000 |
+| `rada_criminal` | zakon.rada.gov.ua | Кримінальне та процесуальне | 3000 |
+| `rada_admin` | zakon.rada.gov.ua | Адм. відповідальність, ліцензування | 3000 |
+| `rada_housing` | zakon.rada.gov.ua | Житлове, ЖКГ, будівництво | 3000 |
+| `rada_land` | zakon.rada.gov.ua | Земельне, сільське господарство | 3000 |
+| `rada_industry` | zakon.rada.gov.ua | Транспорт, промисловість, підприємства | 3000 |
+| `rada_other` | zakon.rada.gov.ua | Освіта, наука, культура, ЗСУ | 3000 |
+| `laws_kmu` | zakon.rada.gov.ua/laws/main/o2 | НПА Кабінету Міністрів | 4000 |
+| `laws_supreme` | supreme.court.gov.ua | Квартальні PDF-огляди практики ВС | ~1500 |
 | `laws_wiki` | legalaid.wiki | Вікі-статті правової допомоги | ~1500 |
 | `laws_ccu` | ccu.gov.ua | Рішення та Висновки Конституційного Суду | ~1500 |
 | `laws_positions` | lpd.court.gov.ua | Правові позиції Верховного Суду (~12 800) | ~2000 |
 
-**Вектор:** 768 вимірів, cosine distance, модель `text-embedding-004` (Google Vertex AI)
+**V2 (20 штук, 3072 вимірів, `gemini-embedding-001`) — shadow, не в продакшні:**
+
+Ті самі назви + суфікс `_v2`: всі 13 `rada_*_v2` + `laws_kmu_v2`, `laws_supreme_v2`, `laws_wiki_v2`, `laws_ccu_v2`, `laws_positions_v2`, `laws_mod_v2`, `laws_zir_v2`.
+
+**Вектор V1:** 768 вимірів, cosine distance, `text-embedding-004` (Vertex AI)  
+**Вектор V2:** 3072 вимірів, cosine distance, `gemini-embedding-001` (Google GenAI)
 
 **Title-prefix:** у кожному чанку починається з назви закону — `"{law_title}\n\n{chunk}"`.  
 Це вже є в нових індексованих чанках (після reindex) та `laws_positions`.
@@ -308,9 +315,14 @@ low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
 
 | Колекція | Коефіцієнт | Причина |
 |----------|-----------|---------|
-| `rada_*`, `laws_positions` | ×1.15 (з адмінки) | Первинне законодавство пріоритетніше |
-| `laws_supreme` | ×0.88 (фіксовано) | PDF-огляди широко матчаться — знижуємо вагу |
-| `laws_kmu`, `laws_ccu`, `laws_wiki` | ×1.0 | Без змін |
+| `laws_kmu` | ×1.18 | Підзаконні акти прямої дії — найвища практична цінність |
+| `rada_*` (всі 13) | ×1.12 | Первинне законодавство |
+| `laws_positions`, `laws_supreme`, `laws_ccu` | ×1.03 | Судова практика — важлива, але вторинна |
+| `laws_zir` | ×0.96 | Роз'яснення ДПС — авторитетні, але вужче застосування |
+| `laws_mod` | ×1.0 | Без змін |
+| `laws_wiki` | ×0.90 | Довідкові статті — мінімальний юридичний пріоритет |
+
+Додатково `_DOC_TYPE_SCORE` бусти: +0.08 Кодекс, +0.07 Закон, +0.06 Постанова, −0.08 Лист/Інформаційний лист.
 
 **Dedup:** максимум 2 чанки від одного `law_id` глобально.
 
@@ -374,11 +386,11 @@ if not low_confidence and (not results or results[0]["similarity"] < min_score):
 
 Розподіл по bucket-ах:
 ```
-law_chunks   (rada_* + laws_wiki)                      → max 4 чанки
-kmu_chunks   (laws_kmu)                                → max 3 чанки
-court_chunks (laws_positions, laws_supreme, laws_ccu)  → max 2 чанки
+law_chunks   (rada_* + laws_wiki)                                  → max 15 чанків
+kmu_chunks   (laws_kmu)                                            → max 8 чанків
+court_chunks (laws_positions, laws_supreme, laws_ccu, laws_mod)    → max 6 чанків
 ```
-Context cap: **14 000 символів** (обрізається якщо більше).
+Context cap: **80 000 символів** (обрізається якщо більше).
 
 Заголовок кожного чанку в контексті:
 ```
@@ -468,7 +480,7 @@ Context cap: **14 000 символів** (обрізається якщо біл
 | `max_output_tokens` | `8000` | Ліміт токенів відповіді |
 | `match_threshold_docs` | `0.35` | Мін. threshold vector search (реальний: max(0.33, value)) |
 | `min_relevance_score` | `0.55` | Hard-stop після reranker (не діє при low_confidence) |
-| `rada_source_boost` | `1.15` | Буст для rada_* та laws_positions |
+| `rada_source_boost` | `1.12` | Буст для rada_* колекцій (laws_kmu=1.18 фіксовано в коді) |
 | `system_prompt` | fallback | Системний промпт Gemini |
 | `llm_timeout_seconds` | `90.0` | Timeout для Gemini |
 | `rewrite_examples` | `""` | Few-shot приклади для Query Rewrite: `"розмовна фраза → юридичний термін"` (по одному на рядок) |
@@ -561,19 +573,42 @@ tail -f /tmp/reindex_rada.log
 
 ## 8. Адмін-панель (`/admin`)
 
-| Розділ | Що робить |
-|--------|-----------|
-| Огляд | Статистика всіх синхронізацій, останні запуски |
-| Рада | Запуск/пауза/відновлення scraper rada_*, розклад |
-| Верховний Суд | Scraper laws_supreme (PDF) |
-| КСУ | Scraper laws_ccu |
-| Позиції ВС | Scraper laws_positions (JSON API) |
-| КМУ | Scraper laws_kmu |
-| **Переіндекс** | Full reindex КМУ і Ради з live-логами (chunk 4000/3000 + title-prefix) |
-| Покриття бази | Які секції Ради вже є в базі |
-| AI Модель | Зміна системного промпту, моделі, thresholds |
-| Онбординг | Тексти онбордингу |
-| База знань | Вручну додати документи |
-| Аналітика | Статистика чатів, популярні питання |
-| Тарифи | Плани підписки, фічі, ціни |
-| Користувачі | Список користувачів, статус підписки |
+| Розділ (URL) | Що робить |
+|-------------|-----------|
+| `/admin` | Огляд: статистика синхронізацій, останні запуски |
+| `/admin/reindex` | Full reindex V1: КМУ + Рада, start/stop/resume, live-логи |
+| `/admin/scraper` | Scraper V1: всі джерела |
+| `/admin/coverage` | Покриття Qdrant: які секції Ради є в базі |
+| `/admin/ai-settings` | AI модель, поріги, системний промпт, rewrite examples |
+| `/admin/stats` | Статистика використання / аналітика чатів |
+| `/admin/v2` | V2 панель: скрапер / реіндекс / аналітика / диск / джерела |
+| `/admin/sync` | Зведення джерел, Centroid Router, авто-синхронізація per source |
+| `/admin/meta` | Браузер збагачених метаданих (Rada + KMU): збагачення OpenData, патч Qdrant, text mining |
+| `/admin/feedback` | Перегляд inline відгуків (👍👎) та рейтингів застосунку (⭐) |
+| `/admin/users` | Список користувачів: тарифи, запити, активність, бонуси, регіон |
+
+## 9. Фронтенд чат — ліміти та збереження
+
+### Ліміти запитів (`profiles` table)
+
+| Поле | Тип | Призначення |
+|------|-----|-------------|
+| `monthly_limit` | int | Базовий ліміт плану |
+| `bonus_requests` | int | Додаткові запити (нарахування за відгуки тощо) |
+| `requests_this_month` | int | Лічильник поточного вікна |
+| `limit_reset_at` | timestamptz | Дата кінця 30-денного вікна (NULL для FREE) |
+| `subscription_tier` | text | `free` / `basic` / `pro` / `ultra` |
+
+**Ефективний ліміт = `monthly_limit + bonus_requests`**  
+**FREE план:** one-time 10 запитів, `limit_reset_at` ніколи не ставиться.  
+**Платні плани:** 30-денне rolling вікно — `limit_reset_at = now + 30d` при першому запиті; скидається на 0 при закінченні вікна.
+
+### Де перевіряється ліміт
+
+Ліміт enforce-иться **тільки на фронтенді** (UX-блокування). Backend `/ask_stream` не перевіряє ліміт перед обробкою. Лічильник (`requests_this_month`) інкрементується після збереження assistant-повідомлення в `POST /api/chats/[id]/messages`.
+
+### Збереження і post-response дії
+
+1. Кожне assistant-повідомлення → `messages` table + `query_analytics` row.
+2. Кожен 2-й turn → `POST /api/chats/[id]/summarize` → backend `/summarize_history` → `chats.context_summary` (передається на наступний запит).
+3. Після першого повідомлення → `PATCH /api/chats/[id]/name` (Gemini генерує `{title, category}`).

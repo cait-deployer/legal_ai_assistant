@@ -81,9 +81,6 @@ RADA_COLLECTIONS: list[str] = [
     "rada_other",
 ]
 
-# Всі колекції системи
-ALL_COLLECTIONS: list[str] = RADA_COLLECTIONS + ["laws_supreme", "laws_wiki", "laws_ccu", "laws_positions", "laws_kmu"]
-
 # ── V2 колекції (gemini-embedding-001, 3072 dims) ──────────────────────────────
 RADA_V2_COLLECTIONS: list[str] = [f"{c}_v2" for c in RADA_COLLECTIONS]
 
@@ -116,37 +113,12 @@ def get_client() -> QdrantClient:
     return _client
 
 
-def get_collection_for_category(category_code: str) -> str:
-    """Повертає назву колекції для РАДА-категорії. Fallback → rada_other."""
-    return CATEGORY_TO_COLLECTION.get(category_code, "rada_other")
-
-
 def get_v2_collection_for_category(category_code: str) -> str:
     """Повертає назву v2-колекції для РАДА-категорії. Fallback → rada_other_v2."""
     return CATEGORY_TO_V2_COLLECTION.get(category_code, "rada_other_v2")
 
 
 # ── ІНІЦІАЛІЗАЦІЯ ──────────────────────────────────────────────────────────────
-
-def init_all_collections(vector_size: int = 768, force_recreate: bool = False) -> None:
-    """Створює всі колекції системи якщо їх немає."""
-    client = get_client()
-    existing = {c.name for c in client.get_collections().collections}
-
-    for name in ALL_COLLECTIONS:
-        if name in existing:
-            if not force_recreate:
-                print(f"✅ '{name}' вже існує — пропускаємо.")
-                continue
-            client.delete_collection(name)
-            print(f"🗑️  Видалено '{name}'.")
-
-        client.create_collection(
-            collection_name=name,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
-        )
-        print(f"✅ Колекцію '{name}' створено (size={vector_size}).")
-
 
 def init_v2_collections(vector_size: int = 3072, force_recreate: bool = False) -> None:
     """Створює всі _v2 колекції (gemini-embedding-001, 3072 dims) якщо їх немає."""
@@ -255,7 +227,7 @@ def get_all_existing_laws_meta() -> dict:
         return get_existing_laws_meta(col)
 
     with ThreadPoolExecutor(max_workers=6) as ex:
-        futures = {ex.submit(_fetch, col): col for col in ALL_COLLECTIONS}
+        futures = {ex.submit(_fetch, col): col for col in ALL_V2_COLLECTIONS}
         for future in as_completed(futures):
             try:
                 all_meta.update(future.result())
@@ -337,7 +309,7 @@ def search_qdrant(
     Паралельний пошук по вказаних колекціях (або всіх якщо None).
     Повертає merged + sorted за score результати, обрізані до top_k.
     """
-    targets = collections or ALL_COLLECTIONS
+    targets = collections or ALL_V2_COLLECTIONS
     all_results: list = []
 
     with ThreadPoolExecutor(max_workers=min(len(targets), 8)) as ex:
@@ -495,7 +467,7 @@ def get_collection_stats() -> dict:
     """Повертає {collection_name: points_count} для всіх колекцій."""
     client = get_client()
     stats: dict = {}
-    for name in ALL_COLLECTIONS:
+    for name in ALL_V2_COLLECTIONS:
         try:
             info = client.get_collection(name)
             stats[name] = info.points_count or 0
@@ -523,7 +495,7 @@ def get_unique_law_count() -> dict | None:
         )
         per_collection: dict[str, int] = {}
         any_success = False
-        for name in ALL_COLLECTIONS:
+        for name in ALL_V2_COLLECTIONS:
             try:
                 result = client.count(
                     collection_name=name,

@@ -331,252 +331,15 @@ def _do_rada(
     log("=" * 50)
 
     _sb_insert_log(src, session_id)
-    processed = 0
 
-    try:
-        from qdrant_storage import (
-            get_all_existing_laws_meta, delete_law_chunks, upload_to_qdrant,
-            get_collection_for_category,
-        )
-        from rada_scanner import get_all_legal_ids, get_law_text, get_law_metadata, detect_text_flags, BASE
-        from langchain_text_splitters import MarkdownTextSplitter
-        from rada_to_supabase import embeddings
+    # V1 reindex is deprecated — use V2 scraper + reindex_v2.py instead (/admin/v2)
+    log("⚠️  Рада V1 реіндекс застарів. Використовуйте V2 скрапер + реіндекс у /admin/v2.", "warning")
+    _sb_update_log(session_id, status="error", finished_at=datetime.now(timezone.utc).isoformat(),
+                   laws_processed=0, error_message="V1 reindex deprecated — use /admin/v2")
+    with _lock:
+        _sync[src]["running"] = False
+    return
 
-        splitter = MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300)
-
-        # 1. Отримуємо список законів (або з кешу при resume)
-        if all_laws_cached is not None:
-            all_laws = all_laws_cached
-            log(f"📋 Список завантажено з кешу: {len(all_laws)} законів")
-        else:
-            log("📡 Сканування розділів Ради...")
-            all_laws = get_all_legal_ids(section_codes=section_codes, log=log)
-            log(f"📦 Знайдено: {len(all_laws)} унікальних законів")
-
-        # 2. Метадані існуючих — окремо по кожній РАДА-колекції
-        # Дозволяємо одному закону бути в кількох колекціях одночасно:
-        # дедуплікація перевіряє лише цільову колекцію, а не всі.
-        log("🔍 Завантаження метаданих Qdrant...")
-        from qdrant_storage import RADA_COLLECTIONS, get_existing_laws_meta as _get_col_meta
-        existing_by_col: dict[str, dict] = {}
-        with _TPE(max_workers=6) as _ex_meta:
-            _meta_futures = {_ex_meta.submit(_get_col_meta, col): col for col in RADA_COLLECTIONS}
-            for _f in _meta_futures:
-                existing_by_col[_meta_futures[_f]] = _f.result()
-        total_existing = sum(len(v) for v in existing_by_col.values())
-        log(f"📊 В базі вже: {total_existing} записів по {len(existing_by_col)} колекціях")
-
-        total = len(all_laws)
-
-        # Захист від дублікатів при паралельній обробці:
-        # один закон може зустрічатись у кількох розділах Ради одночасно.
-        _in_progress: set[str] = set()
-        _in_progress_lock = threading.Lock()
-
-        # ── Функція обробки одного закону (виконується в потоці) ──────────
-        def _process_law(i: int) -> int:
-            """Повертає 1 якщо закон оброблено, 0 якщо пропущено."""
-            law       = all_laws[i]
-            law_id    = law["id"]
-            law_title = law["title"]
-            category  = law["category"]
-            law_url   = f"{BASE}/laws/show/{law_id}"
-            coll      = get_collection_for_category(category)
-
-            # Захист від дублікатів: якщо інший потік вже обробляє цей (закон, колекція) — пропускаємо.
-            # Ключ — пара (law_id, coll), щоб той самий закон міг паралельно йти в різні колекції.
-            _ip_key = (law_id, coll)
-            with _in_progress_lock:
-                if _ip_key in _in_progress:
-                    log(f"  ⏭ [{i + 1}] {law_id}/{coll} — вже обробляється паралельним потоком")
-                    return 0
-                _in_progress.add(_ip_key)
-
-            try:
-                # Дедуплікація — перевіряємо лише в цільовій колекції.
-                # Якщо закон є в іншій колекції — ок, додаємо ще раз у поточну.
-                col_meta = existing_by_col.get(coll, {})
-                if law_id in col_meta:
-                    meta        = col_meta[law_id]
-                    stored_date = meta.get("effective_date", "")
-                    list_date   = law.get("list_date", "")
-                    if stored_date and list_date:
-                        if stored_date == list_date:
-                            log(f"  ⏭ [{i + 1}] {law_id} — вже є в {coll} (дата {stored_date})")
-                            return 0
-                        log(f"🔄 Нова редакція {law_id} в {coll}: {stored_date} → {list_date}")
-                        delete_law_chunks(law_id, coll)
-                    else:
-                        try:
-                            last_str = meta.get("scraped_at", "").replace("Z", "+00:00")
-                            last = datetime.fromisoformat(last_str)
-                            now  = datetime.now(timezone.utc) if last.tzinfo else datetime.now()
-                            if (now - last).days < 7:
-                                log(f"  ⏭ [{i + 1}] {law_id} — в {coll} скраповано {(now - last).days} дн. тому")
-                                return 0
-                            log(f"🔄 Оновлення: {law_id} в {coll} (вік: {(now - last).days} дн.)")
-                            delete_law_chunks(law_id, coll)
-                        except Exception:
-                            pass
-
-                log(f"[{i + 1}/{total}] {law_title[:60]}")
-
-                # Паралельний fetch: текст + метадані з семафором на rada.gov.ua
-                def _fetch_text():
-                    with _rada_http_sem:
-                        return get_law_text(law_id)
-
-                def _fetch_meta():
-                    with _rada_http_sem:
-                        return get_law_metadata(law_id)
-
-                with _TPE(max_workers=2) as ex:
-                    text_f = ex.submit(_fetch_text)
-                    meta_f = ex.submit(_fetch_meta)
-                    text     = text_f.result()
-                    law_meta = meta_f.result()
-
-                scraped_at = datetime.now(timezone.utc).isoformat()
-
-                if text == "__RESTRICTED__":
-                    log(f"  🔒 ДСК — зберігаємо без тексту", "warning")
-                    try:
-                        v = embeddings.embed_query(law_title)
-                        upload_to_qdrant("", {
-                            "source": law_title, "law_id": law_id, "category": category,
-                            "status": "ДСК", "law_url": law_url,
-                            "source_domain": "zakon.rada.gov.ua",
-                            "scraped_at": scraped_at,
-                            "effective_date": law.get("list_date", ""),
-                            "chunk_index": 0,
-                        }, v, coll, session_id=session_id)
-                    except Exception as e:
-                        log(f"  ❌ ДСК upload: {e}", "error")
-                    return 1
-
-                if not text:
-                    log(f"  ⚠️ Порожній текст ({law_id}) — пропускаємо", "warning")
-                    return 0
-
-                chunks     = splitter.split_text(text)
-                # Title-prefix: embedding знає назву закону в кожному чанку
-                chunks     = [f"{law_title}\n\n{c}" for c in chunks]
-                text_flags = detect_text_flags(text)
-                log(f"  ✂️ {len(chunks)} чанків | {law_meta['status']} | {coll}")
-
-                # Batch embed — по 10 чанків за раз
-                vectors = []
-                try:
-                    for b in range(0, len(chunks), 10):
-                        vectors.extend(embeddings.embed_documents(chunks[b:b + 10]))
-                except Exception as e:
-                    log(f"  ⚠️ Batch embed помилка, перемикаємось на посткові: {e}", "warning")
-                    vectors = []
-                    for chunk in chunks:
-                        try:
-                            vectors.append(embeddings.embed_query(chunk))
-                        except Exception as e2:
-                            log(f"  ❌ embed_query: {e2}", "error")
-                            vectors.append(None)
-                if not vectors:
-                    return 0
-
-                base = {
-                    "source": law_title, "law_id": law_id, "category": category,
-                    "status": law_meta["status"], "law_url": law_url,
-                    "source_domain": "zakon.rada.gov.ua", "scraped_at": scraped_at,
-                    "effective_date": law.get("list_date", ""),
-                    "doc_type": law_meta.get("doc_type", ""),
-                    "author": law_meta.get("author", ""),
-                    "superseded_by": law_meta.get("superseded_by", ""),
-                    **text_flags,
-                }
-                for j, (chunk, vector) in enumerate(zip(chunks, vectors)):
-                    if vector is None:
-                        continue
-                    try:
-                        upload_to_qdrant(chunk, {**base, "chunk_index": j}, vector, coll, session_id=session_id)
-                    except Exception as e:
-                        log(f"  ❌ Чанк {j}: {e}", "error")
-
-                log(f"  ✅ [{i + 1}/{total}] готово", "success")
-                return 1
-            finally:
-                with _in_progress_lock:
-                    _in_progress.discard(_ip_key)
-
-        # ── Батч-паралельний цикл ─────────────────────────────────────────
-        i = start_index
-        while i < total:
-
-            # Перевірка паузи між батчами
-            with _lock:
-                pause = _sync[src]["pause_requested"]
-            if pause:
-                log(f"⏸️  Зберігаємо прогрес ({i}/{total}) та зупиняємось...", "warning")
-                _save_state(src, all_laws, i, session_id)
-                _sb_update_log(
-                    session_id,
-                    status="paused",
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                    laws_processed=processed,
-                    error_message=f"Призупинено на законі {i}/{total}",
-                )
-                log(f"⏸️  Призупинено. Прогрес збережено. Відновіть будь-коли.", "warning")
-                with _lock:
-                    _sync[src]["running"] = False
-                    _sync[src]["pause_requested"] = False
-                return
-
-            # Формуємо батч
-            batch_end   = min(i + RADA_WORKERS, total)
-            batch_range = list(range(i, batch_end))
-            log(f"⚡ Батч законів {i + 1}–{batch_end} / {total} ({RADA_WORKERS} потоків)")
-
-            with _TPE(max_workers=RADA_WORKERS) as pool:
-                from concurrent.futures import as_completed
-                futs = {pool.submit(_process_law, idx): idx for idx in batch_range}
-                for fut in as_completed(futs):
-                    try:
-                        processed += fut.result()
-                    except Exception as e:
-                        log(f"  ❌ Воркер: {e}", "error")
-
-            i = batch_end
-
-            # Зберігаємо прогрес і лічильник після кожного батча
-            _save_state(src, all_laws, i, session_id)
-            with _lock:
-                _sync[src]["laws_processed"] = processed
-            if processed % 10 < RADA_WORKERS:
-                _sb_update_log(session_id, laws_processed=processed)
-
-            # Пауза між батчами — ввічливо до rada.gov.ua
-            time.sleep(1.0)
-
-        # ── Успішне завершення ─────────────────────────────────────────────
-        _clear_state()
-        _sb_update_log(
-            session_id,
-            status="success",
-            finished_at=datetime.now(timezone.utc).isoformat(),
-            laws_processed=processed,
-        )
-        log(f"✅ Синхронізацію завершено! Оброблено: {processed} законів.", "success")
-
-    except Exception as e:
-        log(f"❌ Критична помилка: {e}", "error")
-        _sb_update_log(
-            session_id,
-            status="error",
-            finished_at=datetime.now(timezone.utc).isoformat(),
-            laws_processed=processed,
-            error_message=str(e),
-        )
-    finally:
-        with _lock:
-            _sync[src]["running"] = False
-            _sync[src]["pause_requested"] = False
 
 
 def _do_supreme(session_id: str) -> None:
@@ -1096,12 +859,12 @@ async def lifespan(app: FastAPI):
     settings_cache.load()
     _init_vertex_ai()
 
-    # Створюємо всі Qdrant колекції якщо їх немає (безпечно — існуючі пропускає)
+    # Створюємо всі Qdrant V2 колекції якщо їх немає (безпечно — існуючі пропускає)
     try:
-        from qdrant_storage import init_all_collections, ensure_text_indexes
+        from qdrant_storage import init_v2_collections, ensure_text_indexes
         import threading as _threading
-        init_all_collections()
-        print("✅ Qdrant collections ready.")
+        init_v2_collections()
+        print("✅ Qdrant V2 collections ready.")
         # Full-text індекси — запускаємо у фоні щоб не блокувати старт
         _threading.Thread(target=ensure_text_indexes, daemon=True).start()
         print("🔍 Full-text index init started in background.")
@@ -3381,7 +3144,7 @@ def _route_collections(
 
     Завжди: laws_positions, laws_supreme, laws_kmu.
     Додатково: колекції з score ≥ 85% від максимального І ≥ абсолютного порогу.
-    Fallback → ALL_COLLECTIONS якщо центроїди недоступні.
+    Fallback → all_collections (ALL_V2_COLLECTIONS) якщо центроїди недоступні.
     """
     try:
         centroids = _load_centroids()
