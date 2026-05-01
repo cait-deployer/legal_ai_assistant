@@ -458,37 +458,6 @@ def search_law_chunks_by_terms(
     ]
 
 
-def get_all_law_chunks(collection_name: str, law_id: str, max_chunks: int = 60) -> list:
-    """Повертає всі чанки закону відсортовані по chunk_index (без вектора)."""
-    client = get_client()
-    law_filter = Filter(
-        must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]
-    )
-    try:
-        points, _ = client.scroll(
-            collection_name=collection_name,
-            scroll_filter=law_filter,
-            limit=max_chunks,
-            with_payload=True,
-            with_vectors=False,
-        )
-    except Exception as e:
-        print(f"⚠️ get_all_law_chunks [{collection_name}:{law_id}]: {e}")
-        return []
-    points_sorted = sorted(points, key=lambda p: p.payload.get("chunk_index", 0))
-    return [
-        {
-            "out_content":  p.payload.get("content", ""),
-            "out_metadata": {k: v for k, v in p.payload.items() if k != "content"},
-            "similarity":   0.72,
-            "_collection":  collection_name,
-            "_doc_expansion": True,
-            "_full_law": True,
-        }
-        for p in points_sorted
-    ]
-
-
 # ── СТАТИСТИКА ─────────────────────────────────────────────────────────────────
 
 def get_collection_stats() -> dict:
