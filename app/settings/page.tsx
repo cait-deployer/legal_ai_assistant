@@ -87,8 +87,8 @@ function ProfileTab({ profile }: { profile: Profile }) {
   const [styleError, setStyleError] = useState("")
 
   const tier = profile.subscription_tier
-  const isBasicPlus = tier === "basic" || tier === "pro" || tier === "ultra"
-  const isProPlus   = tier === "pro" || tier === "ultra"
+  const isBasicPlus = tier !== "free"
+  const isProPlus   = tier === "pro"
 
   const handleSaveStyle = async () => {
     setStyleSaving(true); setStyleError(""); setStyleSaved(false)
@@ -297,8 +297,8 @@ function ProfileTab({ profile }: { profile: Profile }) {
             {([
               { value: "short",    label: "Коротко",       desc: "Суть за 1–2 абзаци",                   lock: false },
               { value: "standard", label: "Стандарт",      desc: "Збалансована відповідь",                lock: false },
-              { value: "detailed", label: "Розгорнуто",    desc: "З деталями, нюансами та виключеннями", lock: !isBasicPlus, plan: "Basic+" },
-              { value: "full",     label: "Повний аналіз", desc: "Глибокий розбір на 1–2 сторінки",      lock: !isProPlus,   plan: "Pro+" },
+              { value: "detailed", label: "Розгорнуто",    desc: "З деталями, нюансами та виключеннями", lock: !isBasicPlus, plan: "Daily+" },
+              { value: "full",     label: "Повний аналіз", desc: "Глибокий розбір на 1–2 сторінки",      lock: !isProPlus,   plan: "Pro" },
             ] as const).map(opt => (
               <button
                 key={opt.value}

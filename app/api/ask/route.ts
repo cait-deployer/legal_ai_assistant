@@ -98,8 +98,8 @@ export async function POST(request: Request) {
 
   // 5. Gating response preferences by plan tier
   const tier = profile?.subscription_tier ?? "free"
-  const isBasicPlus = tier === "basic" || tier === "pro" || tier === "ultra"
-  const isProPlus   = tier === "pro" || tier === "ultra"
+  const isBasicPlus = tier !== "free"
+  const isProPlus   = tier === "pro"
 
   let response_length_pref = (profile?.response_length_pref ?? "standard") as string
   let response_lang_style  = (profile?.response_lang_style  ?? "legal")    as string
