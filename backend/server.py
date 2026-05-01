@@ -3680,6 +3680,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if _is_russian(question):
             try:
                 _tr_model = GenerativeModel(_model_name)
+                try:
+                    from vertexai.generative_models import ThinkingConfig as _TrThinkingConfig
+                    _tr_gen_cfg = GenerationConfig(
+                        temperature=0.0, max_output_tokens=200,
+                        thinking_config=_TrThinkingConfig(thinking_budget=0),
+                    )
+                except Exception:
+                    _tr_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=200)
                 _tr_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
                         _tr_model.generate_content,
@@ -3691,7 +3699,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                             "Відповідь — тільки переклад без пояснень:\n\n"
                             f"{question}"
                         ),
-                        generation_config=GenerationConfig(temperature=0.0, max_output_tokens=500),
+                        generation_config=_tr_gen_cfg,
                     ),
                     timeout=15.0,
                 )
