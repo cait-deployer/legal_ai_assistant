@@ -76,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Increment requests_this_month with 30-day rolling window
     const { data: usageProfile } = await admin()
       .from("profiles")
-      .select("requests_this_month, total_requests, limit_reset_at, monthly_limit")
+      .select("requests_this_month, total_requests, limit_reset_at, monthly_limit, subscription_tier")
       .eq("id", user.id)
       .single()
 
@@ -87,17 +87,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       let newResetAt: string | null = null
       const isFirstRequest = (profile.total_requests ?? 0) === 0
 
-      // Check if 30-day window has expired
-      if (profile.limit_reset_at) {
-        const resetAt = new Date(profile.limit_reset_at)
-        if (now >= resetAt) {
-          // Window expired — start new 30-day window
-          count = 0
+      // FREE plan: one-time 10 requests, no rolling window — never set limit_reset_at
+      const isFree = (profile.subscription_tier ?? "free") === "free"
+
+      if (!isFree) {
+        // Check if 30-day window has expired
+        if (profile.limit_reset_at) {
+          const resetAt = new Date(profile.limit_reset_at)
+          if (now >= resetAt) {
+            // Window expired — start new 30-day window
+            count = 0
+            newResetAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          }
+        } else {
+          // First request on paid plan — open first window
           newResetAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
         }
-      } else {
-        // First ever request — open first window
-        newResetAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
       }
 
       const usageUpdate: Record<string, unknown> = {

@@ -25,6 +25,7 @@ type Profile = {
   id: string; email: string; full_name: string | null; segment: Segment[]; role: string | null;
   sub_role: string[]; subscription_tier: "free" | "basic" | "pro" | "ultra"; auth_provider: string;
   requests_this_month: number; monthly_limit: number | null; limit_reset_at: string | null;
+  bonus_requests: number | null;
   total_requests: number; last_ip: string | null; last_city: string | null; last_country: string | null;
   user_agent: string | null; created_at: string; updated_at: string;
   marketing_consent: boolean; trial_used: boolean;
@@ -529,12 +530,16 @@ function SecurityTab({ profile }: { profile: Profile }) {
 
 // ── Tab: Usage
 function UsageTab({ profile }: { profile: Profile }) {
-  const used = profile.requests_this_month ?? 0; const limit = profile.monthly_limit;
-  const pct = limit ? Math.min(Math.round((used / limit) * 100), 100) : 0; const isUnlim = limit === null
+  const used = profile.requests_this_month ?? 0
+  const baseLimit = profile.monthly_limit
+  const bonus = profile.bonus_requests ?? 0
+  const effectiveLimit = baseLimit !== null ? baseLimit + bonus : null
+  const isUnlim = effectiveLimit === null
+  const pct = effectiveLimit ? Math.min(Math.round((used / effectiveLimit) * 100), 100) : 0
   const resetAt = profile.limit_reset_at ? new Date(profile.limit_reset_at) : null
   const resetLabel = resetAt ? resetAt.toLocaleDateString("uk-UA", { day: "numeric", month: "long" }) : "—"
   const now = new Date()
-  const daysLeft = resetAt ? Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 86400000)) : 30
+  const daysLeft = resetAt ? Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 86400000)) : null
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 max-w-xl pb-10">
@@ -549,7 +554,7 @@ function UsageTab({ profile }: { profile: Profile }) {
         <div className="p-8 rounded-[2rem] bg-[#0d1120]/60 border border-[#C9A84C]/10 backdrop-blur-md">
           <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] mb-4 text-center">Місячний ліміт</p>
           <div className="flex flex-col items-center gap-1">
-            <span className="text-5xl font-serif font-bold text-[#C9A84C]">{isUnlim ? "∞" : limit}</span>
+            <span className="text-5xl font-serif font-bold text-[#C9A84C]">{isUnlim ? "∞" : effectiveLimit}</span>
             <span className="text-[10px] text-[#C9A84C]/50 font-bold uppercase">{isUnlim ? "необмежено" : "запитів на 30 днів"}</span>
           </div>
         </div>
@@ -580,10 +585,12 @@ function UsageTab({ profile }: { profile: Profile }) {
 
           <div className="flex justify-between items-center mt-8">
             <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] flex items-center gap-2">
-              <Clock className="w-3.5 h-3.5" /> Скидання через {daysLeft} дн.
+              {daysLeft !== null
+                ? <><Clock className="w-3.5 h-3.5" /> Скидання через {daysLeft} дн.</>
+                : <><Clock className="w-3.5 h-3.5" /> Одноразовий ліміт</>}
             </p>
             <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">
-              {isUnlim ? "Безліміт активний" : `Залишилось ${limit! - used} запитів`}
+              {isUnlim ? "Безліміт активний" : `Залишилось ${effectiveLimit! - used} запитів`}
             </p>
           </div>
         </div>

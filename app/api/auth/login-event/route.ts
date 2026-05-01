@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { getIpUsageInheritancePatch } from '@/lib/auth/ip-usage';
 
 async function getGeo(ip: string): Promise<Record<string, string>> {
     if (!ip || ['127.0.0.1', '::1', 'localhost', ''].includes(ip)) return {};
@@ -49,9 +50,9 @@ export async function POST(request: Request) {
     const forwarded = request.headers.get('x-forwarded-for');
     const serverIp = forwarded
         ? forwarded.split(',')[0].trim()
-        : (request.headers.get('x-real-ip') ?? '');
+        : (request.headers.get('cf-connecting-ip') ?? request.headers.get('x-real-ip') ?? '');
 
-    const ip = (body.clientIp as string | undefined) || serverIp;
+    const ip = serverIp || (body.clientIp as string | undefined) || '';
 
     // 3. Збираємо дані
     const ua = request.headers.get('user-agent') ?? '';
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     });
 
     // 5. Формуємо патч для бази
-    const patch: Record<string, string | boolean | null> = {
+    const patch: Record<string, string | number | boolean | null> = {
         last_ip: ip || null,
         user_agent: ua || null,
         last_city: geo.city || null,
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString(),
     };
     if (fingerprint) patch.browser_fingerprint = fingerprint;
+    Object.assign(patch, await getIpUsageInheritancePatch(admin, userId, ip));
     // Propagate trial_used from fingerprint-check (anti-multi-account)
     if (body.trial_used === true) patch.trial_used = true;
 

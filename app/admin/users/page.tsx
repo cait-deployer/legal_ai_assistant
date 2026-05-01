@@ -27,6 +27,7 @@ type User = {
   auth_provider: string
   requests_this_month: number
   monthly_limit: number | null
+  bonus_requests: number | null
   total_requests: number
   session_count: number
   avg_session_duration: number
@@ -226,7 +227,8 @@ type MsgRow  = { id: string; role: string; content: string; created_at: string }
 
 function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void; labels: Record<string, string> }) {
   const rel = formatRelative(user.last_active_at)
-  const pct = user.monthly_limit ? Math.min(100, Math.round((user.requests_this_month / user.monthly_limit) * 100)) : 0
+  const effectiveLimit = user.monthly_limit !== null ? user.monthly_limit + (user.bonus_requests ?? 0) : null
+  const pct = effectiveLimit ? Math.min(100, Math.round((user.requests_this_month / effectiveLimit) * 100)) : 0
   const [chats, setChats]               = useState<ChatRow[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
   const [openChat, setOpenChat]         = useState<ChatRow | null>(null)
@@ -372,10 +374,11 @@ function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs text-[#E0E6ED]/60">Запити цього місяця</span>
                   <span className="text-xs font-mono text-[#C9A84C]">
-                    {user.requests_this_month} / {user.monthly_limit ?? "∞"}
+                    {user.requests_this_month} / {effectiveLimit ?? "∞"}
+                    {(user.bonus_requests ?? 0) > 0 && <span className="text-[#C9A84C]/50 ml-1">(+{user.bonus_requests} бонус)</span>}
                   </span>
                 </div>
-                {user.monthly_limit && (
+                {effectiveLimit && (
                   <div className="w-full h-1.5 bg-[#0A0E1A] rounded-full overflow-hidden">
                     <div className="h-full rounded-full bg-[#C9A84C] transition-all" style={{ width: `${pct}%` }} />
                   </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createClient as createAdminClient } from "@supabase/supabase-js"
+import { getIpUsageInheritancePatch } from "@/lib/auth/ip-usage"
 
 async function getGeo(ip: string): Promise<Record<string, string>> {
   if (!ip || ["127.0.0.1", "::1", "localhost", ""].includes(ip)) return {}
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (serviceKey) {
       const forwarded = request.headers.get("x-forwarded-for")
-      const ip = forwarded ? forwarded.split(",")[0].trim() : (request.headers.get("x-real-ip") ?? "")
+      const ip = forwarded ? forwarded.split(",")[0].trim() : (request.headers.get("cf-connecting-ip") ?? request.headers.get("x-real-ip") ?? "")
       const ua = request.headers.get("user-agent") ?? ""
       const geo = await getGeo(ip)
       const provider = user.app_metadata?.provider ?? "email"
@@ -66,6 +67,8 @@ export async function GET(request: Request) {
 
       // Use upsert so it works even if the profile row doesn't exist yet
       // (new Google users: profile is created during onboarding, but we pre-fill tracking data)
+      const inheritedUsage = await getIpUsageInheritancePatch(admin, user.id, ip)
+
       await admin.from("profiles").upsert({
         id:                user.id,
         email:             user.email ?? "",
@@ -80,6 +83,7 @@ export async function GET(request: Request) {
         // Google: sync display info
         full_name:  user.user_metadata?.full_name ?? null,
         avatar_url: user.user_metadata?.avatar_url ?? null,
+        ...inheritedUsage,
         ...(provider === "google" ? { email_confirmed: true } : {}),
       }, {
         onConflict: "id",
