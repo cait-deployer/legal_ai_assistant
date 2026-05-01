@@ -3683,7 +3683,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 _tr_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
                         _tr_model.generate_content,
-                        f"Переклади на українську мову. Відповідь — тільки переклад без пояснень:\n\n{question}",
+                        (
+                            "Переклади на українську мову точно і повністю. "
+                            "Зберігай усі ключові слова: назви країн, юридичні терміни, "
+                            "специфічні поняття (навіть розмовні скорочення). "
+                            "Наприклад: 'загран командировок' → 'закордонних відряджень'. "
+                            "Відповідь — тільки переклад без пояснень:\n\n"
+                            f"{question}"
+                        ),
                         generation_config=GenerationConfig(temperature=0.0, max_output_tokens=300),
                     ),
                     timeout=8.0,
@@ -4021,7 +4028,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # only the best sibling chunks inside each law_id. This avoids both extremes:
     # one-document tunnel vision and sending entire large laws to the model.
     try:
-        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
+        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law, get_all_law_chunks
         _expanded_keys = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
@@ -4068,7 +4075,31 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             reverse=True,
         )[:_seed_limit]
 
+        _FULL_LAW_MIN_SCORE = 0.75  # якщо топ-1 seed скорить так — беремо ВСІ чанки
+        _FULL_LAW_MAX = 20          # максимум чанків для full-law expansion
+
         for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
+            _seed_score = _seed_info["similarity"]
+            if _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE:
+                # Топ-1 закон з високою впевненістю → ВСІ чанки по порядку (включно з таблицями)
+                _doc_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
+                logger.info("FULL LAW: %s/%s score=%.3f → %d chunks", _col, _lid, _seed_score, len(_doc_chunks))
+                _taken_for_doc = 0
+                for _chunk in _doc_chunks:
+                    _key = (
+                        _chunk["out_metadata"].get("law_id"),
+                        _chunk["out_metadata"].get("chunk_index"),
+                    )
+                    if _key in _expanded_keys:
+                        continue
+                    _chunk["_docset_rank"] = _doc_rank
+                    _chunk["_docset_overlap"] = _seed_info["overlap"]
+                    results.append(_chunk)
+                    _expanded_keys.add(_key)
+                    _expanded_added += 1
+                    _taken_for_doc += 1
+                continue
+
             _doc_chunks = search_qdrant_in_law(
                 _col, _lid, _expansion_vector, top_k=_per_doc_limit, threshold=0.0
             )
@@ -4289,6 +4320,23 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             for r in _rr_protected
         }:
             _rr_protected.append(_wk)
+    # Full-law chunks (sorted by chunk_index) bypass reranker entirely:
+    # table rows like "| США | 80 | 240 |" have zero term-overlap but contain the actual amounts
+    _rr_protected_key_set = {
+        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+        for r in _rr_protected
+    }
+    _fl_added = 0
+    for _fl in [r for r in results if r.get("_full_law")]:
+        if _fl_added >= 15:
+            break
+        _fl_key = (_fl["out_metadata"].get("law_id"), _fl["out_metadata"].get("chunk_index"))
+        if _fl_key not in _rr_protected_key_set:
+            _rr_protected.append(_fl)
+            _rr_protected_key_set.add(_fl_key)
+            _fl_added += 1
+    if _fl_added:
+        logger.info("FULL LAW PROTECTED: %d chunks bypassing reranker", _fl_added)
     _rr_protected_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
