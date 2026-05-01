@@ -3509,6 +3509,7 @@ class AskRequest(BaseModel):
     response_features: list[str] = []          # enabled response quality features from plan
     user_profile: dict | None = None           # {role, sub_role, segment} from onboarding
     history: list[dict] | None = None          # [{role:"user"|"assistant", content:"..."}]
+    context_summary: str | None = None         # compressed summary of older turns (generated every 3rd turn)
     ai_personal_prompt: str | None = None      # персональний AI-профіль юзера (з налаштувань)
     response_length_pref: str = "standard"     # short|standard|detailed|full (gated by plan on frontend)
     response_lang_style: str = "legal"         # legal|plain (gated by plan on frontend)
@@ -4759,24 +4760,31 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if body.ai_personal_prompt and body.ai_personal_prompt.strip():
             personal_block = f"Персональний контекст користувача:\n{body.ai_personal_prompt.strip()[:800]}\n\n"
 
-        # Build conversation history block (last 6 turns max to stay within token budget)
+        # Build summary block (compressed older turns, generated every 3rd turn on frontend)
+        summary_block = ""
+        if body.context_summary and body.context_summary.strip():
+            summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:1200]}\n\n"
+
+        # Build conversation history block — last 3 turns (6 messages) only
+        # Older turns are already covered by context_summary
         history_block = ""
         if body.history:
-            recent = body.history[-12:]  # 12 повідомлень = 6 turns (user+assistant)
+            recent = body.history[-6:]  # 6 повідомлень = 3 turns
             history_lines: list[str] = []
             for turn in recent:
                 role = turn.get("role", "")
-                content = (turn.get("content") or "").strip()[:1000]  # cap per-turn length
+                content = (turn.get("content") or "").strip()[:800]  # cap per-turn
                 if role == "user":
                     history_lines.append(f"Користувач: {content}")
                 elif role == "assistant":
                     history_lines.append(f"Асистент: {content}")
             if history_lines:
-                history_block = "Попередній діалог:\n" + "\n".join(history_lines) + "\n\n"
+                history_block = "Останні повідомлення діалогу:\n" + "\n".join(history_lines) + "\n\n"
 
         prompt = (
             f"{profile_block}"
             f"{personal_block}"
+            f"{summary_block}"
             f"{history_block}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
@@ -4823,6 +4831,83 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "main_gen_cfg": _main_gen_cfg, "llm_timeout": llm_timeout,
         "start_time": start_time, "max_output_tokens": max_output_tokens,
     }
+
+
+class SummarizeHistoryBody(BaseModel):
+    messages: list[dict]          # [{role:"user"|"assistant", content:"..."}]
+    existing_summary: str | None = None
+
+
+@app.post("/summarize_history")
+async def summarize_history_endpoint(body: SummarizeHistoryBody):
+    """Стискає список повідомлень в короткий резюме (200-300 слів).
+    Якщо є existing_summary — включає його в новий стислий контекст."""
+    if not body.messages:
+        return {"summary": body.existing_summary or ""}
+
+    model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
+    from vertexai.generative_models import GenerativeModel, GenerationConfig
+    try:
+        from vertexai.generative_models import ThinkingConfig as _SumThinkingConfig
+        _sum_gen_cfg = GenerationConfig(
+            temperature=0.3, max_output_tokens=600,
+            thinking_config=_SumThinkingConfig(thinking_budget=0),
+        )
+    except Exception:
+        _sum_gen_cfg = GenerationConfig(temperature=0.3, max_output_tokens=600)
+
+    lines: list[str] = []
+    if body.existing_summary:
+        lines.append(f"[Попереднє резюме]\n{body.existing_summary}\n")
+    for turn in body.messages:
+        role = turn.get("role", "")
+        content = (turn.get("content") or "").strip()[:800]
+        if role == "user":
+            lines.append(f"Користувач: {content}")
+        elif role == "assistant":
+            lines.append(f"Асистент: {content}")
+
+    dialogue_text = "\n".join(lines)
+    prompt = (
+        "Зроби стислий переказ наступного діалогу між юридичним асистентом і користувачем. "
+        "Збережи ключові факти: про що запитував користувач, які закони або норми згадувалися, "
+        "які висновки були зроблені. Переказ має бути 200-300 слів, українською мовою.\n\n"
+        f"{dialogue_text}\n\nСтислий переказ:"
+    )
+
+    try:
+        import asyncio as _asyncio
+        _sum_model = GenerativeModel(model_name)
+        resp = await _asyncio.wait_for(
+            _asyncio.to_thread(
+                _sum_model.generate_content,
+                prompt,
+                generation_config=_sum_gen_cfg,
+            ),
+            timeout=20,
+        )
+        summary = ""
+        try:
+            summary = (resp.text or "").strip()
+        except Exception:
+            pass
+        if not summary:
+            # Fallback: non-thought parts
+            try:
+                summary = " ".join(
+                    getattr(p, "text", "").strip()
+                    for p in resp.candidates[0].content.parts
+                    if not getattr(p, "thought", False) and getattr(p, "text", "")
+                ).strip()
+            except Exception:
+                pass
+        if not summary:
+            raise ValueError("empty summary")
+        return {"summary": summary}
+    except Exception as e:
+        logger.warning("summarize_history failed: %s", e)
+        fallback = dialogue_text[:1200].strip()
+        return {"summary": fallback}
 
 
 @app.post("/ask")

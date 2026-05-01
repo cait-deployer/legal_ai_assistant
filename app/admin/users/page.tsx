@@ -221,7 +221,7 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
   )
 }
 
-type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string }
+type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string; context_summary: string | null }
 type MsgRow  = { id: string; role: string; content: string; created_at: string }
 
 function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void; labels: Record<string, string> }) {
@@ -294,6 +294,14 @@ function UserDrawer({ user, onClose, labels }: { user: User; onClose: () => void
                   <X className="w-4 h-4" />
                 </button>
               </div>
+
+              {/* Context summary block */}
+              {openChat.context_summary && (
+                <div className="shrink-0 mx-4 my-3 p-3 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/15">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/50 mb-1.5">Архів контексту</p>
+                  <p className="text-[10px] text-[#E0E6ED]/50 leading-relaxed line-clamp-4">{openChat.context_summary}</p>
+                </div>
+              )}
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">

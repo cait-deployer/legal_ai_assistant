@@ -26,24 +26,30 @@ async function chatBelongsToUser(chatId: string, userId: string): Promise<boolea
   return !!data
 }
 
-// GET /api/chats/[id] — get messages for a chat
+// GET /api/chats/[id] — get messages + context_summary for a chat
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const user = await getVerifiedUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  if (!(await chatBelongsToUser(id, user.id))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 })
-  }
+  // Fetch chat metadata (ownership check + context_summary)
+  const { data: chat } = await admin()
+    .from("chats")
+    .select("id, context_summary")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single()
 
-  const { data, error } = await admin()
+  if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  const { data: messages, error } = await admin()
     .from("messages")
     .select("id, role, content, citations, created_at")
     .eq("chat_id", id)
     .order("created_at", { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  return NextResponse.json({ messages, context_summary: chat.context_summary ?? null })
 }
 
 // DELETE /api/chats/[id] — delete a chat (cascade deletes messages)

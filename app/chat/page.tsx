@@ -140,6 +140,8 @@ function ChatPage() {
 
     const [currentChatId, setCurrentChatId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [contextSummary, setContextSummary] = useState<string | null>(null);
+    const [isSummarizing, setIsSummarizing] = useState(false);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [loadingStatus, setLoadingStatus] = useState('');
@@ -250,6 +252,7 @@ function ChatPage() {
     useEffect(() => {
         if (!currentChatId) {
             setMessages([]);
+            setContextSummary(null);
             setIsFirstMessage(true);
             return;
         }
@@ -257,9 +260,9 @@ function ChatPage() {
         fetch(`/api/chats/${currentChatId}`)
             .then(r => {
                 if (r.status === 404) {
-                    // Chat not found (deleted or belongs to another user) — reset
                     setCurrentChatId(null);
                     setMessages([]);
+                    setContextSummary(null);
                     setIsFirstMessage(true);
                     router.replace('/chat');
                     return null;
@@ -267,14 +270,15 @@ function ChatPage() {
                 return r.json();
             })
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .then((rows: any[] | null) => {
-                if (rows === null) return;
-                if (!Array.isArray(rows)) { setMessages([]); return; }
+            .then((data: { messages: any[]; context_summary: string | null } | null) => {
+                if (data === null) return;
+                const rows = data.messages ?? [];
+                setContextSummary(data.context_summary ?? null);
                 if (rows.length === 0 && newChatInProgressRef.current) {
                     setIsFirstMessage(true);
                     return;
                 }
-                setMessages(rows.map(r => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.citations ?? [] })));
+                setMessages(rows.map((r: { id: string; role: string; content: string; citations?: Citation[] }) => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.citations ?? [] })));
                 setIsFirstMessage(rows.length === 0);
             })
             .catch(() => toast.error('Не вдалося завантажити чат'))
@@ -334,10 +338,12 @@ function ChatPage() {
             body: JSON.stringify({ role: 'user', content: questionText }),
         }).catch(() => { });
 
-        // Build conversation history for context
-        const historyForBackend = messages
+        // Build conversation history for context — last 3 turns (6 messages) only
+        // Older turns are covered by contextSummary which backend uses separately
+        const allHistory = messages
             .filter(m => m.role === 'user' || m.role === 'ai')
             .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }));
+        const historyForBackend = allHistory.slice(-6);
 
         // Negative number → typeof !== 'string' → MessageFeedback won't render for temp message
         const STREAMING_ID = -(Date.now());
@@ -350,7 +356,7 @@ function ChatPage() {
             const res = await fetch('/api/ask/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: questionText, history: historyForBackend }),
+                body: JSON.stringify({ question: questionText, history: historyForBackend, context_summary: contextSummary ?? null }),
                 signal: AbortSignal.timeout(185_000),
             });
 
@@ -468,6 +474,17 @@ function ChatPage() {
                         setMessages(prev => prev.map(m => m.id === STREAMING_ID ? { ...m, id: saved.id } : m));
                     }
                     reviewTrigger.check();
+
+                    // Trigger context compression every 3rd user turn (fire-and-forget)
+                    const userTurnCount = messages.filter(m => m.role === 'user').length + 1; // +1 for current
+                    if (chatId && userTurnCount % 3 === 0) {
+                        setIsSummarizing(true);
+                        fetch(`/api/chats/${chatId}/summarize`, { method: 'POST' })
+                            .then(r => r.ok ? r.json() : null)
+                            .then(data => { if (data?.summary) setContextSummary(data.summary); })
+                            .catch(() => { })
+                            .finally(() => setIsSummarizing(false));
+                    }
                 }).catch(() => { });
 
                 refreshLimit();
@@ -657,6 +674,12 @@ function ChatPage() {
                                 <Send className="h-5 w-5" />
                             </button>
                         </div>
+                        {isSummarizing && (
+                            <div className="flex items-center justify-center gap-1.5 text-[#C9A84C]/40 text-[9px] font-medium tracking-wide">
+                                <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />
+                                Архівуємо контекст діалогу…
+                            </div>
+                        )}
                         <div className="flex items-center gap-2 justify-center text-[#C9A84C]/70 uppercase text-[9px] font-black tracking-widest">
                             <AlertTriangle size={12} className="shrink-0" />
                             URAI базується на законах України. Перевіряйте важливі деталі.

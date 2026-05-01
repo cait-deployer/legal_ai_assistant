@@ -18,7 +18,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params
   const { data, error } = await admin()
     .from("chats")
-    .select("id, title, created_at, updated_at")
+    .select("id, title, created_at, updated_at, context_summary")
     .eq("user_id", id)
     .order("updated_at", { ascending: false })
     .limit(20)
