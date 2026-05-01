@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { ChatSidebar } from '@/components/chat-sidebar';
 import { ChatTour } from '@/components/chat-tour';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { MessageFeedback } from '@/app/components/feedback/MessageFeedback';
 import { ReviewModal } from '@/app/components/feedback/ReviewModal';
 import { useReviewTrigger } from '@/app/hooks/useReviewTrigger';
@@ -477,7 +477,7 @@ function ChatPage() {
 
                     // Trigger context compression every 3rd user turn (fire-and-forget)
                     const userTurnCount = messages.filter(m => m.role === 'user').length + 1; // +1 for current
-                    if (chatId && userTurnCount % 3 === 0) {
+                    if (chatId && userTurnCount % 2 === 0) {
                         setIsSummarizing(true);
                         fetch(`/api/chats/${chatId}/summarize`, { method: 'POST' })
                             .then(r => r.ok ? r.json() : null)

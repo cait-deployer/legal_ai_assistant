@@ -10,7 +10,7 @@ function admin() {
   )
 }
 
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8001"
+const BACKEND_URL = process.env.API_URL ?? "http://localhost:8001"
 // Keep last N messages unsummarized (= last 3 turns)
 const KEEP_LAST_N = 6
 
