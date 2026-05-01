@@ -24,6 +24,9 @@ type Settings = {
   raw_gate_threshold: number
   rada_source_boost: number
   max_output_tokens: number
+  review_first_message_count: number
+  review_repeat_message_count: number
+  review_bonus_requests: number
 }
 
 type SaInfo = { project_id: string; client_email: string } | null
@@ -91,6 +94,9 @@ const DEFAULTS: Settings = {
   raw_gate_threshold: 0.42,
   rada_source_boost: 1.15,
   max_output_tokens: 3000,
+  review_first_message_count: 1,
+  review_repeat_message_count: 5,
+  review_bonus_requests: 5,
 }
 
 function parseSaInfo(json: string): SaInfo {
@@ -192,6 +198,27 @@ function SliderInput({ value, onChange, min, max, step }: { value: number; onCha
         className="flex-1 accent-[#C9A84C] h-1.5 rounded-full cursor-pointer"
       />
       <span className="w-12 text-right font-mono text-sm font-bold text-[#C9A84C]">{value}</span>
+    </div>
+  )
+}
+
+function NumberInput({ value, onChange, min, max, step = 1 }: { value: number; onChange: (v: number) => void; min: number; max: number; step?: number }) {
+  const clamp = (next: number) => Math.min(max, Math.max(min, next))
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={e => onChange(clamp(Math.round(Number(e.target.value) || min)))}
+        className="w-28 bg-[#0A0E1A]/80 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 focus:border-[#C9A84C]/50 rounded-xl px-4 py-2.5 text-sm font-mono font-bold text-[#C9A84C] outline-none transition-colors"
+      />
+      <div className="flex gap-1.5">
+        <button type="button" onClick={() => onChange(clamp(value - step))} className="w-8 h-8 rounded-lg border border-[#C9A84C]/15 text-[#C9A84C]/70 hover:bg-[#C9A84C]/10 transition-colors">-</button>
+        <button type="button" onClick={() => onChange(clamp(value + step))} className="w-8 h-8 rounded-lg border border-[#C9A84C]/15 text-[#C9A84C]/70 hover:bg-[#C9A84C]/10 transition-colors">+</button>
+      </div>
     </div>
   )
 }
@@ -581,6 +608,39 @@ export default function AiSettingsPage() {
             >
               <SliderInput value={settings.max_output_tokens} onChange={v => set("max_output_tokens", v)} min={500} max={8000} step={100} />
             </Field>
+          </div>
+        </section>
+
+        {/* Review prompts */}
+        <section>
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Відгуки користувачів</h2>
+          <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <Field
+                label="Перша поява"
+                hint="Після скількох відповідей вперше показати модалку. Для першої відповіді — 1."
+                restart="none"
+                tooltip="Коли користувач отримує цю кількість відповідей, URAI показує модалку з проханням залишити відгук."
+              >
+                <NumberInput value={settings.review_first_message_count} onChange={v => set("review_first_message_count", v)} min={1} max={50} />
+              </Field>
+              <Field
+                label="Повтор через"
+                hint="Якщо натиснули «пізніше», модалка повернеться через цю кількість нових відповідей."
+                restart="none"
+                tooltip="Працює тільки для користувачів, які ще не залишили відгук. Після відгуку модалка більше не показується."
+              >
+                <NumberInput value={settings.review_repeat_message_count} onChange={v => set("review_repeat_message_count", v)} min={1} max={50} />
+              </Field>
+              <Field
+                label="Бонус запитів"
+                hint="Нараховується один раз після відгуку."
+                restart="none"
+                tooltip="Бонус додається до bonus_requests. Повторно той самий користувач бонус не отримує."
+              >
+                <NumberInput value={settings.review_bonus_requests} onChange={v => set("review_bonus_requests", v)} min={0} max={100} />
+              </Field>
+            </div>
           </div>
         </section>
 

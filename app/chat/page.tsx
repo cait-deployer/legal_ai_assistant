@@ -747,8 +747,10 @@ function ChatPage() {
             {reviewTrigger.status?.show && (
                 <ReviewModal
                     rewardEligible={reviewTrigger.status.reward_eligible}
+                    rewardAmount={reviewTrigger.status.reward_amount}
                     onClose={reviewTrigger.dismiss}
-                    onSubmitted={reviewTrigger.dismiss}
+                    onLater={reviewTrigger.postpone}
+                    onSubmitted={reviewTrigger.submitted}
                 />
             )}
 

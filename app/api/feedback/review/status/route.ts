@@ -17,13 +17,16 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  // Read trigger threshold from app_settings
-  const { data: setting } = await admin()
+  // Read review timing/reward settings from app_settings
+  const { data: settings } = await admin()
     .from("app_settings")
-    .select("value_int")
-    .eq("key", "review_trigger_count")
-    .single()
-  const triggerCount: number = setting?.value_int ?? 10
+    .select("key,value_int")
+    .in("key", ["review_first_message_count", "review_repeat_message_count", "review_bonus_requests"])
+
+  const settingMap = new Map((settings ?? []).map(row => [row.key, row.value_int]))
+  const triggerCount = Math.max(1, settingMap.get("review_first_message_count") ?? 1)
+  const repeatMessageCount = Math.max(1, settingMap.get("review_repeat_message_count") ?? 5)
+  const rewardAmount = Math.max(0, settingMap.get("review_bonus_requests") ?? 5)
 
   // Read user profile fields we need
   const { data: profile } = await admin()
@@ -37,20 +40,17 @@ export async function GET() {
   const totalReqs: number = profile.total_requests ?? 0
   const alreadyRewarded: boolean = profile.has_received_review_reward ?? false
 
-  // Show modal once: when user reaches threshold AND hasn't reviewed yet
+  // Show prompt when user reaches threshold AND hasn't reviewed yet.
+  // Client stores "later" message count and repeats after review_repeat_message_count.
   const shouldShow = totalReqs >= triggerCount && !alreadyRewarded
 
-  // Avoid spam: don't re-show within 24h if dismissed without submitting
-  const lastPromptedAt = profile.review_prompted_at ? new Date(profile.review_prompted_at) : null
-  const recentlyPrompted = lastPromptedAt
-    ? Date.now() - lastPromptedAt.getTime() < 24 * 60 * 60 * 1000
-    : false
-
   return NextResponse.json({
-    show:            shouldShow && !recentlyPrompted,
+    show:            shouldShow,
     total_requests:  totalReqs,
     reward_eligible: !alreadyRewarded,
     trigger_count:   triggerCount,
+    repeat_message_count: repeatMessageCount,
+    reward_amount: rewardAmount,
   })
 }
 

@@ -18,7 +18,7 @@ async function checkAdmin() {
 const BACKEND = process.env.API_URL || "http://localhost:8000"
 
 // All settings managed via admin panel
-const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default: string | number | boolean; secret?: boolean }> = {
+const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "int" | "bool"; default: string | number | boolean; secret?: boolean }> = {
   service_account_json:  { type: "text",  default: "",                   secret: true },
   vertex_location:       { type: "text",  default: "us-central1" },
   vertex_project_id:     { type: "text",  default: "" },
@@ -36,6 +36,9 @@ const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "bool"; default
   rada_source_boost:     { type: "float", default: 1.15 },
   llm_timeout_seconds:   { type: "float", default: 90 },
   max_output_tokens:     { type: "float", default: 3000 },
+  review_first_message_count: { type: "int", default: 1 },
+  review_repeat_message_count: { type: "int", default: 5 },
+  review_bonus_requests: { type: "int", default: 5 },
   rewrite_examples:      { type: "text",  default: "" },
 }
 
@@ -56,6 +59,7 @@ export async function GET() {
     const meta = SETTINGS_SCHEMA[row.key]
     if (meta.type === "bool" && row.value_bool !== null) result[row.key] = row.value_bool
     else if (meta.type === "float" && row.value_text !== null) result[row.key] = parseFloat(row.value_text)
+    else if (meta.type === "int" && row.value_int !== null) result[row.key] = row.value_int
     else if (meta.type === "text" && row.value_text !== null) result[row.key] = row.value_text
   }
 
@@ -77,6 +81,10 @@ export async function PATCH(request: Request) {
       row.value_bool = Boolean(value)
       row.value_text = null
       row.value_int  = null
+    } else if (meta.type === "int") {
+      row.value_int = Math.max(0, Math.round(Number(value) || 0))
+      row.value_text = null
+      row.value_bool = null
     } else {
       row.value_text = String(value)
       row.value_bool = null
