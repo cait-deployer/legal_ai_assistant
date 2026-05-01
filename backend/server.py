@@ -3770,16 +3770,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Відповідь — ТІЛЬКИ перефразований запит, 5–15 слів, без пояснень, без лапок."
                     ),
                 )
-                # max_output_tokens=60 достатньо для 5–15 слів, без thinking (швидше)
+                # max_output_tokens=300: thinking може взяти ~200, для 5–15 слів відповіді вистачить
                 try:
                     from vertexai.generative_models import ThinkingConfig
                     _rw_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=60,
+                        max_output_tokens=300,
                         thinking_config=ThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60)
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=300)
                 _rewrite_examples = settings_cache.get("rewrite_examples", "")
                 resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -4382,11 +4382,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 f"Question: {search_question}\n\n"
                 f"{_chunks_text}"
             )
-            _rr_cfg_json = GenerationConfig(
-                temperature=0.0,
-                max_output_tokens=512,
-                response_mime_type="application/json",
-            )
+            try:
+                from vertexai.generative_models import ThinkingConfig as _RrThinkingConfig
+                _rr_cfg_json = GenerationConfig(
+                    temperature=0.0,
+                    max_output_tokens=1024,
+                    response_mime_type="application/json",
+                    thinking_config=_RrThinkingConfig(thinking_budget=0),
+                )
+            except Exception:
+                _rr_cfg_json = GenerationConfig(
+                    temperature=0.0,
+                    max_output_tokens=1024,
+                    response_mime_type="application/json",
+                )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
                 generation_config=_rr_cfg_json,
