@@ -68,11 +68,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { summary } = await backendRes.json() as { summary: string }
   if (!summary) return NextResponse.json({ error: "empty summary" }, { status: 500 })
 
-  // Save to chats table
-  await admin()
+  // Save to chats table and verify the write, otherwise the UI may think
+  // summary exists while chats.context_summary remains NULL.
+  const { data: savedChat, error: updateError } = await admin()
     .from("chats")
     .update({ context_summary: summary })
     .eq("id", chatId)
+    .eq("user_id", user.id)
+    .select("context_summary")
+    .single()
 
-  return NextResponse.json({ ok: true, summary })
+  if (updateError) {
+    return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
+
+  return NextResponse.json({
+    ok: true,
+    summary: savedChat?.context_summary ?? summary,
+    messages_count: allMessages.length,
+    summarized_count: messages.length,
+  })
 }
