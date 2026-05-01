@@ -158,6 +158,8 @@ function ChatPage() {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const sessionStartRef = useRef<number>(Date.now());
     const newChatInProgressRef = useRef(false);
+    const contextSummaryRef = useRef<string | null>(null);
+    const summaryPromiseRef = useRef<Promise<string | null> | null>(null);
 
     // Typewriter effect refs
     const twQueueRef    = useRef('');   // chars waiting to be shown
@@ -253,6 +255,7 @@ function ChatPage() {
         if (!currentChatId) {
             setMessages([]);
             setContextSummary(null);
+            contextSummaryRef.current = null;
             setIsFirstMessage(true);
             return;
         }
@@ -273,6 +276,7 @@ function ChatPage() {
             .then((data: { messages: any[]; context_summary: string | null } | null) => {
                 if (data === null) return;
                 const rows = data.messages ?? [];
+                contextSummaryRef.current = data.context_summary ?? null;
                 setContextSummary(data.context_summary ?? null);
                 if (rows.length === 0 && newChatInProgressRef.current) {
                     setIsFirstMessage(true);
@@ -305,8 +309,40 @@ function ChatPage() {
             .catch(() => {});
     };
 
+    const runSummary = useCallback(async (chatId: string): Promise<string | null> => {
+        if (summaryPromiseRef.current) {
+            try {
+                return await summaryPromiseRef.current;
+            } catch {
+                return contextSummaryRef.current;
+            }
+        }
+
+        setIsSummarizing(true);
+        const promise = (async () => {
+            const res = await fetch(`/api/chats/${chatId}/summarize`, { method: 'POST' });
+            const data = res.ok ? await res.json() : null;
+            if (data?.summary) {
+                contextSummaryRef.current = data.summary;
+                setContextSummary(data.summary);
+                return data.summary as string;
+            }
+            return contextSummaryRef.current;
+        })();
+
+        summaryPromiseRef.current = promise;
+        try {
+            return await promise;
+        } catch {
+            return contextSummaryRef.current;
+        } finally {
+            summaryPromiseRef.current = null;
+            setIsSummarizing(false);
+        }
+    }, []);
+
     const handleSend = async (text: string) => {
-        if (!text.trim() || isLoading || limitExceeded) return;
+        if (!text.trim() || isLoading || isSummarizing || limitExceeded) return;
         const questionText = text.trim();
         setInput('');
         setLoadingStatus('Готую запит...');
@@ -332,7 +368,24 @@ function ChatPage() {
             } catch (e) { console.error('[chat] create exception:', e); toast.error('Не вдалося створити чат'); setMessages(prev => prev.slice(0, -1)); setIsLoading(false); newChatInProgressRef.current = false; return; }
         }
 
-        fetch(`/api/chats/${chatId}/messages`, {
+        if (!chatId) {
+            setMessages(prev => prev.slice(0, -1));
+            setIsLoading(false);
+            newChatInProgressRef.current = false;
+            return;
+        }
+        const activeChatId = chatId;
+
+        const currentUserTurnCount = messages.filter(m => m.role === 'user').length + 1;
+        let effectiveContextSummary = contextSummaryRef.current;
+        if (summaryPromiseRef.current) {
+            effectiveContextSummary = await runSummary(activeChatId);
+        }
+        if (currentUserTurnCount > 2 && !effectiveContextSummary) {
+            effectiveContextSummary = await runSummary(activeChatId);
+        }
+
+        fetch(`/api/chats/${activeChatId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: 'user', content: questionText }),
@@ -356,7 +409,7 @@ function ChatPage() {
             const res = await fetch('/api/ask/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: questionText, history: historyForBackend, context_summary: contextSummary ?? null }),
+                body: JSON.stringify({ question: questionText, history: historyForBackend, context_summary: effectiveContextSummary ?? null }),
                 signal: AbortSignal.timeout(185_000),
             });
 
@@ -451,7 +504,7 @@ function ChatPage() {
                 const refs = finalPayload?.references ?? [];
                 const meta = finalPayload?._meta ?? {};
 
-                fetch(`/api/chats/${chatId}/messages`, {
+                fetch(`/api/chats/${activeChatId}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -475,15 +528,9 @@ function ChatPage() {
                     }
                     reviewTrigger.check();
 
-                    // Trigger context compression every 3rd user turn (fire-and-forget)
-                    const userTurnCount = messages.filter(m => m.role === 'user').length + 1; // +1 for current
-                    if (chatId && userTurnCount % 2 === 0) {
-                        setIsSummarizing(true);
-                        fetch(`/api/chats/${chatId}/summarize`, { method: 'POST' })
-                            .then(r => r.ok ? r.json() : null)
-                            .then(data => { if (data?.summary) setContextSummary(data.summary); })
-                            .catch(() => { })
-                            .finally(() => setIsSummarizing(false));
+                    // Compress context after every 2nd user turn, then reuse it for the next question.
+                    if (currentUserTurnCount % 2 === 0) {
+                        runSummary(activeChatId).catch(() => {});
                     }
                 }).catch(() => { });
 
@@ -491,7 +538,7 @@ function ChatPage() {
 
                 if (isFirstMessage) {
                     setIsFirstMessage(false);
-                    fetch(`/api/chats/${chatId}/name`, {
+                    fetch(`/api/chats/${activeChatId}/name`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ question: questionText, answer }),
@@ -662,13 +709,13 @@ function ChatPage() {
                                 value={input}
                                 onChange={e => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                disabled={limitExceeded}
+                                disabled={limitExceeded || isSummarizing}
                                 className="bg-transparent border-none focus-visible:ring-0 text-[#E0E6ED] placeholder:text-[#C9A84C]/20 text-sm min-h-[50px] max-h-32 resize-none py-3 px-4 font-medium disabled:cursor-not-allowed"
                                 rows={1}
                             />
                             <button
                                 onClick={() => handleSend(input)}
-                                disabled={!input.trim() || isLoading || limitExceeded}
+                                disabled={!input.trim() || isLoading || isSummarizing || limitExceeded}
                                 className="bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] rounded-2xl h-12 w-12 flex items-center justify-center shrink-0 shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
                             >
                                 <Send className="h-5 w-5" />
