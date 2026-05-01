@@ -335,7 +335,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
           <div className="space-y-2">
             {([
               { value: "legal", label: "Юридична мова", desc: "Точні терміни НПА, як у законодавстві", lock: false },
-              { value: "plain", label: "Простою мовою", desc: "Без жаргону, зрозуміло клієнту",         lock: !isBasicPlus, plan: "Basic+" },
+              { value: "plain", label: "Простою мовою", desc: "Без жаргону, зрозуміло клієнту",         lock: false },
             ] as const).map(opt => (
               <button
                 key={opt.value}

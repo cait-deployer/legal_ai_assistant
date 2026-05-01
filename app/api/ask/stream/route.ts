@@ -99,7 +99,6 @@ export async function POST(request: Request) {
 
   if (response_length_pref === "full"     && !isProPlus)   response_length_pref = "standard"
   if (response_length_pref === "detailed" && !isBasicPlus) response_length_pref = "standard"
-  if (response_lang_style  === "plain"    && !isBasicPlus) response_lang_style  = "legal"
 
   try {
     const res = await fetch(`${BACKEND}/ask_stream`, {

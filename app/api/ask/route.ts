@@ -107,7 +107,6 @@ export async function POST(request: Request) {
   // Downgrade locked preferences silently if plan doesn't allow them
   if (response_length_pref === "full"     && !isProPlus)   response_length_pref = "standard"
   if (response_length_pref === "detailed" && !isBasicPlus) response_length_pref = "standard"
-  if (response_lang_style  === "plain"    && !isBasicPlus) response_lang_style  = "legal"
 
   // 6. Forward to Python backend with plan-based params
   try {
