@@ -320,12 +320,16 @@ function ChatPage() {
 
         setIsSummarizing(true);
         const promise = (async () => {
-            const res = await fetch(`/api/chats/${chatId}/summarize`, { method: 'POST' });
-            const data = res.ok ? await res.json() : null;
-            if (data?.summary) {
-                contextSummaryRef.current = data.summary;
-                setContextSummary(data.summary);
-                return data.summary as string;
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+                const res = await fetch(`/api/chats/${chatId}/summarize`, { method: 'POST' });
+                const data = res.ok ? await res.json() : null;
+                if (data?.summary && data?.persisted !== false) {
+                    contextSummaryRef.current = data.summary;
+                    setContextSummary(data.summary);
+                    return data.summary as string;
+                }
+                if (!data?.skipped || data?.reason !== 'waiting_for_complete_turn') break;
+                await new Promise(resolve => setTimeout(resolve, 900));
             }
             return contextSummaryRef.current;
         })();

@@ -42,7 +42,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (msgError) return NextResponse.json({ error: msgError.message }, { status: 500 })
   if (!allMessages || allMessages.length <= KEEP_LAST_N) {
     // Not enough messages to summarize yet
-    return NextResponse.json({ ok: true, summary: chat.context_summary ?? null, skipped: true })
+    return NextResponse.json({
+      ok: true,
+      chat_id: chatId,
+      summary: chat.context_summary ?? null,
+      skipped: true,
+      reason: "not_enough_messages",
+      messages_count: allMessages?.length ?? 0,
+      summarized_count: 0,
+      persisted: Boolean(chat.context_summary),
+      summary_len: chat.context_summary?.length ?? 0,
+    })
+  }
+
+  const lastMessage = allMessages[allMessages.length - 1]
+  if (allMessages.length % 2 !== 0 || lastMessage.role !== "assistant") {
+    return NextResponse.json({
+      ok: true,
+      chat_id: chatId,
+      summary: chat.context_summary ?? null,
+      skipped: true,
+      reason: "waiting_for_complete_turn",
+      messages_count: allMessages.length,
+      summarized_count: 0,
+      persisted: Boolean(chat.context_summary),
+      summary_len: chat.context_summary?.length ?? 0,
+    })
   }
 
   // Messages to summarize = everything except the last KEEP_LAST_N
@@ -75,17 +100,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .update({ context_summary: summary })
     .eq("id", chatId)
     .eq("user_id", user.id)
-    .select("context_summary")
+    .select("id, context_summary")
     .single()
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 })
   }
 
+  const persisted = savedChat?.context_summary === summary
+  if (!persisted) {
+    return NextResponse.json({
+      error: "summary was generated but not persisted",
+      chat_id: chatId,
+      messages_count: allMessages.length,
+      summarized_count: messages.length,
+      persisted: false,
+      summary_len: summary.length,
+      saved_summary_len: savedChat?.context_summary?.length ?? 0,
+    }, { status: 500 })
+  }
+
   return NextResponse.json({
     ok: true,
-    summary: savedChat?.context_summary ?? summary,
+    chat_id: chatId,
+    summary: savedChat.context_summary,
     messages_count: allMessages.length,
     summarized_count: messages.length,
+    persisted: true,
+    summary_len: savedChat.context_summary.length,
   })
 }
