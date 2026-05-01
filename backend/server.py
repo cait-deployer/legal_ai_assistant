@@ -4087,8 +4087,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         _expanded_added = 0
         _expansion_vector = rw_vector or query_vector
-        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", min(8, max(4, body.max_docs // 2))))
-        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", 3))
+        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", min(5, max(3, body.max_docs // 3))))
+        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", 2))
         _seed_docs = sorted(
             _seed_candidates.items(),
             key=lambda item: (
@@ -4238,11 +4238,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if not settings_cache.get_bool("title_boost_enabled", False):
             _title_kws = []
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
+            _title_chunks_per_doc = int(settings_cache.get_float("title_boost_chunks_per_doc", 2))
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=_title_chunks_per_doc)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
-            _title_results = _title_results[:40]  # більший cap щоб охопити більше law_ids і релевантних чанків
+            _title_cap = int(settings_cache.get_float("title_boost_candidate_limit", 24))
+            _title_results = _title_results[:_title_cap]
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             _title_added = 0
             for r in _title_results:
@@ -4272,6 +4274,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
+    _final_max_docs = int(settings_cache.get_float("final_context_max_chunks", min(body.max_docs, 8)))
+    _final_max_docs = max(3, min(body.max_docs, _final_max_docs))
+    _per_law_final_cap = int(settings_cache.get_float("final_chunks_per_law", 2))
+    _per_law_final_cap = max(1, min(4, _per_law_final_cap))
+
     # Protected slots: keep authoritative primary-law chunks so the reranker cannot
     # collapse an answer into background/wiki material when primary sources exist.
     _protected_colls = {
@@ -4286,7 +4293,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             or r.get("_doc_expansion")
             or r["out_metadata"].get("law_id") in _seen_laws_in_semantic
         )
-    ][: max(3, min(6, body.max_docs // 2))]
+    ][: max(2, min(4, _final_max_docs // 2))]
     _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
     _docset_keep: list[dict] = []
     _docset_seen: set[tuple[str, str]] = set()
@@ -4307,7 +4314,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             continue
         _docset_keep.append(_r)
         _docset_seen.add(_doc_key)
-        if len(_docset_keep) >= max(3, min(6, body.max_docs // 2)):
+        if len(_docset_keep) >= max(2, min(4, _final_max_docs // 2)):
             break
     for _dk in _docset_keep:
         _dk_key = (_dk["out_metadata"].get("law_id"), _dk["out_metadata"].get("chunk_index"))
@@ -4335,7 +4342,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     }
 
     # LLM Reranker: якщо кандидатів більше ніж max_docs — просимо Gemini вибрати найрелевантніші
-    if len(results) > body.max_docs:
+    if len(results) > _final_max_docs:
         try:
             import asyncio as _aio
             _rerank_model = GenerativeModel(_model_name)
@@ -4343,7 +4350,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _open_candidates = [r for r in results
                                 if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
                                 not in _rr_protected_keys]
-            _candidates = _open_candidates[:min(len(_open_candidates), 60)]
+            _candidate_limit = int(settings_cache.get_float("reranker_candidate_limit", 30))
+            _candidate_limit = max(12, min(60, _candidate_limit))
+            _candidate_preview_chars = int(settings_cache.get_float("reranker_preview_chars", 450))
+            _candidate_preview_chars = max(220, min(700, _candidate_preview_chars))
+            _candidates = _open_candidates[:min(len(_open_candidates), _candidate_limit)]
             def _rr_candidate_text(i: int, c: dict) -> str:
                 meta = c["out_metadata"]
                 title = meta.get("source") or meta.get("title") or "Без назви"
@@ -4353,15 +4364,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 return (
                     f"[{i + 1}] collection={collection}; title={title}; "
                     f"law_id={law_id}; doc_type={doc_type}\n"
-                    f"{c['out_content'][:700]}"
+                    f"{c['out_content'][:_candidate_preview_chars]}"
                 )
 
             _chunks_text = "\n\n".join(
                 _rr_candidate_text(i, c)
                 for i, c in enumerate(_candidates)
             )
-            # Cap: мін 8, до половини max_docs; з урахуванням protected slots
-            _rr_select = min(body.max_docs, max(8, body.max_docs // 2))
+            # Cap: keep final context compact; protected slots already preserve primary law.
+            _rr_select = min(_final_max_docs, max(5, _final_max_docs))
             _rr_slots = max(1, _rr_select - len(_rr_protected))
             _rerank_prompt = (
                 f"Respond ONLY with a JSON object, no other text.\n"
@@ -4434,37 +4445,49 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                             reranked.append(_c)
                             _ranked_ids.add(_ck)
                 # Merge: protected primary-law chunks + reranked open candidates
-                results = (_rr_protected + reranked)[:body.max_docs]
+                results = (_rr_protected + reranked)[:_final_max_docs]
                 if _rr_protected:
                     logger.info("RERANKER: protected=%d + reranked=%d → total=%d",
                                 len(_rr_protected), len(reranked), len(results))
-                logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
+                logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:_final_max_docs])
             else:
                 results = _sort_for_legal_context(
                     results,
                     f"{search_question} {rewritten_query or ''}",
-                )[:body.max_docs]
+                )[:_final_max_docs]
                 logger.info("RERANKER: fallback (parsed 0 indices, raw=%r)", _rr_raw[:80])
         except Exception as _rr_err:
             logger.warning("Reranker error: %s", _rr_err)
             results = _sort_for_legal_context(
                 results,
                 f"{search_question} {rewritten_query or ''}",
-            )[:body.max_docs]
+            )[:_final_max_docs]
     else:
         results = _sort_for_legal_context(
             results,
             f"{search_question} {rewritten_query or ''}",
-        )[:body.max_docs]
+        )[:_final_max_docs]
 
     results = _prefer_term_matched_results(
         results,
         f"{search_question} {rewritten_query or ''}",
-        body.max_docs,
+        _final_max_docs,
     )
 
+    _dedup_final: list[dict] = []
+    _final_law_counts: dict[tuple[str, str], int] = {}
+    for _r in results:
+        _law_key = (_r.get("_collection", ""), _r["out_metadata"].get("law_id", ""))
+        if _final_law_counts.get(_law_key, 0) >= _per_law_final_cap:
+            continue
+        _dedup_final.append(_r)
+        _final_law_counts[_law_key] = _final_law_counts.get(_law_key, 0) + 1
+        if len(_dedup_final) >= _final_max_docs:
+            break
+    results = _dedup_final
+
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
-    for _i, _r in enumerate(results[:body.max_docs], start=1):
+    for _i, _r in enumerate(results[:_final_max_docs], start=1):
         _m = _r.get("out_metadata", {})
         logger.info(
             "FINAL[%d] tier=%d col=%s law_id=%s chunk=%s score=%.3f title=%s",
@@ -4611,6 +4634,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # Hard cap на весь context — захист від MAX_TOKENS на відповіді
     if len(context) > 80000:
         context = context[:80000] + "\n\n[...контекст обрізано для економії токенів]"
+    logger.info("FINAL CONTEXT: chunks=%d chars=%d", len(results), len(context))
 
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
@@ -4709,6 +4733,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         # plan response_detailed/scenarios can still bump a standard user to 800
         if _word_limit < 800 and ("response_detailed" in rf or "response_scenarios" in rf):
             _word_limit = 800
+        _word_limit_cap = int(settings_cache.get_float("response_word_limit_cap", 900))
+        if _word_limit_cap > 0:
+            _word_limit = min(_word_limit, max(250, _word_limit_cap))
         response_instructions.append(
             f"Пиши завершену відповідь до {_word_limit} слів. "
             "Ніколи не обривай речення — якщо не вистачає місця, скорочуй менш важливі деталі, але завжди завершуй думку."
