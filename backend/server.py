@@ -3683,11 +3683,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 try:
                     from vertexai.generative_models import ThinkingConfig as _TrThinkingConfig
                     _tr_gen_cfg = GenerationConfig(
-                        temperature=0.0, max_output_tokens=200,
+                        temperature=0.0, max_output_tokens=800,
                         thinking_config=_TrThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
-                    _tr_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=200)
+                    _tr_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=800)
                 _tr_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
                         _tr_model.generate_content,
