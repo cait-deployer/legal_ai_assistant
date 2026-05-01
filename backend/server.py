@@ -4850,11 +4850,11 @@ async def summarize_history_endpoint(body: SummarizeHistoryBody):
     try:
         from vertexai.generative_models import ThinkingConfig as _SumThinkingConfig
         _sum_gen_cfg = GenerationConfig(
-            temperature=0.3, max_output_tokens=600,
+            temperature=0.0, max_output_tokens=600,
             thinking_config=_SumThinkingConfig(thinking_budget=0),
         )
     except Exception:
-        _sum_gen_cfg = GenerationConfig(temperature=0.3, max_output_tokens=600)
+        _sum_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=600)
 
     lines: list[str] = []
     if body.existing_summary:

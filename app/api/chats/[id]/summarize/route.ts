@@ -95,16 +95,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   // Save to chats table and verify the write, otherwise the UI may think
   // summary exists while chats.context_summary remains NULL.
-  const { data: savedChat, error: updateError } = await admin()
+  const { error: updateError } = await admin()
     .from("chats")
-    .update({ context_summary: summary })
+    .update({ context_summary: summary, updated_at: new Date().toISOString() })
     .eq("id", chatId)
     .eq("user_id", user.id)
-    .select("id, context_summary")
-    .single()
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
+
+  const { data: savedChat, error: readBackError } = await admin()
+    .from("chats")
+    .select("id, context_summary")
+    .eq("id", chatId)
+    .eq("user_id", user.id)
+    .single()
+
+  if (readBackError) {
+    return NextResponse.json({ error: readBackError.message }, { status: 500 })
   }
 
   const persisted = savedChat?.context_summary === summary

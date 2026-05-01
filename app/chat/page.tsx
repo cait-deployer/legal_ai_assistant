@@ -381,13 +381,6 @@ function ChatPage() {
         const activeChatId = chatId;
 
         const currentUserTurnCount = messages.filter(m => m.role === 'user').length + 1;
-        let effectiveContextSummary = contextSummaryRef.current;
-        if (summaryPromiseRef.current) {
-            effectiveContextSummary = await runSummary(activeChatId);
-        }
-        if (currentUserTurnCount > 2 && !effectiveContextSummary) {
-            effectiveContextSummary = await runSummary(activeChatId);
-        }
 
         fetch(`/api/chats/${activeChatId}/messages`, {
             method: 'POST',
@@ -395,8 +388,9 @@ function ChatPage() {
             body: JSON.stringify({ role: 'user', content: questionText }),
         }).catch(() => { });
 
-        // Build conversation history for context — last 3 turns (6 messages) only
-        // Older turns are covered by contextSummary which backend uses separately
+        // Build conversation history for context — last 3 turns (6 messages) only.
+        // Summary is persisted for future memory, but not injected into answer generation yet:
+        // short summaries can distort follow-up retrieval more than they help.
         const allHistory = messages
             .filter(m => m.role === 'user' || m.role === 'ai')
             .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }));
@@ -413,7 +407,7 @@ function ChatPage() {
             const res = await fetch('/api/ask/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: questionText, history: historyForBackend, context_summary: effectiveContextSummary ?? null }),
+                body: JSON.stringify({ question: questionText, history: historyForBackend, context_summary: null }),
                 signal: AbortSignal.timeout(185_000),
             });
 
