@@ -4179,7 +4179,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _kw_query = f"{search_question} {rewritten_query or ''}".strip()
         _kw_results = (
             search_qdrant_text(_kw_query, target_collections, limit=15)
-            if settings_cache.get_bool("lexical_fallback_enabled", False)
+            if settings_cache.get_bool("lexical_fallback_enabled", True)
             else []
         )
         _kw_query_words = {w.lower() for w in _kw_query.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
@@ -4260,7 +4260,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             ]
         ))[:14]
         logger.info("TITLE BOOST kws: %s", _title_kws)
-        if not settings_cache.get_bool("title_boost_enabled", False):
+        if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
