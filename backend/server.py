@@ -4850,11 +4850,11 @@ async def summarize_history_endpoint(body: SummarizeHistoryBody):
     try:
         from vertexai.generative_models import ThinkingConfig as _SumThinkingConfig
         _sum_gen_cfg = GenerationConfig(
-            temperature=0.0, max_output_tokens=600,
+            temperature=0.0, max_output_tokens=1200,
             thinking_config=_SumThinkingConfig(thinking_budget=0),
         )
     except Exception:
-        _sum_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=600)
+        _sum_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=1200)
 
     lines: list[str] = []
     if body.existing_summary:
@@ -4871,7 +4871,8 @@ async def summarize_history_endpoint(body: SummarizeHistoryBody):
     prompt = (
         "Зроби стислий переказ наступного діалогу між юридичним асистентом і користувачем. "
         "Збережи ключові факти: про що запитував користувач, які закони або норми згадувалися, "
-        "які висновки були зроблені. Переказ має бути 200-300 слів, українською мовою.\n\n"
+        "які висновки були зроблені, які уточнення вже поставлені та які відповіді вже надані. "
+        "Не використовуй markdown-заголовки. Переказ має бути 250-450 слів, українською мовою.\n\n"
         f"{dialogue_text}\n\nСтислий переказ:"
     )
 
