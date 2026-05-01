@@ -3691,11 +3691,25 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                             "Відповідь — тільки переклад без пояснень:\n\n"
                             f"{question}"
                         ),
-                        generation_config=GenerationConfig(temperature=0.0, max_output_tokens=300),
+                        generation_config=GenerationConfig(temperature=0.0, max_output_tokens=500),
                     ),
-                    timeout=8.0,
+                    timeout=15.0,
                 )
-                search_question = _tr_resp.text.strip() or question
+                _tr_text = ""
+                try:
+                    _tr_text = _tr_resp.text.strip()
+                except Exception:
+                    pass
+                if not _tr_text:
+                    try:
+                        _tr_text = " ".join(
+                            getattr(_p, "text", "").strip()
+                            for _p in _tr_resp.candidates[0].content.parts
+                            if not getattr(_p, "thought", False) and getattr(_p, "text", "")
+                        ).strip()
+                    except Exception:
+                        pass
+                search_question = _tr_text or question
                 logger.info("RU→UA: %s → %s", question[:60], search_question[:60])
             except Exception:
                 pass  # fallback — шукаємо оригінальним текстом
