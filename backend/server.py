@@ -3770,16 +3770,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Відповідь — ТІЛЬКИ перефразований запит, 5–15 слів, без пояснень, без лапок."
                     ),
                 )
-                # thinking_budget=0 — вимикаємо thinking для rewrite (швидше + не обрізає вивід)
+                # max_output_tokens=60 достатньо для 5–15 слів, без thinking (швидше)
                 try:
                     from vertexai.generative_models import ThinkingConfig
                     _rw_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=2500,
+                        max_output_tokens=60,
                         thinking_config=ThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=2500)
+                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=60)
                 _rewrite_examples = settings_cache.get("rewrite_examples", "")
                 resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -3787,7 +3787,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         f"{_rewrite_examples}\n{q} →",
                         generation_config=_rw_cfg,
                     ),
-                    timeout=8.0,
+                    timeout=15.0,
                 )
                 # Debug: log all parts to understand model output
                 try:
