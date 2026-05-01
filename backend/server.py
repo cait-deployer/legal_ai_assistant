@@ -3717,8 +3717,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         ).strip()
                     except Exception:
                         pass
+                try:
+                    _tr_parts = [(getattr(_p, "thought", None), getattr(_p, "text", "")[:60]) for _p in _tr_resp.candidates[0].content.parts]
+                    logger.info("TR parts: %s", _tr_parts)
+                except Exception:
+                    pass
                 search_question = _tr_text or question
-                logger.info("RU→UA: %s → %s", question[:60], search_question[:60])
+                logger.info("RU→UA: %s → %s", question[:80], search_question[:120])
             except Exception:
                 pass  # fallback — шукаємо оригінальним текстом
 
@@ -3834,9 +3839,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     except Exception:
                         pass
                 text = raw.strip().split("\n")[0].strip()
-                logger.info("REWRITE raw=%r", text[:80])
+                logger.info("REWRITE raw=%r", text)
                 if text and text.lower() != q.lower() and 5 < len(text) < 300 and len(text.split()) >= 4:
-                    logger.info("REWRITE: %s → %s", q[:80], text[:150])
+                    logger.info("REWRITE: %s → %s", q[:80], text)
                     return text
                 return None
             except Exception as e:
