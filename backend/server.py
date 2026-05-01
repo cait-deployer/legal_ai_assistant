@@ -3624,8 +3624,8 @@ def _legal_research_sort_key(result: dict, terms: list[str]) -> tuple:
     """Stable generic ordering for final context/citations."""
     return (
         _source_tier(result),
-        -_authority_score(result),
         -_term_overlap_score(result, terms),
+        -_authority_score(result),
         -result.get("similarity", 0.0),
     )
 
@@ -4285,16 +4285,17 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         col for col in {r.get("_collection", "") for r in results}
         if col.startswith("rada_") or col in {"laws_kmu_v2", "laws_mod_v2", "laws_ccu_v2"}
     }
+    _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
     _rr_protected = [
         r for r in results
         if r.get("_collection") in _protected_colls
+        and _term_overlap_score(r, _docset_terms) > 0
         and (
             r.get("_title_match")
             or r.get("_doc_expansion")
             or r["out_metadata"].get("law_id") in _seen_laws_in_semantic
         )
     ][: max(2, min(4, _final_max_docs // 2))]
-    _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
     _docset_keep: list[dict] = []
     _docset_seen: set[tuple[str, str]] = set()
     for _r in sorted(
@@ -4476,7 +4477,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     _dedup_final: list[dict] = []
     _final_law_counts: dict[tuple[str, str], int] = {}
+    _final_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
+    _has_any_matched = any(_term_overlap_score(_r, _final_terms) > 0 for _r in results)
     for _r in results:
+        if _has_any_matched and _term_overlap_score(_r, _final_terms) <= 0:
+            continue
         _law_key = (_r.get("_collection", ""), _r["out_metadata"].get("law_id", ""))
         if _final_law_counts.get(_law_key, 0) >= _per_law_final_cap:
             continue
