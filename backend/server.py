@@ -3426,6 +3426,103 @@ def _route_collections(
         return list(all_collections)
 
 
+_QUERY_STOPWORDS = {
+    "дай", "дайте", "надай", "надайте", "інфо", "інформацію", "інформація",
+    "щодо", "стосовно", "про", "по", "для", "при", "або", "или", "та", "і",
+    "й", "в", "у", "на", "з", "із", "від", "до", "як", "які", "який", "яка",
+    "это", "це", "ця", "цей", "вони", "воно", "там", "так", "само", "тому",
+}
+
+
+def _query_terms(text: str, limit: int = 24) -> list[str]:
+    terms: list[str] = []
+    for raw in re.findall(r"[\w'-]+", (text or "").lower()):
+        if len(raw) < 4 or raw in _QUERY_STOPWORDS:
+            continue
+        terms.append(raw)
+        lemma = _ua_lemma(raw)
+        if lemma and lemma not in _QUERY_STOPWORDS:
+            terms.append(lemma)
+    return list(dict.fromkeys(terms))[:limit]
+
+
+def _term_overlap_score(result: dict, terms: list[str]) -> int:
+    meta = result.get("out_metadata", {})
+    haystack = (
+        (meta.get("source") or "") + " " +
+        (meta.get("title") or "") + " " +
+        (result.get("out_content") or "")
+    ).lower()
+    return sum(1 for term in terms if term in haystack)
+
+
+def _authority_score(result: dict) -> float:
+    col = result.get("_collection", "")
+    meta = result.get("out_metadata", {})
+    doc_type = meta.get("rada_doc_type") or meta.get("doc_type", "")
+
+    score = 1.0
+    if col == "laws_kmu_v2":
+        score = 1.18
+    elif col.startswith("rada_"):
+        score = 1.12
+    elif col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2"):
+        score = 1.03
+    elif col == "laws_zir_v2":
+        score = 0.96
+    elif col == "laws_wiki_v2":
+        score = 0.90
+
+    type_boost = {
+        "Кодекс": 0.08,
+        "Закон": 0.07,
+        "Постанова": 0.06,
+        "Наказ": 0.04,
+        "Розпорядження": 0.03,
+        "Лист": -0.08,
+        "Роз'яснення": -0.05,
+        "Інформаційний лист": -0.08,
+    }.get(doc_type, 0.0)
+    return score + type_boost
+
+
+def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs: int) -> list[dict]:
+    terms = _query_terms(query_text)
+    if len(terms) < 2:
+        return results[:max_docs]
+
+    scored = [(_term_overlap_score(r, terms), r) for r in results]
+    matched = [(score, r) for score, r in scored if score > 0]
+    if len(matched) < 2:
+        return results[:max_docs]
+
+    matched.sort(
+        key=lambda item: (
+            item[0],
+            _authority_score(item[1]),
+            item[1].get("similarity", 0.0),
+        ),
+        reverse=True,
+    )
+    matched_rows = [r for _, r in matched]
+    matched_keys = {
+        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+        for r in matched_rows
+    }
+    remainder = [
+        r for _, r in scored
+        if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index")) not in matched_keys
+    ]
+    reranked = (matched_rows + remainder)[:max_docs]
+    logger.info(
+        "TERM RERANK: matched=%d total=%d terms=%s",
+        len(matched_rows),
+        len(reranked),
+        terms[:10],
+    )
+    return reranked
+
+
 # ── Intent classifier → вибір колекцій ───────────────────────────────────────
 
 async def _classify_and_route(question: str, all_cols: list[str], model_name: str = "", query_vector: list | None = None) -> list[str]:
@@ -4225,9 +4322,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 logger.info("RERANKER: fallback (parsed 0 indices, raw=%r)", _rr_raw[:80])
         except Exception as _rr_err:
             logger.warning("Reranker error: %s", _rr_err)
-            results = results[:body.max_docs]
+        results = results[:body.max_docs]
     else:
         results = results[:body.max_docs]
+
+    results = _prefer_term_matched_results(
+        results,
+        f"{search_question} {rewritten_query or ''}",
+        body.max_docs,
+    )
 
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
