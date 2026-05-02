@@ -159,11 +159,12 @@ def parse_laws_from_page(html: str, category: str) -> list[dict]:
 
 # ─── ЗБІР ЗАКОНІВ З ОДНОГО РОЗДІЛУ (ПОСТОРІНКОВО) ────────────────────────────
 
-def get_laws_from_section(code: str, label: str, limit: int = None, log=None, max_pages: int | None = None) -> list[dict]:
+def get_laws_from_section(code: str, label: str, limit: int = None, log=None, max_pages: int | None = None, stop_check=None) -> list[dict]:
     """
     Проходить всі сторінки розділу і збирає список законів.
     limit — обмеження для тест-режиму (None = качаємо все).
     max_pages — якщо задано, зупиняємось після N сторінок (для інкрементального режиму).
+    stop_check — callable() → bool, перевіряємо між сторінками для швидкої зупинки.
     log — callback(message, level) для виводу в UI; якщо None — print.
     """
     _log = log if log else (lambda m, lv="info": print(m))
@@ -180,6 +181,8 @@ def get_laws_from_section(code: str, label: str, limit: int = None, log=None, ma
     seen_ids = set()
 
     for page in range(1, effective_pages + 1):
+        if stop_check and stop_check():
+            break
         if limit and len(all_laws) >= limit:
             break
 
@@ -255,11 +258,12 @@ ALL_THEMES: list[tuple[str, str]] = [
 
 # ЗБІР ПО ВСІХ (або вибраних) РОЗДІЛАХ
 
-def get_all_legal_ids(section_codes: list[str] | None = None, log=None, max_pages: int | None = None) -> list[dict]:
+def get_all_legal_ids(section_codes: list[str] | None = None, log=None, max_pages: int | None = None, stop_check=None) -> list[dict]:
     """
     Проходить по всіх (або вибраних) розділах і збирає список унікальних законів.
     section_codes — список кодів (наприклад ["h14", "h19"]); None = всі SECTIONS.
     max_pages — якщо задано, кожен розділ сканується лише перші N сторінок (інкрементальний режим).
+    stop_check — callable() → bool, зупиняє між секціями і сторінками.
     log — callback(message, level) для виводу в UI.
     Дедуплікація по law_id — один закон може бути в кількох розділах.
     """
@@ -276,8 +280,11 @@ def get_all_legal_ids(section_codes: list[str] | None = None, log=None, max_page
     seen_ids = set()
 
     for idx, (code, label) in enumerate(sections_to_scan, 1):
+        if stop_check and stop_check():
+            _log(f"⏸ Зупинено на розділі {idx}/{total_sections}")
+            break
         _log(f"📡 Сканування розділу {idx}/{total_sections}: [{code}] {label}")
-        section_laws = get_laws_from_section(code, label, limit=TEST_DOCS_PER_SECTION, log=_log, max_pages=max_pages)
+        section_laws = get_laws_from_section(code, label, limit=TEST_DOCS_PER_SECTION, log=_log, max_pages=max_pages, stop_check=stop_check)
         for law in section_laws:
             if law["id"] not in seen_ids:
                 seen_ids.add(law["id"])

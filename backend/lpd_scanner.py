@@ -84,16 +84,19 @@ def strip_html(html: str) -> str:
 
 # ── Завантаження позицій ───────────────────────────────────────────────────────
 
-def fetch_all_positions(log=None, max_pages: int | None = None) -> list[dict]:
+def fetch_all_positions(log=None, max_pages: int | None = None, stop_check=None) -> list[dict]:
     """
     Завантажує правові позиції через пагінацію /legal-position/recent (відсортовані від найновіших).
     max_pages — якщо задано, завантажує тільки перші N сторінок (для інкрементального режиму).
+    stop_check — callable() → bool для швидкої зупинки між сторінками.
     Повертає список raw dict з полями API.
     """
     all_positions: list[dict] = []
     page = 1
 
     while True:
+        if stop_check and stop_check():
+            break
         if max_pages and page > max_pages:
             if log:
                 log(f"  🔍 recent_only: зупиняємось після {max_pages} сторінок ({len(all_positions)} позицій)")

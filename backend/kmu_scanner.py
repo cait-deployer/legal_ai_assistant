@@ -31,14 +31,14 @@ def _kmu_doc_type(title: str, law_id: str) -> str:
     return "НПА КМУ"
 
 
-def get_all_kmu_docs(log=None, max_pages: int | None = None) -> list[dict]:
+def get_all_kmu_docs(log=None, max_pages: int | None = None, stop_check=None) -> list[dict]:
     """Збирає НПА КМУ з zakon.rada.gov.ua/laws/main/o2.
     max_pages — якщо задано, бере тільки перші N сторінок (для інкрементального режиму)."""
     from rada_scanner import get_laws_from_section
 
     _log = log or (lambda m, lv="info": print(m))
     _log(f"📡 Сканування КМУ: zakon.rada.gov.ua/laws/main/{KMU_SECTION_CODE}")
-    docs = get_laws_from_section(KMU_SECTION_CODE, KMU_SECTION_LABEL, log=_log, max_pages=max_pages)
+    docs = get_laws_from_section(KMU_SECTION_CODE, KMU_SECTION_LABEL, log=_log, max_pages=max_pages, stop_check=stop_check)
     _log(f"📄 КМУ зібрано: {len(docs)} документів")
     return docs
 

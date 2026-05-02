@@ -194,10 +194,10 @@ def _get_ids(source: str, recent_pages: int | None = None) -> list[dict]:
 
     if source == "rada":
         from rada_scanner import get_all_legal_ids
-        items = get_all_legal_ids(log=_log, max_pages=recent_pages)
+        items = get_all_legal_ids(log=_log, max_pages=recent_pages, stop_check=_should_stop)
     elif source == "kmu":
         from kmu_scanner import get_all_kmu_docs
-        items = get_all_kmu_docs(log=_log, max_pages=recent_pages)
+        items = get_all_kmu_docs(log=_log, max_pages=recent_pages, stop_check=_should_stop)
     elif source == "ccu":
         from ccu_scanner import get_all_ccu_docs
         items = get_all_ccu_docs(log=_log)
@@ -209,7 +209,7 @@ def _get_ids(source: str, recent_pages: int | None = None) -> list[dict]:
         items = get_all_wiki_articles()
     elif source == "positions":
         from lpd_scanner import fetch_all_positions
-        items = fetch_all_positions(log=_log, max_pages=recent_pages)
+        items = fetch_all_positions(log=_log, max_pages=recent_pages, stop_check=_should_stop)
     else:
         items = []
 
