@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ThumbsUp, ThumbsDown, X, Send } from "lucide-react"
+import { ThumbsUp, ThumbsDown, X, Send, Star } from "lucide-react"
 import { AudioRecorderButton } from "./AudioRecorderButton"
 
 const TAGS: Record<"positive" | "negative", string[]> = {
@@ -16,11 +16,13 @@ interface Props {
   betaMode?: boolean
   autoOpen?: boolean
   onSubmitted?: () => void
+  showReviewButton?: boolean
+  onReviewOpen?: () => void
 }
 
 type Vote = "positive" | "negative"
 
-export function MessageFeedback({ messageId, chatId, initialIsPositive = null, betaMode = false, autoOpen = false, onSubmitted }: Props) {
+export function MessageFeedback({ messageId, chatId, initialIsPositive = null, betaMode = false, autoOpen = false, onSubmitted, showReviewButton = false, onReviewOpen }: Props) {
   const initialVote = initialIsPositive === null ? null : initialIsPositive ? "positive" : "negative"
   const [vote, setVote]             = useState<Vote | null>(initialVote)
   const [showModal, setShowModal]   = useState(false)
@@ -106,6 +108,16 @@ export function MessageFeedback({ messageId, chatId, initialIsPositive = null, b
         )}
         {betaMode && !submitted && (
           <span className="text-[10px] text-[#C9A84C]/50 ml-1 font-medium">бета-відгук</span>
+        )}
+        {showReviewButton && onReviewOpen && (
+          <button
+            onClick={onReviewOpen}
+            title="Оцінити URAI"
+            className="flex items-center gap-1 ml-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/25 hover:bg-[#C9A84C]/20 hover:border-[#C9A84C]/50 transition-all"
+          >
+            <Star className="w-3 h-3 fill-[#C9A84C]" />
+            Оцінити
+          </button>
         )}
       </div>
 

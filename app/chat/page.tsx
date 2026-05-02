@@ -633,7 +633,10 @@ function ChatPage() {
                             </motion.div>
                         ) : (
                             <div className="space-y-5 md:space-y-8 pb-6 md:pb-10">
-                                {messages.map(msg => (
+                                {messages.map((msg, _mi, _arr) => {
+                                    const lastAiId = [..._arr].reverse().find(m => m.role === 'ai')?.id
+                                    const isLastAi = msg.role === 'ai' && msg.id === lastAiId
+                                    return (
                                     <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex gap-2 md:gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                                         <div className={`h-8 w-8 md:h-10 md:w-10 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0 shadow-xl ${msg.role === 'ai' ? 'bg-[#0d1120] border border-[#C9A84C]/30 text-[#C9A84C]' : 'bg-[#C9A84C] text-[#0A0E1A]'
                                             }`}>
@@ -671,11 +674,14 @@ function ChatPage() {
                                                     betaMode={isBetaTester}
                                                     autoOpen={pendingBetaFeedbackId === msg.id}
                                                     onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
+                                                    showReviewButton={isLastAi && reviewTrigger.buttonVisible}
+                                                    onReviewOpen={reviewTrigger.reopen}
                                                 />
                                             )}
                                         </div>
                                     </motion.div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         )}
 

@@ -114,9 +114,10 @@ function LogPanel({
   canResume: boolean
   onClose: () => void
 }) {
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const logsContainerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = logsContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [logs.length])
 
   return (
@@ -143,7 +144,7 @@ function LogPanel({
         </div>
       </div>
       {/* Logs */}
-      <div className="h-56 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
+      <div ref={logsContainerRef} className="h-56 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
         {logs.length === 0 && <div className="text-gray-600 text-center pt-8">Логів ще немає...</div>}
         {logs.map((l, i) => (
           <div key={i} className="flex gap-2">
@@ -151,7 +152,6 @@ function LogPanel({
             <span className={`${LOG_COLOR[l.level] ?? "text-gray-400"} break-all`}>{l.message}</span>
           </div>
         ))}
-        <div ref={bottomRef} />
       </div>
     </div>
   )
@@ -591,7 +591,7 @@ function PipelineWidget() {
   const [status, setStatus]     = useState<PipelineStatus | null>(null)
   const [showLogs, setShowLogs] = useState(false)
   const [error, setError]       = useState("")
-  const logBottomRef = useRef<HTMLDivElement>(null)
+  const logContainerRef = useRef<HTMLDivElement>(null)
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -607,7 +607,8 @@ function PipelineWidget() {
     return () => clearInterval(id)
   }, [status?.running, fetchStatus])
   useEffect(() => {
-    if (showLogs) logBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = logContainerRef.current
+    if (showLogs && el) el.scrollTop = el.scrollHeight
   }, [status?.live_logs?.length, showLogs])
 
   async function handleTrigger() {
@@ -627,12 +628,27 @@ function PipelineWidget() {
   }
 
   const stepNames = status?.step_names?.length ? status.step_names : PIPELINE_STEP_NAMES
+  const totalSteps = stepNames.length
 
-  // Detect current step from last log message
-  const lastLog = status?.live_logs?.at(-1)?.message ?? ""
-  const currentStep = (() => {
-    const m = lastLog.match(/^\[(\d+)\//)
-    return m ? Number(m[1]) : 0
+  // Detect current/completed steps by scanning logs for [N/6] ▶ and [N/6] ✅ markers
+  const { currentStep, completedSteps } = (() => {
+    if (!status?.running && status?.last_run) {
+      // Pipeline finished — all steps done
+      return { currentStep: 0, completedSteps: new Set(Array.from({ length: totalSteps }, (_, i) => i + 1)) }
+    }
+    const logs = status?.live_logs ?? []
+    const completed = new Set<number>()
+    let current = 0
+    for (const log of logs) {
+      // Match only [N/totalSteps] at start of message (not [66001/99793] doc indices)
+      const m = log.message.match(new RegExp(`^\\[(\\d{1,2})\\/${totalSteps}\\]\\s*(▶|✅)`))
+      if (m) {
+        const n = Number(m[1])
+        if (m[2] === "▶") current = n
+        if (m[2] === "✅") { completed.add(n); if (current === n) current = 0 }
+      }
+    }
+    return { currentStep: current, completedSteps: completed }
   })()
 
   return (
@@ -644,7 +660,7 @@ function PipelineWidget() {
           <span className="text-sm font-bold text-[#E0E6ED]">Пайплайн оновлення</span>
           {status?.running && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 animate-pulse">
-              ▶ Виконується{currentStep > 0 ? ` (крок ${currentStep}/6)` : ""}
+              ▶ Виконується{currentStep > 0 ? ` · крок ${currentStep}/${totalSteps}` : ""}
             </span>
           )}
           {!status?.running && status?.last_run && (
@@ -672,22 +688,28 @@ function PipelineWidget() {
       {/* 6 steps */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {stepNames.map((name, i) => {
-          const stepN = i + 1
-          const isDone = !status?.running && (status?.last_run != null) && stepN <= 6
+          const stepN    = i + 1
+          const isDone   = completedSteps.has(stepN)
           const isActive = status?.running && stepN === currentStep
-          const isPast   = status?.running && stepN < currentStep
           return (
-            <div key={i} className={`rounded-xl border px-3 py-2 transition-colors ${
-              isActive ? "border-emerald-500/40 bg-emerald-500/8" :
-              isPast   ? "border-emerald-500/20 bg-emerald-500/5" :
-              isDone   ? "border-white/8 bg-white/3" :
-                         "border-white/5"
+            <div key={i} className={`rounded-xl border px-3 py-2 transition-all duration-300 ${
+              isActive ? "border-emerald-400/60 bg-emerald-500/10 shadow-[0_0_12px_rgba(52,211,153,0.15)]" :
+              isDone   ? "border-emerald-600/40 bg-emerald-900/20" :
+                         "border-white/5 bg-transparent"
             }`}>
               <div className="flex items-center gap-1.5">
-                <span className={`text-[10px] font-bold w-4 shrink-0 ${isActive ? "text-emerald-400" : isPast ? "text-emerald-600" : "text-gray-600"}`}>
-                  {isPast ? "✓" : stepN}
+                <span className={`text-[10px] font-black w-4 shrink-0 flex items-center justify-center ${
+                  isActive ? "text-emerald-300 animate-pulse" :
+                  isDone   ? "text-emerald-400" :
+                             "text-gray-600"
+                }`}>
+                  {isDone ? "✓" : isActive ? "▶" : stepN}
                 </span>
-                <span className={`text-[10px] leading-tight ${isActive ? "text-[#E0E6ED] font-semibold" : "text-gray-500"}`}>{name}</span>
+                <span className={`text-[10px] leading-tight font-medium ${
+                  isActive ? "text-emerald-200" :
+                  isDone   ? "text-emerald-500/80" :
+                             "text-gray-600"
+                }`}>{name}</span>
               </div>
             </div>
           )
@@ -704,7 +726,7 @@ function PipelineWidget() {
 
       {/* Logs */}
       {showLogs && (
-        <div className="bg-[#080d16] rounded-xl border border-white/5 h-48 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
+        <div ref={logContainerRef} className="bg-[#080d16] rounded-xl border border-white/5 h-48 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
           {!status?.live_logs?.length && <div className="text-gray-600 text-center pt-8">Логів ще немає...</div>}
           {status?.live_logs?.map((l, i) => (
             <div key={i} className="flex gap-2">
@@ -712,7 +734,6 @@ function PipelineWidget() {
               <span className={LOG_COLOR[l.level] ?? "text-gray-400"}>{l.message}</span>
             </div>
           ))}
-          <div ref={logBottomRef} />
         </div>
       )}
 
