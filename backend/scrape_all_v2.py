@@ -179,20 +179,25 @@ def _law_id_for(source: str, doc: dict) -> str:
 
 
 # ── ID list fetchers ───────────────────────────────────────────────────────────
-def _get_ids(source: str) -> list[dict]:
-    cached = _load_cache(source)
-    if cached is not None:
-        _log(f"  Кеш: {len(cached)} ID ({source})")
-        return cached
+def _get_ids(source: str, recent_pages: int | None = None) -> list[dict]:
+    # recent_pages mode: bypass cache, fetch only first N pages (incremental pipeline)
+    if recent_pages is None:
+        cached = _load_cache(source)
+        if cached is not None:
+            _log(f"  Кеш: {len(cached)} ID ({source})")
+            return cached
 
-    _log(f"  ⏳ Завантажуємо список {source}... (може зайняти декілька хвилин)")
+    if recent_pages:
+        _log(f"  🔍 {source}: recent_only — завантажуємо перші {recent_pages} сторінок (~{recent_pages * 50} doc)")
+    else:
+        _log(f"  ⏳ Завантажуємо список {source}... (може зайняти декілька хвилин)")
 
     if source == "rada":
         from rada_scanner import get_all_legal_ids
-        items = get_all_legal_ids(log=_log)
+        items = get_all_legal_ids(log=_log, max_pages=recent_pages)
     elif source == "kmu":
         from kmu_scanner import get_all_kmu_docs
-        items = get_all_kmu_docs(log=_log)
+        items = get_all_kmu_docs(log=_log, max_pages=recent_pages)
     elif source == "ccu":
         from ccu_scanner import get_all_ccu_docs
         items = get_all_ccu_docs(log=_log)
@@ -204,12 +209,15 @@ def _get_ids(source: str) -> list[dict]:
         items = get_all_wiki_articles()
     elif source == "positions":
         from lpd_scanner import fetch_all_positions
-        items = fetch_all_positions(log=_log)
+        items = fetch_all_positions(log=_log, max_pages=recent_pages)
     else:
         items = []
 
-    _save_cache(source, items)
-    _log(f"  {source}: {len(items)} документів (кеш збережено)")
+    if recent_pages is None:
+        _save_cache(source, items)
+        _log(f"  {source}: {len(items)} документів (кеш збережено)")
+    else:
+        _log(f"  {source}: {len(items)} документів (recent_only, без кешу)")
     return items
 
 
@@ -658,7 +666,7 @@ def _process_source(source: str, items: list, start_idx: int, state: dict, statu
 
 
 # ── Internal run logic (always single source) ─────────────────────────────────
-def _run_main(source: str, rada_collection: str | None = None, force: bool = False) -> None:
+def _run_main(source: str, rada_collection: str | None = None, force: bool = False, recent_pages: int | None = None) -> None:
     _tls.source = source
     os.makedirs(RAW_DIR, exist_ok=True)
 
@@ -672,10 +680,10 @@ def _run_main(source: str, rada_collection: str | None = None, force: bool = Fal
     status = _load_status()
 
     _log(f"\n{'='*60}")
-    _log(f"ДЖЕРЕЛО: {source.upper()}" + (" [FORCE]" if force else ""))
+    _log(f"ДЖЕРЕЛО: {source.upper()}" + (" [FORCE]" if force else "") + (f" [recent:{recent_pages}p]" if recent_pages else ""))
     _log(f"{'='*60}")
 
-    items = _get_ids(source)
+    items = _get_ids(source, recent_pages=recent_pages)
     _log(f"  Всього: {len(items)} документів")
 
     if source == "rada" and rada_collection is not None:
@@ -709,14 +717,16 @@ def run_scrape_all(
     log_callback=None,
     stop_event: threading.Event | None = None,
     force: bool = False,
+    recent_pages: int | None = None,
 ) -> None:
-    """Called from server.py for a SINGLE source. Runs in a daemon thread."""
+    """Called from server.py for a SINGLE source. Runs in a daemon thread.
+    recent_pages — if set, only fetches first N pages (most recent) — used by pipeline."""
     evt = stop_event if stop_event is not None else threading.Event()
     _log_cbs[source]   = log_callback
     _stop_evts[source] = evt
     _tls.source = source
     try:
-        _run_main(source=source, rada_collection=rada_collection, force=force)
+        _run_main(source=source, rada_collection=rada_collection, force=force, recent_pages=recent_pages)
     finally:
         _log_cbs.pop(source, None)
         _stop_evts.pop(source, None)

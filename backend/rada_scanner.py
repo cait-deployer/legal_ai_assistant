@@ -159,23 +159,27 @@ def parse_laws_from_page(html: str, category: str) -> list[dict]:
 
 # ─── ЗБІР ЗАКОНІВ З ОДНОГО РОЗДІЛУ (ПОСТОРІНКОВО) ────────────────────────────
 
-def get_laws_from_section(code: str, label: str, limit: int = None, log=None) -> list[dict]:
+def get_laws_from_section(code: str, label: str, limit: int = None, log=None, max_pages: int | None = None) -> list[dict]:
     """
     Проходить всі сторінки розділу і збирає список законів.
     limit — обмеження для тест-режиму (None = качаємо все).
+    max_pages — якщо задано, зупиняємось після N сторінок (для інкрементального режиму).
     log — callback(message, level) для виводу в UI; якщо None — print.
     """
     _log = log if log else (lambda m, lv="info": print(m))
 
     total_pages = get_total_pages(code)
-    _log(f"📂 Розділ [{code}] {label} — {total_pages} стор. (~{total_pages * 50} doc)")
+    effective_pages = min(total_pages, max_pages) if max_pages else total_pages
+    _log(f"📂 Розділ [{code}] {label} — {effective_pages}/{total_pages} стор. (~{effective_pages * 50} doc)")
     if limit:
         _log(f"   ⚠️  TEST MODE: беремо перші {limit} документів", "warning")
+    if max_pages and max_pages < total_pages:
+        _log(f"   🔍 recent_only: перевіряємо тільки {max_pages} найновіших сторінок")
 
     all_laws = []
     seen_ids = set()
 
-    for page in range(1, total_pages + 1):
+    for page in range(1, effective_pages + 1):
         if limit and len(all_laws) >= limit:
             break
 
@@ -205,7 +209,7 @@ def get_laws_from_section(code: str, label: str, limit: int = None, log=None) ->
                 if limit and len(all_laws) >= limit:
                     break
 
-        _log(f"   📄 [{code}] {label[:25]} — Стор. {page}/{total_pages}: зібрано {len(all_laws)}")
+        _log(f"   📄 [{code}] {label[:25]} — Стор. {page}/{effective_pages}: зібрано {len(all_laws)}")
         time.sleep(0.3)
 
     _log(f"   ✅ [{code}] готово: {len(all_laws)} законів", "success")
@@ -251,10 +255,11 @@ ALL_THEMES: list[tuple[str, str]] = [
 
 # ЗБІР ПО ВСІХ (або вибраних) РОЗДІЛАХ
 
-def get_all_legal_ids(section_codes: list[str] | None = None, log=None) -> list[dict]:
+def get_all_legal_ids(section_codes: list[str] | None = None, log=None, max_pages: int | None = None) -> list[dict]:
     """
     Проходить по всіх (або вибраних) розділах і збирає список унікальних законів.
     section_codes — список кодів (наприклад ["h14", "h19"]); None = всі SECTIONS.
+    max_pages — якщо задано, кожен розділ сканується лише перші N сторінок (інкрементальний режим).
     log — callback(message, level) для виводу в UI.
     Дедуплікація по law_id — один закон може бути в кількох розділах.
     """
@@ -272,7 +277,7 @@ def get_all_legal_ids(section_codes: list[str] | None = None, log=None) -> list[
 
     for idx, (code, label) in enumerate(sections_to_scan, 1):
         _log(f"📡 Сканування розділу {idx}/{total_sections}: [{code}] {label}")
-        section_laws = get_laws_from_section(code, label, limit=TEST_DOCS_PER_SECTION, log=_log)
+        section_laws = get_laws_from_section(code, label, limit=TEST_DOCS_PER_SECTION, log=_log, max_pages=max_pages)
         for law in section_laws:
             if law["id"] not in seen_ids:
                 seen_ids.add(law["id"])

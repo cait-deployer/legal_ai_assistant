@@ -5213,9 +5213,13 @@ def _do_pipeline(session_id: str) -> None:
             _evt.clear()
         _pipeline_log(f"🚀 Пайплайн розпочато: {session_id[:8]}", "info")
 
-        # ── Step 1: Scrape (force=False → skip existing OK files) ──────────────
+        # ── Step 1: Scrape (force=False, recent_pages=10 → only newest N pages) ──
         step = 1
         _step_log(f"▶ {_PIPELINE_STEP_NAMES[0]}")
+        # rada/kmu have 2000+ pages each; in pipeline we only check the 10 most recent pages
+        # (~500 docs) — new docs always appear on page 1 (sorted by last edition date desc).
+        # mod/zir use different scrapers (Playwright) so they handle skip logic internally.
+        PIPELINE_RECENT_PAGES = 10
         for scrape_src in sources:
             if _stopped():
                 _step_log("⏸ Зупинено", "warning")
@@ -5232,7 +5236,8 @@ def _do_pipeline(session_id: str) -> None:
                 else:
                     from scrape_all_v2 import run_scrape_all
                     run_scrape_all(source=scrape_src, rada_collection=None,
-                                   log_callback=_pipeline_log, stop_event=stop_ev, force=False)
+                                   log_callback=_pipeline_log, stop_event=stop_ev,
+                                   force=False, recent_pages=PIPELINE_RECENT_PAGES)
             except Exception as e:
                 _step_log(f"⚠️ Scrape {scrape_src}: {e}", "warning")
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[0]} завершено")
