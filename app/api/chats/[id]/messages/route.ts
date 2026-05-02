@@ -76,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Increment requests_this_month with 30-day rolling window
     const { data: usageProfile } = await admin()
       .from("profiles")
-      .select("requests_this_month, total_requests, limit_reset_at, monthly_limit, subscription_tier, browser_fingerprint, has_received_review_reward")
+      .select("requests_this_month, total_requests, limit_reset_at, monthly_limit, subscription_tier, is_beta_tester, browser_fingerprint, has_received_review_reward")
       .eq("id", user.id)
       .single()
 
@@ -89,8 +89,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
       // FREE plan: one-time 10 requests, no rolling window — never set limit_reset_at
       const isFree = (profile.subscription_tier ?? "free") === "free"
+      const isBetaTester = profile.is_beta_tester === true
 
-      if (!isFree) {
+      if (!isFree && !isBetaTester) {
         // Check if 30-day window has expired
         if (profile.limit_reset_at) {
           const resetAt = new Date(profile.limit_reset_at)

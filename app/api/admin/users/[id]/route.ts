@@ -21,12 +21,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params
   if (!await getCallerUser()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const { data, error } = await admin().auth.admin.getUserById(id)
+  const sb = admin()
+  const { data, error } = await sb.auth.admin.getUserById(id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const bannedUntil = (data.user as { banned_until?: string | null }).banned_until
   const isBanned = bannedUntil ? new Date(bannedUntil) > new Date() : false
-  return NextResponse.json({ is_banned: isBanned })
+  const { data: profile } = await sb
+    .from("profiles")
+    .select("is_beta_tester")
+    .eq("id", id)
+    .maybeSingle()
+
+  return NextResponse.json({ is_banned: isBanned, is_beta_tester: profile?.is_beta_tester ?? false })
 }
 
 // PATCH /api/admin/users/[id] — edit profile OR toggle ban
@@ -53,6 +60,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     update.monthly_limit = body.monthly_limit === "" || body.monthly_limit === null ? null : Number(body.monthly_limit)
   if (body.bonus_requests !== undefined)
     update.bonus_requests = body.bonus_requests === "" ? 0 : Number(body.bonus_requests)
+  if (body.is_beta_tester !== undefined)
+    update.is_beta_tester = Boolean(body.is_beta_tester)
 
   if (Object.keys(update).length === 0) return NextResponse.json({ ok: true })
 

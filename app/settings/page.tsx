@@ -34,6 +34,7 @@ type Profile = {
   tour_completed: boolean | null;
   response_length_pref: "short" | "standard" | "detailed" | "full" | null;
   response_lang_style: "legal" | "plain" | null;
+  is_beta_tester?: boolean;
 }
 
 const SEGMENT_LABELS: Record<Segment, string> = {
@@ -162,9 +163,20 @@ function ProfileTab({ profile }: { profile: Profile }) {
         <div className="w-20 h-20 rounded-2xl bg-[#C9A84C] flex items-center justify-center text-3xl font-serif font-bold text-[#0A0E1A] shadow-lg shadow-[#C9A84C]/20">
           {(fullName || profile.email).charAt(0).toUpperCase()}
         </div>
-        <div>
-          <h2 className="text-xl font-serif font-bold text-[#E0E6ED]">{fullName || "Користувач"}</h2>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-serif font-bold text-[#E0E6ED]">{fullName || "Користувач"}</h2>
+            {profile.is_beta_tester && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-[#C9A84C]/15 border border-[#C9A84C]/40 text-[#C9A84C]">
+                <Zap className="w-2.5 h-2.5" />
+                Beta
+              </span>
+            )}
+          </div>
           <p className="text-sm text-[#C9A84C]/60 font-medium">{profile.email}</p>
+          {profile.is_beta_tester && (
+            <p className="text-[10px] text-[#E0E6ED]/35 mt-1">Учасник програми бета-тестування</p>
+          )}
         </div>
       </div>
 

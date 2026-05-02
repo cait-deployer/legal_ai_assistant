@@ -493,9 +493,21 @@ def _process_one(source: str, doc: dict, status: dict, force: bool = False) -> s
     """Returns: ok | empty | restricted | error | skipped"""
     law_id = _law_id_for(source, doc)
 
-    with _status_lock:
-        if not force and status.get(law_id, {}).get("status") == "ok" and not _meta_incomplete(source, law_id):
-            return "skipped"
+    if not force:
+        with _status_lock:
+            # Primary: status.json says "ok" and meta is complete
+            if status.get(law_id, {}).get("status") == "ok" and not _meta_incomplete(source, law_id):
+                return "skipped"
+            # Fallback: .txt file exists on disk — trust disk over missing status entry
+            txt_path = Path(os.path.join(RAW_DIR, source, f"{law_id}.txt"))
+            if txt_path.exists() and txt_path.stat().st_size > 50 and not _meta_incomplete(source, law_id):
+                # Heal status.json so next run is fast
+                if status.get(law_id, {}).get("status") != "ok":
+                    status[law_id] = {
+                        "source": source, "status": "ok",
+                        "scraped_at": _now(), "title": "", "effective_date": "",
+                    }
+                return "skipped"
 
     try:
         _law_id, text, meta = _FETCHERS[source](doc)

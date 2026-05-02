@@ -6,7 +6,7 @@ import {
   Users, Search, X, ChevronLeft, ChevronRight,
   ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Loader2,
   Check, Mail, Globe, MessageSquare, ArrowLeft,
-  Pencil, Ban, ShieldCheck, Trash2, AlertTriangle, Save,
+  Pencil, Ban, ShieldCheck, Trash2, AlertTriangle, Save, Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -226,7 +226,7 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
 type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string; context_summary: string | null }
 type MsgRow  = { id: string; role: string; content: string; created_at: string }
 
-type EditForm = { subscription_tier: string; monthly_limit: string; bonus_requests: string }
+type EditForm = { subscription_tier: string; monthly_limit: string; bonus_requests: string; is_beta_tester: boolean }
 
 function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose: () => void; onRefresh: () => void; labels: Record<string, string> }) {
   const rel = formatRelative(user.last_active_at)
@@ -246,7 +246,9 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
     subscription_tier: user.subscription_tier,
     monthly_limit: user.monthly_limit !== null ? String(user.monthly_limit) : "",
     bonus_requests: String(user.bonus_requests ?? 0),
+    is_beta_tester: false,
   })
+  const [confirmBetaToggle, setConfirmBetaToggle] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmBan, setConfirmBan]       = useState(false)
@@ -255,7 +257,10 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
   useEffect(() => {
     fetch(`/api/admin/users/${user.id}`)
       .then(r => r.json())
-      .then(d => { if (typeof d.is_banned === "boolean") setIsBanned(d.is_banned) })
+      .then(d => {
+        if (typeof d.is_banned === "boolean") setIsBanned(d.is_banned)
+        if (typeof d.is_beta_tester === "boolean") setEditForm(f => ({ ...f, is_beta_tester: d.is_beta_tester }))
+      })
       .catch(() => {})
   }, [user.id])
 
@@ -294,6 +299,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
           subscription_tier: editForm.subscription_tier,
           monthly_limit: editForm.monthly_limit,
           bonus_requests: editForm.bonus_requests,
+          is_beta_tester: editForm.is_beta_tester,
         }),
       })
       const d = await r.json()
@@ -616,6 +622,55 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
           </div>
         </div>
 
+        {/* ── Beta tester confirm overlay ── */}
+        <AnimatePresence>
+          {confirmBetaToggle && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex items-end"
+            >
+              <motion.div
+                initial={{ y: 80, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 80, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 360, damping: 32 }}
+                className="w-full bg-[#0d1120] border-t border-[#C9A84C]/30 p-6 space-y-4"
+              >
+                <div className="flex items-center gap-2 text-[#C9A84C]">
+                  <Sparkles className="w-5 h-5 shrink-0" />
+                  <p className="font-bold text-sm">
+                    {editForm.is_beta_tester ? "Прибрати статус бета-тестера" : "Надати статус бета-тестера"} {user.full_name || user.email}?
+                  </p>
+                </div>
+                <p className="text-xs text-[#E0E6ED]/40 leading-relaxed">
+                  {editForm.is_beta_tester
+                    ? "Користувач втратить PRO-доступ та обов&apos;язковий режим відгуків."
+                    : "Користувач отримає повний PRO-доступ та бачитиме модальне вікно відгуку після кожної відповіді."}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmBetaToggle(false)}
+                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[10px] font-bold uppercase tracking-wider transition-all"
+                  >
+                    Скасувати
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditForm(f => ({ ...f, is_beta_tester: !f.is_beta_tester }))
+                      setConfirmBetaToggle(false)
+                    }}
+                    className="flex-1 h-10 rounded-xl bg-[#C9A84C] hover:bg-[#C9A84C]/90 text-[#0A0E1A] text-[10px] font-black uppercase tracking-wider transition-all"
+                  >
+                    Підтвердити
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* ── Ban confirm overlay ── */}
         <AnimatePresence>
           {confirmBan && (
@@ -770,6 +825,29 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                     onChange={e => setEditForm(f => ({ ...f, bonus_requests: e.target.value }))}
                     className="w-full h-10 rounded-xl bg-[#0A0E1A] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs px-3 focus:outline-none focus:border-[#C9A84C]/50"
                   />
+                </div>
+
+                {/* Beta tester toggle */}
+                <div className="flex items-center justify-between p-4 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/15">
+                  <div>
+                    <p className="text-xs font-bold text-[#E0E6ED]">Бета-тестер</p>
+                    <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">Повний PRO-доступ + обов&apos;язковий відгук після кожної відповіді</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmBetaToggle(true)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors focus:outline-none ${
+                      editForm.is_beta_tester
+                        ? "bg-[#C9A84C] border-[#C9A84C]"
+                        : "bg-[#0A0E1A] border-[#C9A84C]/30"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform mt-0.5 ${
+                        editForm.is_beta_tester ? "translate-x-5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
 

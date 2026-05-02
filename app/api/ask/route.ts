@@ -46,7 +46,7 @@ export async function POST(request: Request) {
   // 2. Get user's subscription_tier + onboarding profile
   const { data: profile } = await admin()
     .from("profiles")
-    .select("subscription_tier, role, sub_role, segment, ai_personal_prompt, response_length_pref, response_lang_style")
+    .select("subscription_tier, is_beta_tester, role, sub_role, segment, ai_personal_prompt, response_length_pref, response_lang_style")
     .eq("id", user.id)
     .single()
 
@@ -61,8 +61,10 @@ export async function POST(request: Request) {
     segment:  profile.segment  ?? [],
   } : null
 
-  if (profile?.subscription_tier) {
-    const planId = profile.subscription_tier
+  const effectivePlanId = profile?.is_beta_tester ? "pro" : profile?.subscription_tier
+
+  if (effectivePlanId) {
+    const planId = effectivePlanId
 
     // 3. Get plan limits (id IS the slug)
     const { data: plan } = await admin()
@@ -97,7 +99,7 @@ export async function POST(request: Request) {
   }
 
   // 5. Gating response preferences by plan tier
-  const tier = profile?.subscription_tier ?? "free"
+  const tier = profile?.is_beta_tester ? "pro" : (profile?.subscription_tier ?? "free")
   const isBasicPlus = tier !== "free"
   const isProPlus   = tier === "pro"
 

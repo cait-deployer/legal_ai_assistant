@@ -71,6 +71,7 @@ type Message = {
     text: string;
     references?: Citation[];
     templates?: Template[];
+    feedback?: { is_positive: boolean } | null;
 };
 
 function AuthBg() {
@@ -149,6 +150,8 @@ function ChatPage() {
     const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
     const [isFirstMessage, setIsFirstMessage] = useState(true);
     const [limitExceeded, setLimitExceeded] = useState(false);
+    const [isBetaTester, setIsBetaTester] = useState(false);
+    const [pendingBetaFeedbackId, setPendingBetaFeedbackId] = useState<string | null>(null);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showTour, setShowTour] = useState(false);
     const reviewTrigger = useReviewTrigger();
@@ -221,8 +224,10 @@ function ChatPage() {
             .then(r => r.ok ? r.json() : null)
             .then(profile => {
                 if (!profile) return;
+                const beta = profile.is_beta_tester === true;
+                setIsBetaTester(beta);
                 const { monthly_limit, bonus_requests, requests_this_month, tour_completed } = profile;
-                if (monthly_limit != null && requests_this_month >= monthly_limit + (bonus_requests ?? 0)) {
+                if (!beta && monthly_limit != null && requests_this_month >= monthly_limit + (bonus_requests ?? 0)) {
                     setLimitExceeded(true);
                 }
                 // Show tour only for new users where tour_completed is explicitly false
@@ -281,7 +286,7 @@ function ChatPage() {
                     setIsFirstMessage(true);
                     return;
                 }
-                setMessages(rows.map((r: { id: string; role: string; content: string; citations?: Citation[] }) => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.citations ?? [] })));
+                setMessages(rows.map((r: { id: string; role: string; content: string; citations?: Citation[]; feedback?: { is_positive: boolean } | null }) => ({ id: r.id, role: r.role === 'assistant' ? 'ai' : 'user', text: r.content, references: r.citations ?? [], feedback: r.feedback ?? null })));
                 setIsFirstMessage(rows.length === 0);
             })
             .catch(() => toast.error('Не вдалося завантажити чат'))
@@ -301,7 +306,9 @@ function ChatPage() {
             .then(r => r.ok ? r.json() : null)
             .then(profile => {
                 if (!profile) return;
-                if (profile.monthly_limit != null && profile.requests_this_month >= profile.monthly_limit + (profile.bonus_requests ?? 0)) {
+                const beta = profile.is_beta_tester === true;
+                setIsBetaTester(beta);
+                if (!beta && profile.monthly_limit != null && profile.requests_this_month >= profile.monthly_limit + (profile.bonus_requests ?? 0)) {
                     setLimitExceeded(true);
                 }
             })
@@ -522,6 +529,7 @@ function ChatPage() {
                 }).then(r => r.ok ? r.json() : null).then(saved => {
                     if (saved?.id) {
                         setMessages(prev => prev.map(m => m.id === STREAMING_ID ? { ...m, id: saved.id } : m));
+                        if (isBetaTester) setPendingBetaFeedbackId(saved.id);
                     }
                     reviewTrigger.check();
 
@@ -656,7 +664,14 @@ function ChatPage() {
                                             </Card>
                                             <span className="text-[10px] font-bold text-[#C9A84C]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Ви'}</span>
                                             {msg.role === 'ai' && typeof msg.id === 'string' && currentChatId && (
-                                                <MessageFeedback messageId={msg.id} chatId={currentChatId} />
+                                                <MessageFeedback
+                                                    messageId={msg.id}
+                                                    chatId={currentChatId}
+                                                    initialIsPositive={msg.feedback?.is_positive ?? null}
+                                                    betaMode={isBetaTester}
+                                                    autoOpen={pendingBetaFeedbackId === msg.id}
+                                                    onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
+                                                />
                                             )}
                                         </div>
                                     </motion.div>

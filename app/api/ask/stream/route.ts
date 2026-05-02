@@ -45,14 +45,14 @@ export async function POST(request: Request) {
 
   const { data: profile } = await admin()
     .from("profiles")
-    .select("subscription_tier, role, sub_role, segment, ai_personal_prompt, response_length_pref, response_lang_style, browser_fingerprint, requests_this_month, monthly_limit, bonus_requests")
+    .select("subscription_tier, is_beta_tester, role, sub_role, segment, ai_personal_prompt, response_length_pref, response_lang_style, browser_fingerprint, requests_this_month, monthly_limit, bonus_requests")
     .eq("id", user.id)
     .single()
 
   // Fingerprint abuse guard: for free users, find the oldest OTHER FREE account
   // with the same browser_fingerprint. Paid accounts are ignored — a user who
   // upgraded should not penalise a genuinely new free user on the same device.
-  if ((profile?.subscription_tier ?? "free") === "free" && profile?.browser_fingerprint) {
+  if (!profile?.is_beta_tester && (profile?.subscription_tier ?? "free") === "free" && profile?.browser_fingerprint) {
     const { data: oldestFreeSibling } = await admin()
       .from("profiles")
       .select("requests_this_month, monthly_limit, bonus_requests")
@@ -81,8 +81,10 @@ export async function POST(request: Request) {
     segment:  profile.segment  ?? [],
   } : null
 
-  if (profile?.subscription_tier) {
-    const planId = profile.subscription_tier
+  const effectivePlanId = profile?.is_beta_tester ? "pro" : profile?.subscription_tier
+
+  if (effectivePlanId) {
+    const planId = effectivePlanId
 
     const { data: plan } = await admin()
       .from("subscription_plans")
@@ -112,7 +114,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const tier = profile?.subscription_tier ?? "free"
+  const tier = profile?.is_beta_tester ? "pro" : (profile?.subscription_tier ?? "free")
   const isBasicPlus = tier !== "free"
   const isProPlus   = tier === "pro"
 

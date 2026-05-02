@@ -2384,7 +2384,7 @@ async def get_users(
         sort_dir = "desc"
 
     select_cols = (
-        "id,email,full_name,avatar_url,subscription_tier,"
+        "id,email,full_name,avatar_url,subscription_tier,is_beta_tester,"
         "is_onboarded,email_confirmed,trial_used,"
         "last_active_at,last_city,last_country,last_country_code,"
         "auth_provider,requests_this_month,monthly_limit,"
@@ -5208,6 +5208,9 @@ def _do_pipeline(session_id: str) -> None:
 
     try:
         _pipeline_stop.clear()
+        # Clear all per-source stop events from a previous stop press
+        for _evt in _v2_scrape_stop.values():
+            _evt.clear()
         _pipeline_log(f"🚀 Пайплайн розпочато: {session_id[:8]}", "info")
 
         # ── Step 1: Scrape (force=False → skip existing OK files) ──────────────
@@ -5349,6 +5352,9 @@ async def pipeline_stop_route():
         if not _sync["pipeline"]["running"]:
             raise HTTPException(400, "Пайплайн не виконується")
         _pipeline_stop.set()
+        # Also signal all per-source scrape stop events so the active scraper exits
+        for _evt in _v2_scrape_stop.values():
+            _evt.set()
         _sync["pipeline"]["pause_requested"] = True
     return {"ok": True}
 

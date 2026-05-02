@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ThumbsUp, ThumbsDown, X, Send } from "lucide-react"
 import { AudioRecorderButton } from "./AudioRecorderButton"
 
@@ -12,17 +12,29 @@ const TAGS: Record<"positive" | "negative", string[]> = {
 interface Props {
   messageId: string
   chatId:    string
+  initialIsPositive?: boolean | null
+  betaMode?: boolean
+  autoOpen?: boolean
+  onSubmitted?: () => void
 }
 
 type Vote = "positive" | "negative"
 
-export function MessageFeedback({ messageId, chatId }: Props) {
-  const [vote, setVote]             = useState<Vote | null>(null)
+export function MessageFeedback({ messageId, chatId, initialIsPositive = null, betaMode = false, autoOpen = false, onSubmitted }: Props) {
+  const initialVote = initialIsPositive === null ? null : initialIsPositive ? "positive" : "negative"
+  const [vote, setVote]             = useState<Vote | null>(initialVote)
   const [showModal, setShowModal]   = useState(false)
   const [selectedTags, setTags]     = useState<string[]>([])
   const [text, setText]             = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted]   = useState(false)
+  const [submitted, setSubmitted]   = useState(initialIsPositive !== null)
+  const autoOpenedRef = useRef(false)
+
+  useEffect(() => {
+    if (!autoOpen || submitted || autoOpenedRef.current) return
+    autoOpenedRef.current = true
+    setShowModal(true)
+  }, [autoOpen, submitted])
 
   const openModal = (v: Vote) => {
     setVote(v)
@@ -37,7 +49,7 @@ export function MessageFeedback({ messageId, chatId }: Props) {
     setTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
 
   const handleSubmit = async () => {
-    if (submitting) return
+    if (submitting || !vote) return
     setSubmitting(true)
     try {
       await fetch("/api/feedback/message", {
@@ -52,6 +64,7 @@ export function MessageFeedback({ messageId, chatId }: Props) {
         }),
       })
       setSubmitted(true)
+      onSubmitted?.()
       setTimeout(() => setShowModal(false), 1200)
     } finally {
       setSubmitting(false)
@@ -91,6 +104,9 @@ export function MessageFeedback({ messageId, chatId }: Props) {
         {submitted && (
           <span className="text-[10px] text-[#E0E6ED]/40 ml-1">Дякуємо!</span>
         )}
+        {betaMode && !submitted && (
+          <span className="text-[10px] text-[#C9A84C]/50 ml-1 font-medium">бета-відгук</span>
+        )}
       </div>
 
       {/* Modal */}
@@ -111,7 +127,9 @@ export function MessageFeedback({ messageId, chatId }: Props) {
                   <p className="text-sm font-semibold text-[#E0E6ED]">
                     {vote === "positive" ? "Що сподобалось?" : "Що покращити?"}
                   </p>
-                  <p className="text-xs text-[#E0E6ED]/40">Ваш відгук зробить URAI кращим</p>
+                  <p className="text-xs text-[#E0E6ED]/40">
+                    {betaMode ? "Бета-тестування URAI — ваш відгук важливий" : "Ваш відгук зробить URAI кращим"}
+                  </p>
                 </div>
               </div>
               <button onClick={closeModal} className="text-[#E0E6ED]/40 hover:text-[#E0E6ED] transition-colors">
