@@ -140,7 +140,7 @@ function RestartBadge({ type }: { type: "none" | "cache" | "restart" | "rescrape
   }
   const c = configs[type]
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-wider ${c.color}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[12px] font-black uppercase tracking-wider ${c.color}`}>
       ↻ {c.label}
     </span>
   )
@@ -418,7 +418,7 @@ export default function AiSettingsPage() {
           </Button>
           <Button
             size="sm" onClick={handleSave} disabled={saving}
-            className="gap-2 h-9 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#C9A84C]/10 disabled:opacity-40"
+            className="gap-2 h-9 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[12px] shadow-lg shadow-[#C9A84C]/10 disabled:opacity-40"
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             Зберегти
@@ -430,7 +430,7 @@ export default function AiSettingsPage() {
 
         {/* Service Account */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Google Vertex AI — Service Account</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Google Vertex AI — Service Account</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
             <ServiceAccountUploader
               saInfo={saInfo}
@@ -444,7 +444,7 @@ export default function AiSettingsPage() {
 
         {/* Restart info banner */}
         <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 text-[11px] text-[#E0E6ED]/50 space-y-2">
-          <p className="font-black uppercase tracking-wider text-[10px] text-[#C9A84C]/60">Коли що потрібно після змін:</p>
+          <p className="font-black uppercase tracking-wider text-[12px] text-[#C9A84C]/60">Коли що потрібно після змін:</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div className="flex items-start gap-2">
               <span className="text-emerald-400 font-bold shrink-0">↻ Оновити кеш</span>
@@ -463,7 +463,7 @@ export default function AiSettingsPage() {
 
         {/* Vertex location */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Vertex AI Регіон</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Vertex AI Регіон</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
             <Field
               label="Location"
@@ -488,7 +488,7 @@ export default function AiSettingsPage() {
 
         {/* Models */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Моделі</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Моделі</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-5">
             <Field
               label="AI Модель (генерація відповідей)"
@@ -527,7 +527,7 @@ export default function AiSettingsPage() {
 
         {/* Generation params */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри генерації</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри генерації</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-6">
             <Field
               label="Temperature"
@@ -558,7 +558,7 @@ export default function AiSettingsPage() {
 
         {/* Search params */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри пошуку в базі знань</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Параметри пошуку в базі знань</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-6">
             <Field
               label="Поріг відповідності документів (match_threshold_docs)"
@@ -613,7 +613,7 @@ export default function AiSettingsPage() {
 
         {/* Review prompts */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Відгуки користувачів</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Відгуки користувачів</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <Field
@@ -646,7 +646,7 @@ export default function AiSettingsPage() {
 
         {/* System prompt */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Системний промпт</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Системний промпт</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-4">
             <Field
               label="Системний промпт"
@@ -668,7 +668,7 @@ export default function AiSettingsPage() {
 
         {/* Rewrite examples */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Query Rewrite — приклади переформулювань</h2>
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">Query Rewrite — приклади переформулювань</h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-4">
             <Field
               label="Few-shot приклади"

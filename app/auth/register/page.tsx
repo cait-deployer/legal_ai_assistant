@@ -171,7 +171,7 @@ function RegisterForm() {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="fullName" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Повне ім&apos;я</Label>
+          <Label htmlFor="fullName" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Повне ім&apos;я</Label>
           <Input
             id="fullName"
             type="text"
@@ -186,7 +186,7 @@ function RegisterForm() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
+          <Label htmlFor="email" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
           <Input
             id="email"
             type="email"
@@ -200,7 +200,7 @@ function RegisterForm() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
+          <Label htmlFor="password" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
           <div className="relative">
             <Input
               id="password"
@@ -238,7 +238,7 @@ function RegisterForm() {
                   />
                 ))}
               </div>
-              <span className={`text-[10px] font-black uppercase tracking-wider ${passwordStrength === "weak" ? "text-red-400" :
+              <span className={`text-[12px] font-black uppercase tracking-wider ${passwordStrength === "weak" ? "text-red-400" :
                 passwordStrength === "medium" ? "text-amber-400" : "text-emerald-400"
                 }`}>
                 {passwordStrength === "weak" ? "Слабкий" : passwordStrength === "medium" ? "Середній" : "Надійний"}
@@ -267,7 +267,7 @@ function RegisterForm() {
         </Link>
       </p>
 
-      <p className="text-center text-[10px] text-white/25 mt-4 leading-relaxed">
+      <p className="text-center text-[12px] text-white/25 mt-4 leading-relaxed">
         Реєструючись, ви погоджуєтесь із{" "}
         <Link href="/terms" className="text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors underline-offset-2 hover:underline">
           Умовами користування

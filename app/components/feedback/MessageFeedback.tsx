@@ -11,7 +11,7 @@ const TAGS: Record<"positive" | "negative", string[]> = {
 
 interface Props {
   messageId: string
-  chatId:    string
+  chatId: string
   initialIsPositive?: boolean | null
   betaMode?: boolean
   autoOpen?: boolean
@@ -24,12 +24,12 @@ type Vote = "positive" | "negative"
 
 export function MessageFeedback({ messageId, chatId, initialIsPositive = null, betaMode = false, autoOpen = false, onSubmitted, showReviewButton = false, onReviewOpen }: Props) {
   const initialVote = initialIsPositive === null ? null : initialIsPositive ? "positive" : "negative"
-  const [vote, setVote]             = useState<Vote | null>(initialVote)
-  const [showModal, setShowModal]   = useState(false)
-  const [selectedTags, setTags]     = useState<string[]>([])
-  const [text, setText]             = useState("")
+  const [vote, setVote] = useState<Vote | null>(initialVote)
+  const [showModal, setShowModal] = useState(false)
+  const [selectedTags, setTags] = useState<string[]>([])
+  const [text, setText] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted]   = useState(initialIsPositive !== null)
+  const [submitted, setSubmitted] = useState(initialIsPositive !== null)
   const autoOpenedRef = useRef(false)
 
   useEffect(() => {
@@ -58,10 +58,10 @@ export function MessageFeedback({ messageId, chatId, initialIsPositive = null, b
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message_id:   messageId,
-          chat_id:      chatId,
-          is_positive:  vote === "positive",
-          tags:         selectedTags,
+          message_id: messageId,
+          chat_id: chatId,
+          is_positive: vote === "positive",
+          tags: selectedTags,
           feedback_text: text.trim() || null,
         }),
       })
@@ -104,16 +104,16 @@ export function MessageFeedback({ messageId, chatId, initialIsPositive = null, b
           <ThumbsDown className="w-3.5 h-3.5" />
         </button>
         {submitted && (
-          <span className="text-[10px] text-[#E0E6ED]/40 ml-1">Дякуємо!</span>
+          <span className="text-[12px] text-[#E0E6ED]/40 ml-1">Дякуємо!</span>
         )}
         {betaMode && !submitted && (
-          <span className="text-[10px] text-[#C9A84C]/50 ml-1 font-medium">бета-відгук</span>
+          <span className="text-[12px] text-[#C9A84C]/50 ml-1 font-medium">бета-відгук</span>
         )}
         {showReviewButton && onReviewOpen && (
           <button
             onClick={onReviewOpen}
             title="Оцінити URAI"
-            className="flex items-center gap-1 ml-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/25 hover:bg-[#C9A84C]/20 hover:border-[#C9A84C]/50 transition-all"
+            className="flex items-center gap-1 ml-1 px-2 py-1 rounded-lg text-[12px] font-semibold text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/25 hover:bg-[#C9A84C]/20 hover:border-[#C9A84C]/50 transition-all"
           >
             <Star className="w-3 h-3 fill-[#C9A84C]" />
             Оцінити

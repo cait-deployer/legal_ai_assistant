@@ -125,7 +125,7 @@ function OnboardingContent() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tour_completed: false }),
-      }).catch(() => {})
+      }).catch(() => { })
 
       // Генеруємо персональний AI-промпт у фоні (не блокуємо редирект)
       fetch("/api/user/generate-prompt", {
@@ -136,7 +136,7 @@ function OnboardingContent() {
           sub_role: selections.sub_roles ?? [],
           segment: selections.segments ?? [],
         }),
-      }).catch(() => {})
+      }).catch(() => { })
 
       // Record IP / geo / UA / fingerprint after onboarding (works for Google + email)
       fetch("/api/auth/login-event", {
@@ -145,7 +145,7 @@ function OnboardingContent() {
         body: JSON.stringify({
           fingerprint: btoa(`${navigator.userAgent}-${screen.width}x${screen.height}`).slice(0, 64),
         }),
-      }).catch(() => {})
+      }).catch(() => { })
 
       window.location.href = "/"
     } catch (err) {
@@ -188,11 +188,11 @@ function OnboardingContent() {
           return (
             <div key={s.step_key} className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all duration-300 ${done ? "bg-[#C9A84C] text-[#0A0E1A]" : active ? "bg-[#C9A84C]/20 border border-[#C9A84C]/50 text-[#C9A84C]" : "bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/30"
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[12px] font-black transition-all duration-300 ${done ? "bg-[#C9A84C] text-[#0A0E1A]" : active ? "bg-[#C9A84C]/20 border border-[#C9A84C]/50 text-[#C9A84C]" : "bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/30"
                   }`}>
                   {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
                 </div>
-                <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${active ? "text-[#C9A84C]" : done ? "text-[#C9A84C]/60" : "text-[#C9A84C]/20"
+                <span className={`text-[12px] font-black uppercase tracking-wider transition-colors ${active ? "text-[#C9A84C]" : done ? "text-[#C9A84C]/60" : "text-[#C9A84C]/20"
                   }`}>
                   {s.step_key === 'segments' ? 'Сфера' : s.step_key === 'roles' ? 'Роль' : 'Спеціалізація'}
                 </span>
@@ -208,7 +208,7 @@ function OnboardingContent() {
       {/* ── Card (Твій оригінальний стиль) ── */}
       <div className="bg-[#0d1120]/80 backdrop-blur-xl border border-[#C9A84C]/20 rounded-[2.5rem] shadow-2xl p-7">
         <div className="mb-5">
-          <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] mb-1">Крок {currentStepIdx + 1} з {steps.length}</p>
+          <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] mb-1">Крок {currentStepIdx + 1} з {steps.length}</p>
           <h2 className="text-lg font-serif font-bold text-white">{currentStep.title}</h2>
           <p className="text-sm text-[#E0E6ED]/50 mt-0.5">{currentStep.subtitle}</p>
         </div>
@@ -226,8 +226,8 @@ function OnboardingContent() {
                 key={opt.id}
                 onClick={() => handleSelect(opt.value)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-2xl border text-left transition-all duration-150 ${isSelected
-                    ? "border-[#C9A84C]/50 bg-[#C9A84C]/8 ring-1 ring-[#C9A84C]/20"
-                    : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5"
+                  ? "border-[#C9A84C]/50 bg-[#C9A84C]/8 ring-1 ring-[#C9A84C]/20"
+                  : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30 hover:bg-[#C9A84C]/5"
                   }`}
               >
                 {opt.icon && (
@@ -288,7 +288,7 @@ function OnboardingContent() {
         </div>
       </div>
 
-      <p className="text-center mt-6 text-[10px] font-black text-[#C9A84C]/30 uppercase tracking-[0.2em]">
+      <p className="text-center mt-6 text-[12px] font-black text-[#C9A84C]/30 uppercase tracking-[0.2em]">
         URAI · Юридичний асистент України
       </p>
     </div>

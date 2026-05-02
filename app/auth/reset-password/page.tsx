@@ -128,7 +128,7 @@ function ResetPasswordForm() {
         </AnimatePresence>
 
         <div className="space-y-2">
-          <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] ml-1">Придумайте пароль</Label>
+          <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] ml-1">Придумайте пароль</Label>
           <div className="relative group">
             <Input
               type={showPassword ? "text" : "password"}
@@ -150,7 +150,7 @@ function ResetPasswordForm() {
         </div>
 
         <div className="space-y-2">
-          <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] ml-1">Повторіть пароль</Label>
+          <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] ml-1">Повторіть пароль</Label>
           <Input
             type={showPassword ? "text" : "password"}
             placeholder="Введіть ще раз"
@@ -173,7 +173,7 @@ function ResetPasswordForm() {
       </form>
 
       <div className="mt-8 pt-6 border-t border-[#C9A84C]/10 text-center">
-        <Link href="/auth/login" className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2">
+        <Link href="/auth/login" className="text-[12px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2">
           <ArrowLeft size={14} /> ПОВЕРНУТИСЯ ДО ВХОДУ
         </Link>
       </div>

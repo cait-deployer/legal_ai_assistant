@@ -42,7 +42,7 @@ export function PricingSection() {
     fetch("/api/plans")
       .then(r => r.json())
       .then(setPlans)
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false))
   }, [])
 
@@ -52,7 +52,7 @@ export function PricingSection() {
     return { price: `${plan.price_uah} грн`, period: "/ місяць" }
   }
 
-return (
+  return (
     <section id="pricing" className="py-24 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-14">
@@ -89,19 +89,17 @@ return (
                 <div
                   key={plan.id}
                   /* Додано flex-col та h-full для однакової висоти */
-                  className={`relative flex flex-col h-full rounded-2xl border transition-all duration-300 ${
-                    isHighlight
+                  className={`relative flex flex-col h-full rounded-2xl border transition-all duration-300 ${isHighlight
                       ? "border-[#C9A84C] bg-[#13192B] shadow-2xl shadow-[#C9A84C]/15 ring-1 ring-[#C9A84C]/30 z-10"
                       : "bg-[#12192b] border-[#C9A84C]/25 hover:border-[#C9A84C]/50 hover:shadow-lg hover:shadow-[#C9A84C]/5"
-                  }`}
+                    }`}
                 >
                   {plan.badge_text && (
                     <div
-                      className={`absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-bold whitespace-nowrap z-20 ${
-                        plan.badge_color === "gold"
+                      className={`absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-bold whitespace-nowrap z-20 ${plan.badge_color === "gold"
                           ? "bg-[#C9A84C] text-[#0A0E1A]"
                           : "bg-[#1a2236] text-[#C9A84C] border border-[#C9A84C]/30"
-                      }`}
+                        }`}
                     >
                       {plan.badge_color !== "gold" && <span className="mr-1">◆</span>}
                       {plan.badge_text}
@@ -149,11 +147,10 @@ return (
                   <div className="space-y-3 border-t border-[#C9A84C]/25 px-6 pt-4 pb-6 mt-auto">
                     {plan.main_benefit && (
                       <div
-                        className={`text-xs italic px-3 py-2.5 rounded-lg leading-tight ${
-                          isHighlight
+                        className={`text-xs italic px-3 py-2.5 rounded-lg leading-tight ${isHighlight
                             ? "text-[#E2C47A] bg-[#C9A84C]/10 border border-[#C9A84C]/20"
                             : "text-[#C9A84C] bg-[#C9A84C]/5 border border-[#C9A84C]/15"
-                        }`}
+                          }`}
                       >
                         → {plan.main_benefit}
                       </div>
@@ -161,17 +158,16 @@ return (
 
                     <Link
                       href="/chat"
-                      className={`w-full inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${
-                        isHighlight
+                      className={`w-full inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${isHighlight
                           ? "bg-[#C9A84C] text-[#0A0E1A] hover:bg-[#E2C47A] shadow-lg shadow-[#C9A84C]/25"
                           : "bg-white/[0.08] border border-[#C9A84C]/25 text-[#E0E6ED] hover:bg-[#C9A84C]/10 hover:border-[#C9A84C]"
-                      }`}
+                        }`}
                     >
                       {plan.button_text ?? "Почати"}
                     </Link>
 
                     {plan.note_text && (
-                      <p className="text-center text-white/45 text-[10px] min-h-[1em]">{plan.note_text}</p>
+                      <p className="text-center text-white/45 text-[12px] min-h-[1em]">{plan.note_text}</p>
                     )}
                   </div>
                 </div>

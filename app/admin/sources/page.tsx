@@ -142,7 +142,7 @@ export default function SourcesPage() {
       <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Джерела</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">Що ми скрапимо і навіщо</p>
+          <p className="text-xs sm:text-sm text-gray-400 mt-1">Що ми скрапимо і навіщо</p>
         </div>
 
         {/* Header stats */}
@@ -151,7 +151,7 @@ export default function SourcesPage() {
             База знань URAI складається з 8 джерел. Кожне джерело — окремий тип юридичної інформації
             з власним скрапером, форматом зберігання і колекцією Qdrant.
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-500">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-400">
             <div><span className="text-[#C9A84C] font-bold">~40 000+</span> документів загалом</div>
             <div><span className="text-[#C9A84C] font-bold">8</span> джерел скрапінгу</div>
             <div><span className="text-[#C9A84C] font-bold">20</span> колекцій Qdrant v2</div>
@@ -184,16 +184,16 @@ export default function SourcesPage() {
 
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Що містить</div>
+                  <div className="text-[12px] font-bold text-gray-400 uppercase tracking-wider">Що містить</div>
                   <p className="text-xs text-[#E0E6ED]/80 leading-relaxed">{src.what}</p>
                 </div>
                 <div className="space-y-1">
-                  <div className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider">Навіщо боту</div>
+                  <div className="text-[12px] font-bold text-amber-500/70 uppercase tracking-wider">Навіщо боту</div>
                   <p className="text-xs text-[#E0E6ED]/80 leading-relaxed">{src.why}</p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 border-t border-white/5 pt-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-400 border-t border-white/5 pt-3">
                 <span>Чанк: <b className="text-gray-400">{src.chunks}</b></span>
                 <span>Truncate: <b className="text-gray-400">{src.truncate}</b></span>
                 <span>Splitter: <b className="text-gray-400">{src.splitter}</b></span>
@@ -221,7 +221,7 @@ export default function SourcesPage() {
               </div>
             ))}
           </div>
-          <div className="text-xs text-gray-600 border-t border-[#C9A84C]/10 pt-3">
+          <div className="text-xs text-gray-400 border-t border-[#C9A84C]/10 pt-3">
             Правило: завжди спочатку скрапінг, потім реіндекс. Реіндекс читає файли один раз на старті — нові файли після запуску не підхоплюються.
           </div>
         </div>

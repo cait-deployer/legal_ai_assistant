@@ -114,30 +114,30 @@ type SourceState = {
 function StatusBadge({ status }: { status: string }) {
   if (status === "success")
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
         <CheckCircle className="w-3 h-3" /> Успішно
       </span>
     )
   if (status === "error")
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
         <XCircle className="w-3 h-3" /> Помилка
       </span>
     )
   if (status === "running")
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
         <Loader2 className="w-3 h-3 animate-spin" /> Виконується
       </span>
     )
   if (status === "paused")
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
         <Pause className="w-3 h-3" /> Призупинено
       </span>
     )
   return (
-    <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/70 shrink-0">
+    <span className="inline-flex items-center text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/70 shrink-0">
       {status}
     </span>
   )
@@ -210,7 +210,7 @@ function SourceBadge({ source }: { source?: string }) {
   const info = SOURCE_LABELS[source ?? ""]
   if (!info) return <span className="text-[#E0E6ED]/30 text-xs">—</span>
   return (
-    <span className={`text-[10px] font-black uppercase tracking-wider ${info.color}`}>
+    <span className={`text-[12px] font-black uppercase tracking-wider ${info.color}`}>
       {info.label}
     </span>
   )
@@ -329,18 +329,18 @@ function QdrantMapModal({ onClose }: { onClose: () => void }) {
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
           {/* Rada collections */}
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60 mb-3 flex items-center gap-2">
+            <p className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60 mb-3 flex items-center gap-2">
               <Database className="w-3.5 h-3.5" /> РАДА (13 колекцій)
             </p>
             <div className="space-y-2">
               {QDRANT_MAP.map(({ col, label, color, sections }) => (
                 <div key={col} className="flex gap-3 items-start">
-                  <span className={`shrink-0 mt-0.5 inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold min-w-[110px] justify-center ${color}`}>
+                  <span className={`shrink-0 mt-0.5 inline-flex items-center px-2.5 py-1 rounded-full border text-[12px] font-bold min-w-[110px] justify-center ${color}`}>
                     {label}
                   </span>
                   <div className="flex flex-wrap gap-1.5 pt-0.5">
                     {sections.map(s => (
-                      <span key={s.code} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[10px] text-[#E0E6ED]/70">
+                      <span key={s.code} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[12px] text-[#E0E6ED]/70">
                         <span className="font-mono text-[#C9A84C]/50">{s.code}</span>
                         {s.name}
                       </span>
@@ -353,13 +353,13 @@ function QdrantMapModal({ onClose }: { onClose: () => void }) {
 
           {/* Other collections */}
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60 mb-3 flex items-center gap-2">
+            <p className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60 mb-3 flex items-center gap-2">
               <BookOpen className="w-3.5 h-3.5" /> Інші джерела (3 колекції)
             </p>
             <div className="space-y-2">
               {OTHER_COLLECTIONS.map(({ col, label, color, desc }) => (
                 <div key={col} className="flex gap-3 items-center">
-                  <span className={`shrink-0 inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold min-w-[110px] justify-center ${color}`}>
+                  <span className={`shrink-0 inline-flex items-center px-2.5 py-1 rounded-full border text-[12px] font-bold min-w-[110px] justify-center ${color}`}>
                     {label}
                   </span>
                   <span className="text-xs text-[#E0E6ED]/50">{col}</span>
@@ -516,12 +516,12 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
   return (
     <div
       className={`bg-[#0d1120]/60 border rounded-2xl transition-all duration-200 ${state.running
-          ? state.pause_requested
-            ? "border-blue-500/30"
-            : "border-amber-500/30"
-          : state.can_resume
-            ? "border-blue-500/20"
-            : "border-[#C9A84C]/10 hover:border-[#C9A84C]/20"
+        ? state.pause_requested
+          ? "border-blue-500/30"
+          : "border-amber-500/30"
+        : state.can_resume
+          ? "border-blue-500/20"
+          : "border-[#C9A84C]/10 hover:border-[#C9A84C]/20"
         }`}
     >
       <div className="p-5">
@@ -540,12 +540,12 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             {/* Status badge */}
             {state.running && state.pause_requested && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+              <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
                 <Loader2 className="w-3 h-3 animate-spin" /> Зупиняємось...
               </span>
             )}
             {state.running && !state.pause_requested && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
                 <Loader2 className="w-3 h-3 animate-spin" /> Виконується
               </span>
             )}
@@ -579,7 +579,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
               size="sm"
               onClick={openRunModal}
               disabled={state.running}
-              className="gap-1.5 h-9 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[10px] shadow-lg shadow-[#C9A84C]/10 disabled:opacity-40"
+              className="gap-1.5 h-9 rounded-xl bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] font-black uppercase tracking-wider text-[12px] shadow-lg shadow-[#C9A84C]/10 disabled:opacity-40"
             >
               {state.running ? (
                 <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Йде...</>
@@ -598,10 +598,10 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
         {source.supportsPause && state.can_resume && state.resume_progress && (
           <div className="mt-3 p-3 bg-blue-500/5 border border-blue-500/15 rounded-xl">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-black text-blue-400 uppercase tracking-wider">
+              <span className="text-[12px] font-black text-blue-400 uppercase tracking-wider">
                 Збережений прогрес
               </span>
-              <span className="text-[10px] font-mono text-blue-400">
+              <span className="text-[12px] font-mono text-blue-400">
                 {state.resume_progress.next_index} / {state.resume_progress.total} законів
               </span>
             </div>
@@ -615,7 +615,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                 }}
               />
             </div>
-            <p className="text-[10px] text-[#E0E6ED]/50 mt-1.5">
+            <p className="text-[12px] text-[#E0E6ED]/50 mt-1.5">
               Натисніть «Відновити» щоб продовжити з місця зупинки,
               або «З початку» щоб почати заново.
             </p>
@@ -647,7 +647,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
             </div>
             {/* Legend */}
             <div className="px-6 py-2 border-b border-[#C9A84C]/10 shrink-0">
-              <p className="text-[10px] text-[#E0E6ED]/30 mb-1.5 font-black uppercase tracking-wider flex items-center gap-1.5">
+              <p className="text-[12px] text-[#E0E6ED]/30 mb-1.5 font-black uppercase tracking-wider flex items-center gap-1.5">
                 <Map className="w-3 h-3" /> Розділ → Qdrant колекція
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -658,7 +658,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                   rada_housing: "Житлове", rada_land: "Земельне", rada_industry: "Бізнес",
                   rada_other: "Інше",
                 }).map(([col, label]) => (
-                  <span key={col} className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-bold ${COLLECTION_COLOR[col]}`}>
+                  <span key={col} className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[12px] font-bold ${COLLECTION_COLOR[col]}`}>
                     {label}
                   </span>
                 ))}
@@ -678,7 +678,7 @@ function SourceCard({ source }: { source: typeof SOURCES[0] }) {
                     return (
                       <label key={t.code} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border cursor-pointer transition-all ${selectedCodes.has(t.code) ? "border-[#C9A84C]/50 bg-[#C9A84C]/5" : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"}`}>
                         <input type="checkbox" checked={selectedCodes.has(t.code)} onChange={() => toggleTheme(t.code)} className="accent-[#C9A84C] shrink-0" />
-                        <span className="font-mono text-[10px] text-[#C9A84C]/40 shrink-0 w-7">{t.code}</span>
+                        <span className="font-mono text-[12px] text-[#C9A84C]/40 shrink-0 w-7">{t.code}</span>
                         <span className="text-xs text-[#E0E6ED]/80 leading-tight flex-1 min-w-0">{t.label}</span>
                         <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full border text-[9px] font-bold ${colColor}`}>
                           {colLabel}
@@ -789,7 +789,7 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-y-auto py-6 space-y-8">
         {/* Sources */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">
             Джерела даних
           </h2>
           <div className="space-y-3">
@@ -802,15 +802,15 @@ export default function SettingsPage() {
         {/* Sync analytics panel */}
         {syncStats && (
           <section>
-            <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">
+            <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">
               Аналітика
             </h2>
             <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 space-y-4">
               {/* Alerts */}
               {syncStats.alerts.map((a, i) => (
                 <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm ${a.level === "error" ? "bg-red-500/10 border-red-500/20 text-red-400"
-                    : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                      : "bg-[#C9A84C]/5 border-[#C9A84C]/15 text-[#C9A84C]/80"
+                  : a.level === "warning" ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                    : "bg-[#C9A84C]/5 border-[#C9A84C]/15 text-[#C9A84C]/80"
                   }`}>
                   {a.level === "error" && <XCircle className="w-4 h-4 shrink-0" />}
                   {a.level === "warning" && <AlertTriangle className="w-4 h-4 shrink-0" />}
@@ -822,47 +822,47 @@ export default function SettingsPage() {
               {/* Stats row */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-[#0A0E1A]/60 rounded-xl px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
+                  <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3" /> Надійність / 30 дн
                   </p>
                   <p className={`text-xl font-bold mt-1 ${syncStats.reliability_30d.pct == null ? "text-[#E0E6ED]/30"
-                      : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
-                        : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
-                          : "text-red-400"
+                    : syncStats.reliability_30d.pct >= 80 ? "text-emerald-400"
+                      : syncStats.reliability_30d.pct >= 50 ? "text-amber-400"
+                        : "text-red-400"
                     }`}>
                     {syncStats.reliability_30d.pct != null ? `${syncStats.reliability_30d.pct}%` : "—"}
                   </p>
-                  <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+                  <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">
                     {syncStats.reliability_30d.success} з {syncStats.reliability_30d.total} запусків
                   </p>
                 </div>
                 <div className="bg-[#0A0E1A]/60 rounded-xl px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
+                  <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                     <CheckCircle className="w-3 h-3" /> Законів додано
                   </p>
                   <p className="text-xl font-bold mt-1 text-white">
                     {syncStats.laws_30d.toLocaleString("uk-UA")}
                   </p>
-                  <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">{syncStats.laws_7d} за 7 днів</p>
+                  <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">{syncStats.laws_7d} за 7 днів</p>
                 </div>
                 <div className="bg-[#0A0E1A]/60 rounded-xl px-4 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
+                  <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50 flex items-center gap-1">
                     <Timer className="w-3 h-3" /> Сер. тривалість
                   </p>
                   <p className="text-xl font-bold mt-1 text-white">{fmtDuration(syncStats.avg_duration_sec)}</p>
-                  <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">успішних запусків</p>
+                  <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">успішних запусків</p>
                 </div>
               </div>
 
               {/* Sparkline */}
               {syncStats.last_14_runs.length > 0 && (
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/40 mb-2">
+                  <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/40 mb-2">
                     Останні {syncStats.last_14_runs.length} запусків
                     <span className="ml-2 font-normal normal-case text-[#E0E6ED]/30">· висота = кількість законів</span>
                   </p>
                   <MiniSparkline runs={syncStats.last_14_runs} />
-                  <div className="flex items-center gap-4 mt-2 text-[10px] text-[#E0E6ED]/40">
+                  <div className="flex items-center gap-4 mt-2 text-[12px] text-[#E0E6ED]/40">
                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" /> успіх</span>
                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" /> помилка</span>
                     <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400 inline-block" /> призупинено</span>
@@ -875,14 +875,14 @@ export default function SettingsPage() {
 
         {/* History */}
         <section>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">
+          <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4">
             Історія синхронізацій
           </h2>
           <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#C9A84C]/10">
               <p className="text-sm text-[#E0E6ED]/70">Останні 20 запусків</p>
               {lastUpdated && (
-                <span className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest">
+                <span className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-widest">
                   {lastUpdated.toLocaleTimeString()}
                 </span>
               )}
@@ -903,12 +903,12 @@ export default function SettingsPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#C9A84C]/10 bg-[#0A0E1A]/40">
-                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-20 hidden sm:table-cell">Джерело</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-32">Статус</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Початок</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Кінець</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-24">Законів</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden md:table-cell">Повідомлення</th>
+                        <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-20 hidden sm:table-cell">Джерело</th>
+                        <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-32">Статус</th>
+                        <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Початок</th>
+                        <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Кінець</th>
+                        <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-24">Законів</th>
+                        <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden md:table-cell">Повідомлення</th>
                       </tr>
                     </thead>
                     <tbody>

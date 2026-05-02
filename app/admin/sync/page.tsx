@@ -23,8 +23,8 @@ type ReindexSourceStatus = {
   live_logs: LogEntry[]
 }
 
-type DiskSource   = { files: number; size_mb: number }
-type SyncStatus   = {
+type DiskSource = { files: number; size_mb: number }
+type SyncStatus = {
   schedule_hour: number
   sources: Record<string, { enabled: boolean; running: boolean; last_sync: string | null }>
   pipeline_enabled: boolean
@@ -46,31 +46,31 @@ const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "z
 type Source = typeof SOURCES[number]
 
 const SRC: Record<Source, { label: string; expected: number; note?: string }> = {
-  rada:      { label: "Верховна Рада",       expected: 15500 },
-  kmu:       { label: "Кабінет Міністрів",   expected: 10000 },
-  ccu:       { label: "Конституційний суд",  expected: 500   },
-  supreme:   { label: "Верховний суд",       expected: 1000  },
-  wiki:      { label: "Legal Aid Wiki",      expected: 3000  },
-  positions: { label: "Правові позиції ВС",  expected: 12800 },
-  mod:       { label: "МОУ (PDF)",           expected: 210, note: "Playwright + OCR, ~30хв" },
-  zir:       { label: "ЗІР ДПС",            expected: 5900  },
+  rada: { label: "Верховна Рада", expected: 15500 },
+  kmu: { label: "Кабінет Міністрів", expected: 10000 },
+  ccu: { label: "Конституційний суд", expected: 500 },
+  supreme: { label: "Верховний суд", expected: 1000 },
+  wiki: { label: "Legal Aid Wiki", expected: 3000 },
+  positions: { label: "Правові позиції ВС", expected: 12800 },
+  mod: { label: "МОУ (PDF)", expected: 210, note: "Playwright + OCR, ~30хв" },
+  zir: { label: "ЗІР ДПС", expected: 5900 },
 }
 
 const SRC_COLS: Record<Source, string[]> = {
-  rada:      ["rada_finance_v2","rada_state_v2","rada_personnel_v2","rada_court_v2","rada_intl_v2","rada_labor_v2","rada_civil_v2","rada_criminal_v2","rada_admin_v2","rada_housing_v2","rada_land_v2","rada_industry_v2","rada_other_v2"],
-  kmu:       ["laws_kmu_v2"],
-  ccu:       ["laws_ccu_v2"],
-  supreme:   ["laws_supreme_v2"],
-  wiki:      ["laws_wiki_v2"],
+  rada: ["rada_finance_v2", "rada_state_v2", "rada_personnel_v2", "rada_court_v2", "rada_intl_v2", "rada_labor_v2", "rada_civil_v2", "rada_criminal_v2", "rada_admin_v2", "rada_housing_v2", "rada_land_v2", "rada_industry_v2", "rada_other_v2"],
+  kmu: ["laws_kmu_v2"],
+  ccu: ["laws_ccu_v2"],
+  supreme: ["laws_supreme_v2"],
+  wiki: ["laws_wiki_v2"],
   positions: ["laws_positions_v2"],
-  mod:       ["laws_mod_v2"],
-  zir:       ["laws_zir_v2"],
+  mod: ["laws_mod_v2"],
+  zir: ["laws_zir_v2"],
 }
 
 const LOG_COLOR: Record<string, string> = {
-  error:   "text-red-400",
+  error: "text-red-400",
   warning: "text-amber-400",
-  info:    "text-[#E0E6ED]",
+  info: "text-[#E0E6ED]",
   success: "text-emerald-400",
 }
 
@@ -89,10 +89,10 @@ function StatusDot({ running, canResume }: { running: boolean; canResume: boolea
 }
 
 function StatusLabel({ running, canResume, pauseRequested }: { running: boolean; canResume: boolean; pauseRequested: boolean }) {
-  if (running && pauseRequested) return <span className="text-[10px] text-amber-400">Зупиняється</span>
-  if (running) return <span className="text-[10px] text-emerald-400">Виконується</span>
-  if (canResume) return <span className="text-[10px] text-amber-400">Призупинено</span>
-  return <span className="text-[10px] text-gray-600">Idle</span>
+  if (running && pauseRequested) return <span className="text-[12px] text-amber-400">Зупиняється</span>
+  if (running) return <span className="text-[12px] text-emerald-400">Виконується</span>
+  if (canResume) return <span className="text-[12px] text-amber-400">Призупинено</span>
+  return <span className="text-[12px] text-gray-400">Idle</span>
 }
 
 // ── Log Panel ──────────────────────────────────────────────────────────────────
@@ -127,25 +127,25 @@ function LogPanel({
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
           <span className="text-xs font-mono font-bold text-[#C9A84C] truncate">{title}</span>
-          <span className="text-[10px] text-gray-600 shrink-0">{logs.length} рядків</span>
+          <span className="text-[12px] text-gray-400 shrink-0">{logs.length} рядків</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {canResume && !running && onResume && (
-            <button onClick={onResume} className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded transition-colors">
+            <button onClick={onResume} className="flex items-center gap-1 text-[12px] text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded transition-colors">
               <SkipForward className="w-3 h-3" /> Продовжити
             </button>
           )}
           {running && onStop && (
-            <button onClick={onStop} className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded transition-colors">
+            <button onClick={onStop} className="flex items-center gap-1 text-[12px] text-red-400 hover:text-red-300 bg-red-500/10 border border-red-500/20 px-2.5 py-1.5 rounded transition-colors">
               <Square className="w-3 h-3" /> Зупинити
             </button>
           )}
-          <button onClick={onClose} className="text-[10px] text-gray-600 hover:text-gray-400 px-2.5 py-1.5 rounded hover:bg-white/5 transition-colors">✕</button>
+          <button onClick={onClose} className="text-[12px] text-gray-400 hover:text-gray-400 px-2.5 py-1.5 rounded hover:bg-white/5 transition-colors">✕</button>
         </div>
       </div>
       {/* Logs */}
       <div ref={logsContainerRef} className="h-56 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
-        {logs.length === 0 && <div className="text-gray-600 text-center pt-8">Логів ще немає...</div>}
+        {logs.length === 0 && <div className="text-gray-400 text-center pt-8">Логів ще немає...</div>}
         {logs.map((l, i) => (
           <div key={i} className="flex gap-2">
             <span className="text-gray-700 shrink-0">{l.ts?.slice(11, 19) || ""}</span>
@@ -160,9 +160,9 @@ function LogPanel({
 // ── Centroid widget ────────────────────────────────────────────────────────────
 
 function CentroidWidget({ needsRebuild }: { needsRebuild: boolean }) {
-  const [status, setStatus]         = useState<CentroidInfo | null>(null)
+  const [status, setStatus] = useState<CentroidInfo | null>(null)
   const [rebuilding, setRebuilding] = useState(false)
-  const [error, setError]           = useState("")
+  const [error, setError] = useState("")
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -183,7 +183,7 @@ function CentroidWidget({ needsRebuild }: { needsRebuild: boolean }) {
     setRebuilding(false)
   }
 
-  const isReady    = status?.ready && !status?.building
+  const isReady = status?.ready && !status?.building
   const isBuilding = status?.building
 
   return (
@@ -196,15 +196,15 @@ function CentroidWidget({ needsRebuild }: { needsRebuild: boolean }) {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-bold text-[#E0E6ED]">Centroid Router</span>
-              {isBuilding && <span className="text-[10px] px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">Будується...</span>}
-              {isReady && <span className="text-[10px] px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">● Активний</span>}
-              {needsRebuild && isReady && <span className="text-[10px] px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">⚠ Потрібне перебудування</span>}
+              {isBuilding && <span className="text-[12px] px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">Будується...</span>}
+              {isReady && <span className="text-[12px] px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">● Активний</span>}
+              {needsRebuild && isReady && <span className="text-[12px] px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">⚠ Потрібне перебудування</span>}
             </div>
-            <div className="text-xs text-gray-500 mt-0.5">
+            <div className="text-xs text-gray-400 mt-0.5">
               Семантичний routing → правильні Qdrant колекції для кожного запиту
-              {status?.built_at && <span className="ml-2 text-gray-600">· {fmtTime(status.built_at)} · {status.total_collections} кол.</span>}
+              {status?.built_at && <span className="ml-2 text-gray-400">· {fmtTime(status.built_at)} · {status.total_collections} кол.</span>}
             </div>
-            <div className="text-[10px] text-amber-500/70 mt-1">
+            <div className="text-[12px] text-amber-500/70 mt-1">
               ⚠ Обов&apos;язково перебудувати після кожного реіндексу
             </div>
           </div>
@@ -238,14 +238,14 @@ const SCHEDULE_META: Record<string, string> = {
 }
 
 function ScheduleWidget() {
-  const [status, setStatus]         = useState<SyncStatus | null>(null)
-  const [hour, setHour]             = useState(1)
-  const [sources, setSources]       = useState<Record<string, boolean>>({})
+  const [status, setStatus] = useState<SyncStatus | null>(null)
+  const [hour, setHour] = useState(1)
+  const [sources, setSources] = useState<Record<string, boolean>>({})
   const [pipelineMode, setPipeline] = useState(false)
-  const [isDirty, setIsDirty]       = useState(false)
-  const [saving, setSaving]         = useState(false)
-  const [saved, setSaved]           = useState(false)
-  const [error, setError]           = useState("")
+  const [isDirty, setIsDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState("")
 
   const fetchStatus = useCallback(async (forceOverwrite = false) => {
     try {
@@ -308,7 +308,7 @@ function ScheduleWidget() {
         <div className="flex items-center gap-2">
           <Clock className="w-4 h-4 text-[#C9A84C]" />
           <span className="text-sm font-bold text-[#E0E6ED]">Авто-синхронізація</span>
-          {anyEnabled && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">Активна</span>}
+          {anyEnabled && <span className="text-[12px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">Активна</span>}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => fetchStatus(false)} className="p-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-gray-400 hover:text-[#E0E6ED] transition-colors"><RefreshCw className="w-3 h-3" /></button>
@@ -325,9 +325,9 @@ function ScheduleWidget() {
           <div className="flex items-center gap-2">
             <Layers className="w-3.5 h-3.5 text-emerald-400" />
             <span className="text-xs font-bold text-[#E0E6ED]">Режим пайплайну</span>
-            {pipelineMode && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">Увімкнено</span>}
+            {pipelineMode && <span className="text-[12px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">Увімкнено</span>}
           </div>
-          <div className="text-[10px] text-gray-500 mt-1 leading-relaxed">
+          <div className="text-[12px] text-gray-400 mt-1 leading-relaxed">
             {pipelineMode
               ? "Щодня запускає повний 6-крокований цикл: Скрапінг → Реіндекс нових → Збагачення → Текст. скасування → Застосування → Патч Qdrant"
               : "Вимкнено — щодня запускає тільки скрапінг окремих джерел нижче"}
@@ -362,7 +362,7 @@ function ScheduleWidget() {
             <option key={i} value={i}>{String(i).padStart(2, "0")}:00 UTC</option>
           ))}
         </select>
-        <span className="text-[10px] text-gray-600">
+        <span className="text-[12px] text-gray-400">
           {pipelineMode ? "для пайплайну" : "для всіх ввімкнених джерел нижче"}
         </span>
       </div>
@@ -370,7 +370,7 @@ function ScheduleWidget() {
       {/* Per-source toggles — only when pipeline is OFF */}
       {!pipelineMode && (
         !status ? (
-          <div className="text-xs text-gray-600">Завантаження...</div>
+          <div className="text-xs text-gray-400">Завантаження...</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {Object.entries(SCHEDULE_META).map(([src, label]) => {
@@ -379,12 +379,12 @@ function ScheduleWidget() {
                 <div key={src} className="flex items-center justify-between gap-2 bg-[#0d1120] rounded-xl px-3 py-2">
                   <div>
                     <div className="text-xs font-medium text-[#E0E6ED]">{label}</div>
-                    <div className="text-[10px] text-gray-600">
+                    <div className="text-[12px] text-gray-400">
                       {s?.last_sync ? `Останній: ${fmtTime(s.last_sync)}` : "Ще не запускалось"}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {s?.running && <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">▶ Зараз</span>}
+                    {s?.running && <span className="text-[12px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">▶ Зараз</span>}
                     <button
                       onClick={() => handleToggle(src)}
                       className={`relative w-11 h-6 rounded-full transition-colors ${sources[src] ? "bg-[#C9A84C]" : "bg-gray-700"}`}
@@ -422,20 +422,20 @@ function ManualStepsWidget({
     fetch("/api/admin/v2/reindex/last-completed")
       .then(r => r.ok ? r.json() : {})
       .then(setLastCompleted)
-      .catch(() => {})
+      .catch(() => { })
     const id = setInterval(() => {
       fetch("/api/admin/v2/reindex/last-completed")
         .then(r => r.ok ? r.json() : {})
         .then(setLastCompleted)
-        .catch(() => {})
+        .catch(() => { })
     }, 30000)
     return () => clearInterval(id)
   }, [])
 
-  const anyScrapeRunning  = SOURCES.some(s => scrapeStatus[s]?.running)
+  const anyScrapeRunning = SOURCES.some(s => scrapeStatus[s]?.running)
   const anyReindexRunning = SOURCES.some(s => reindxStatus[s]?.running)
-  const anyScrapeResume   = SOURCES.some(s => scrapeStatus[s]?.can_resume && !scrapeStatus[s]?.running)
-  const anyReindexResume  = SOURCES.some(s => reindxStatus[s]?.can_resume && !reindxStatus[s]?.running)
+  const anyScrapeResume = SOURCES.some(s => scrapeStatus[s]?.can_resume && !scrapeStatus[s]?.running)
+  const anyReindexResume = SOURCES.some(s => reindxStatus[s]?.can_resume && !reindxStatus[s]?.running)
 
   const now = Date.now()
   const staleSource = SOURCES.find(s => {
@@ -476,7 +476,7 @@ function ManualStepsWidget({
             return (
               <span key={s} className="inline-flex items-center gap-1">
                 <span className="font-mono text-[9px] text-gray-700">{s}</span>
-                <span className={`text-[9px] ${isStale ? "text-amber-400 font-bold" : "text-gray-600"}`}>
+                <span className={`text-[9px] ${isStale ? "text-amber-400 font-bold" : "text-gray-400"}`}>
                   {isStale ? `⚠${ageDays.toFixed(0)}д` : fmtTime(ts) ?? ""}
                 </span>
               </span>
@@ -528,11 +528,11 @@ function ManualStepsWidget({
       <div className="flex items-center gap-2">
         <Info className="w-3.5 h-3.5 text-gray-400" />
         <span className="text-xs font-bold text-[#E0E6ED]">РУЧНЕ — Покрокове керування</span>
-        <span className="text-[10px] text-gray-600 ml-1">правильний порядок дій</span>
+        <span className="text-[12px] text-gray-400 ml-1">правильний порядок дій</span>
       </div>
 
       {staleSource && (
-        <div className="flex items-start gap-2 text-[10px] text-amber-400 bg-amber-500/8 border border-amber-500/20 rounded-xl px-3 py-2">
+        <div className="flex items-start gap-2 text-[12px] text-amber-400 bg-amber-500/8 border border-amber-500/20 rounded-xl px-3 py-2">
           <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
           <span>Джерело <span className="font-mono font-bold">{staleSource}</span> реіндексувалось понад 7 днів тому — наступний ▶Р виконає повний реіндекс (не тільки нові файли).</span>
         </div>
@@ -543,15 +543,14 @@ function ManualStepsWidget({
           <div key={step.n} className={`rounded-xl border px-3 py-2.5 ${step.color}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-1.5 mb-1">
-                <span className={`text-[10px] font-black w-3 shrink-0 ${step.accent}`}>{step.n}</span>
-                <span className="text-[10px] font-bold text-[#E0E6ED]">{step.title}</span>
+                <span className={`text-[12px] font-black w-3 shrink-0 ${step.accent}`}>{step.n}</span>
+                <span className="text-[12px] font-bold text-[#E0E6ED]">{step.title}</span>
               </div>
               {step.manual && (
-                <span className={`text-[9px] shrink-0 px-1.5 py-0.5 rounded font-bold ${
-                  step.status === "running" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 animate-pulse" :
-                  step.status === "paused"  ? "bg-amber-500/15 text-amber-400 border border-amber-500/25" :
-                                             "bg-white/5 text-gray-600 border border-white/10"
-                }`}>
+                <span className={`text-[9px] shrink-0 px-1.5 py-0.5 rounded font-bold ${step.status === "running" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 animate-pulse" :
+                  step.status === "paused" ? "bg-amber-500/15 text-amber-400 border border-amber-500/25" :
+                    "bg-white/5 text-gray-400 border border-white/10"
+                  }`}>
                   {step.status === "running" ? "▶ Виконується" : step.status === "paused" ? "⏸ Призупинено" : "Idle"}
                 </span>
               )}
@@ -561,13 +560,13 @@ function ManualStepsWidget({
                 </a>
               )}
             </div>
-            <p className="text-[9px] text-gray-500 leading-relaxed pl-4">{step.desc}</p>
+            <p className="text-[9px] text-gray-400 leading-relaxed pl-4">{step.desc}</p>
             {step.extra}
           </div>
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-gray-600 border-t border-white/5 pt-2.5">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-gray-400 border-t border-white/5 pt-2.5">
         <span>⏸ Пауза (кроки 1-2) — зберігає прогрес, продовжуй кнопкою <span className="text-amber-400">SkipForward</span></span>
         <span>Реіндекс: одночасно тільки 1 джерело</span>
         <span>Кроки 3-6 → <a href="/admin/meta" className="text-[#C9A84C] hover:text-[#C9A84C]/70">сторінка Метадані</a></span>
@@ -588,9 +587,9 @@ const PIPELINE_STEP_NAMES = [
 ]
 
 function PipelineWidget() {
-  const [status, setStatus]     = useState<PipelineStatus | null>(null)
+  const [status, setStatus] = useState<PipelineStatus | null>(null)
   const [showLogs, setShowLogs] = useState(false)
-  const [error, setError]       = useState("")
+  const [error, setError] = useState("")
   const logContainerRef = useRef<HTMLDivElement>(null)
 
   const fetchStatus = useCallback(async () => {
@@ -613,16 +612,20 @@ function PipelineWidget() {
 
   async function handleTrigger() {
     setError("")
-    const res = await fetch("/api/admin/pipeline", { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "trigger" }) })
+    const res = await fetch("/api/admin/pipeline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "trigger" })
+    })
     if (!res.ok) { const d = await res.json(); setError(d.error || "Помилка") }
     else { setShowLogs(true); fetchStatus() }
   }
 
   async function handleStop() {
     setError("")
-    const res = await fetch("/api/admin/pipeline", { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop" }) })
+    const res = await fetch("/api/admin/pipeline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop" })
+    })
     if (!res.ok) { const d = await res.json(); setError(d.error || "Помилка") }
     else fetchStatus()
   }
@@ -659,12 +662,12 @@ function PipelineWidget() {
           <Layers className="w-4 h-4 text-[#C9A84C]" />
           <span className="text-sm font-bold text-[#E0E6ED]">Пайплайн оновлення</span>
           {status?.running && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 animate-pulse">
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 animate-pulse">
               ▶ Виконується{currentStep > 0 ? ` · крок ${currentStep}/${totalSteps}` : ""}
             </span>
           )}
           {!status?.running && status?.last_run && (
-            <span className="text-[10px] text-gray-600">Останній: {fmtTime(status.last_run)}</span>
+            <span className="text-[12px] text-gray-400">Останній: {fmtTime(status.last_run)}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -688,28 +691,25 @@ function PipelineWidget() {
       {/* 6 steps */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {stepNames.map((name, i) => {
-          const stepN    = i + 1
-          const isDone   = completedSteps.has(stepN)
+          const stepN = i + 1
+          const isDone = completedSteps.has(stepN)
           const isActive = status?.running && stepN === currentStep
           return (
-            <div key={i} className={`rounded-xl border px-3 py-2 transition-all duration-300 ${
-              isActive ? "border-emerald-400/60 bg-emerald-500/10 shadow-[0_0_12px_rgba(52,211,153,0.15)]" :
-              isDone   ? "border-emerald-600/40 bg-emerald-900/20" :
-                         "border-white/5 bg-transparent"
-            }`}>
+            <div key={i} className={`rounded-xl border px-3 py-2 transition-all duration-300 ${isActive ? "border-emerald-400/60 bg-emerald-500/10 shadow-[0_0_12px_rgba(52,211,153,0.15)]" :
+              isDone ? "border-emerald-600/40 bg-emerald-900/20" :
+                "border-white/5 bg-transparent"
+              }`}>
               <div className="flex items-center gap-1.5">
-                <span className={`text-[10px] font-black w-4 shrink-0 flex items-center justify-center ${
-                  isActive ? "text-emerald-300 animate-pulse" :
-                  isDone   ? "text-emerald-400" :
-                             "text-gray-600"
-                }`}>
+                <span className={`text-[12px] font-black w-4 shrink-0 flex items-center justify-center ${isActive ? "text-emerald-300 animate-pulse" :
+                  isDone ? "text-emerald-400" :
+                    "text-gray-400"
+                  }`}>
                   {isDone ? "✓" : isActive ? "▶" : stepN}
                 </span>
-                <span className={`text-[10px] leading-tight font-medium ${
-                  isActive ? "text-emerald-200" :
-                  isDone   ? "text-emerald-500/80" :
-                             "text-gray-600"
-                }`}>{name}</span>
+                <span className={`text-[12px] leading-tight font-medium ${isActive ? "text-emerald-200" :
+                  isDone ? "text-emerald-500/80" :
+                    "text-gray-400"
+                  }`}>{name}</span>
               </div>
             </div>
           )
@@ -719,7 +719,7 @@ function PipelineWidget() {
       {/* Log toggle */}
       <button
         onClick={() => setShowLogs(p => !p)}
-        className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+        className="text-[12px] text-gray-400 hover:text-gray-400 transition-colors"
       >
         {showLogs ? "▲ Сховати логи" : `▼ Показати логи (${status?.live_logs?.length ?? 0} рядків)`}
       </button>
@@ -727,7 +727,7 @@ function PipelineWidget() {
       {/* Logs */}
       {showLogs && (
         <div ref={logContainerRef} className="bg-[#080d16] rounded-xl border border-white/5 h-48 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
-          {!status?.live_logs?.length && <div className="text-gray-600 text-center pt-8">Логів ще немає...</div>}
+          {!status?.live_logs?.length && <div className="text-gray-400 text-center pt-8">Логів ще немає...</div>}
           {status?.live_logs?.map((l, i) => (
             <div key={i} className="flex gap-2">
               <span className="text-gray-700 shrink-0">{l.ts?.slice(11, 19)}</span>
@@ -747,11 +747,11 @@ function PipelineWidget() {
 export default function SyncPage() {
   const [scrapeStatus, setScrapeStatus] = useState<Record<string, ScrapeSourceStatus>>({})
   const [reindxStatus, setReindxStatus] = useState<Record<string, ReindexSourceStatus>>({})
-  const [diskData, setDiskData]         = useState<Record<string, DiskSource>>({})
+  const [diskData, setDiskData] = useState<Record<string, DiskSource>>({})
   const [qdrantCounts, setQdrantCounts] = useState<Record<string, number>>({})
-  const [lawCounts,   setLawCounts]   = useState<Record<string, number>>({})
-  const [refreshing, setRefreshing]     = useState(false)
-  const [lastRefresh, setLastRefresh]   = useState<Date | null>(null)
+  const [lawCounts, setLawCounts] = useState<Record<string, number>>({})
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [needsRebuild, setNeedsRebuild] = useState(false)
 
   // Active log panel: {src, type}
@@ -769,10 +769,10 @@ export default function SyncPage() {
         fetch("/api/admin/v2/disk"),
         fetch("/api/admin/v2/analytics?limit=1"),
       ])
-      if (scrR.status === "fulfilled" && scrR.value.ok)  setScrapeStatus(await scrR.value.json())
-      if (reiR.status === "fulfilled" && reiR.value.ok)  setReindxStatus(await reiR.value.json())
+      if (scrR.status === "fulfilled" && scrR.value.ok) setScrapeStatus(await scrR.value.json())
+      if (reiR.status === "fulfilled" && reiR.value.ok) setReindxStatus(await reiR.value.json())
       if (diskR.status === "fulfilled" && diskR.value.ok) { const d = await diskR.value.json(); setDiskData(d.sources ?? {}) }
-      if (anlR.status === "fulfilled" && anlR.value.ok)  { const d = await anlR.value.json(); setQdrantCounts(d.qdrant_v2 ?? {}); setLawCounts(d.qdrant_v2_laws ?? {}) }
+      if (anlR.status === "fulfilled" && anlR.value.ok) { const d = await anlR.value.json(); setQdrantCounts(d.qdrant_v2 ?? {}); setLawCounts(d.qdrant_v2_laws ?? {}) }
       setLastRefresh(new Date())
     } catch { /* ignore */ }
     if (!silent) setRefreshing(false)
@@ -897,7 +897,7 @@ export default function SyncPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Керування базою знань</h1>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               Скрапінг · Реіндекс · Авто-синхронізація
               {lastRefresh && <span className="ml-2 text-gray-700">· {lastRefresh.toLocaleTimeString("uk-UA")}</span>}
             </p>
@@ -921,53 +921,53 @@ export default function SyncPage() {
             {/* Авто */}
             <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-3 py-3">
               <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.5 rounded">АВТО</span>
+                <span className="text-[12px] font-black text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.5 rounded">АВТО</span>
                 <span className="text-xs font-bold text-[#E0E6ED]">Пайплайн (рекомендовано)</span>
               </div>
-              <p className="text-[10px] text-gray-500 leading-relaxed">
+              <p className="text-[12px] text-gray-400 leading-relaxed">
                 Увімкни <span className="text-emerald-300 font-semibold">Режим пайплайну</span> у блоці «Авто-синхронізація» нижче — і все буде запускатись автоматично щодня за розкладом.<br />
                 Або натисни <span className="text-emerald-300 font-semibold">«Запустити зараз»</span> у блоці «Пайплайн оновлення» щоб виконати повний цикл одразу.<br />
-                <span className="text-gray-600 mt-1 block">Після завершення — перебудуй Centroid Router.</span>
+                <span className="text-gray-400 mt-1 block">Після завершення — перебудуй Centroid Router.</span>
               </p>
             </div>
             {/* Ручне */}
             <div className="rounded-xl border border-white/8 bg-white/2 px-3 py-3">
               <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-[10px] font-black text-gray-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded">РУЧНЕ</span>
+                <span className="text-[12px] font-black text-gray-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded">РУЧНЕ</span>
                 <span className="text-xs font-bold text-[#E0E6ED]">Покрокове керування</span>
               </div>
-              <p className="text-[10px] text-gray-500 leading-relaxed">
+              <p className="text-[12px] text-gray-400 leading-relaxed">
                 Використовуй таблицю «Джерела» нижче: кнопки <span className="text-blue-400 font-semibold">▶С</span> (скрапінг) і <span className="text-amber-400 font-semibold">▶Р</span> (реіндекс) для кожного джерела окремо.<br />
                 Збагачення, текстові скасування і патч Qdrant — керуй зі сторінки <a href="/admin/meta" className="text-[#C9A84C] underline hover:text-[#C9A84C]/80">Метадані</a>.<br />
-                <span className="text-gray-600 mt-1 block">Реіндекс: одночасно тільки одне джерело.</span>
+                <span className="text-gray-400 mt-1 block">Реіндекс: одночасно тільки одне джерело.</span>
               </p>
             </div>
           </div>
 
           {/* 6 кроків */}
           <div>
-            <div className="text-[10px] text-gray-600 uppercase tracking-wide mb-2">Що відбувається під час повного циклу:</div>
+            <div className="text-[12px] text-gray-400 uppercase tracking-wide mb-2">Що відбувається під час повного циклу:</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
               {[
-                { n: "1", color: "text-blue-400 border-blue-500/20 bg-blue-500/5",       title: "Скрапінг",              desc: "Нові документи з сайтів → диск. Існуючі пропускаються." },
-                { n: "2", color: "text-amber-400 border-amber-500/20 bg-amber-500/5",    title: "Реіндекс нових",        desc: "Тільки нові файли → чанки → вектори → Qdrant." },
+                { n: "1", color: "text-blue-400 border-blue-500/20 bg-blue-500/5", title: "Скрапінг", desc: "Нові документи з сайтів → диск. Існуючі пропускаються." },
+                { n: "2", color: "text-amber-400 border-amber-500/20 bg-amber-500/5", title: "Реіндекс нових", desc: "Тільки нові файли → чанки → вектори → Qdrant." },
                 { n: "3", color: "text-emerald-400 border-emerald-500/20 bg-emerald-500/5", title: "Збагачення OpenData", desc: "Дата прийняття, тема, статус, організація з OpenData API." },
-                { n: "4", color: "text-violet-400 border-violet-500/20 bg-violet-500/5",  title: "Текст. скасування",   desc: "Пошук у текстах: «втратив чинність», «скасовано» тощо." },
-                { n: "5", color: "text-pink-400 border-pink-500/20 bg-pink-500/5",       title: "Застосування кешу",     desc: "Знайдені скасування записуються у meta.json файли." },
-                { n: "6", color: "text-purple-400 border-purple-500/20 bg-purple-500/5", title: "Патч Qdrant",           desc: "Метадані з meta.json → payload Qdrant (без ре-векторизації)." },
+                { n: "4", color: "text-violet-400 border-violet-500/20 bg-violet-500/5", title: "Текст. скасування", desc: "Пошук у текстах: «втратив чинність», «скасовано» тощо." },
+                { n: "5", color: "text-pink-400 border-pink-500/20 bg-pink-500/5", title: "Застосування кешу", desc: "Знайдені скасування записуються у meta.json файли." },
+                { n: "6", color: "text-purple-400 border-purple-500/20 bg-purple-500/5", title: "Патч Qdrant", desc: "Метадані з meta.json → payload Qdrant (без ре-векторизації)." },
               ].map((s, i) => (
                 <div key={i} className={`rounded-lg border px-2.5 py-2 ${s.color}`}>
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className={`text-[10px] font-black w-3 shrink-0 ${s.color.split(" ")[0]}`}>{s.n}</span>
-                    <span className="text-[10px] font-semibold text-[#E0E6ED]">{s.title}</span>
+                    <span className={`text-[12px] font-black w-3 shrink-0 ${s.color.split(" ")[0]}`}>{s.n}</span>
+                    <span className="text-[12px] font-semibold text-[#E0E6ED]">{s.title}</span>
                   </div>
-                  <p className="text-[9px] text-gray-600 leading-relaxed pl-4">{s.desc}</p>
+                  <p className="text-[9px] text-gray-400 leading-relaxed pl-4">{s.desc}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="flex items-start gap-2 text-[10px] text-amber-400/70 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2">
+          <div className="flex items-start gap-2 text-[12px] text-amber-400/70 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2">
             <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
             <span>Після будь-якого реіндексу — обов&apos;язково перебудуй <span className="font-semibold">Centroid Router</span> (блок нижче), інакше бот шукатиме в неправильних колекціях.</span>
           </div>
@@ -977,7 +977,7 @@ export default function SyncPage() {
         {actionError && (
           <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
             <AlertCircle className="w-4 h-4 shrink-0" /> {actionError}
-            <button onClick={() => setActionError("")} className="ml-auto text-gray-600 hover:text-gray-400">✕</button>
+            <button onClick={() => setActionError("")} className="ml-auto text-gray-400 hover:text-gray-400">✕</button>
           </div>
         )}
 
@@ -985,19 +985,19 @@ export default function SyncPage() {
         <div className="bg-[#111827] rounded-2xl border border-white/5 overflow-hidden">
           <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between gap-2">
             <span className="text-xs font-bold text-[#C9A84C] uppercase tracking-wide">Джерела</span>
-            <span className="text-[10px] text-gray-600 hidden sm:block">Натисни на рядок → логи у панелі нижче</span>
-            <span className="text-[10px] text-gray-600 sm:hidden">Натисни → логи</span>
+            <span className="text-[12px] text-gray-400 hidden sm:block">Натисни на рядок → логи у панелі нижче</span>
+            <span className="text-[12px] text-gray-400 sm:hidden">Натисни → логи</span>
           </div>
 
           {/* ── Mobile cards (< sm) ─────────────────────────────────────────── */}
           <div className="sm:hidden divide-y divide-white/5">
             {SOURCES.map(src => {
-              const sc     = scrapeStatus[src]
-              const ri     = reindxStatus[src]
-              const disk   = diskData[src]?.files ?? 0
+              const sc = scrapeStatus[src]
+              const ri = reindxStatus[src]
+              const disk = diskData[src]?.files ?? 0
               const qdrant = getQdrant(src)
-              const meta   = SRC[src]
-              const qdrantOk    = qdrant > 0
+              const meta = SRC[src]
+              const qdrantOk = qdrant > 0
               const isActiveLog = activeLog?.src === src
               const anyReindexRunning = Object.values(reindxStatus).some(r => r.running)
 
@@ -1011,12 +1011,12 @@ export default function SyncPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-mono text-[10px] text-gray-600 bg-[#0A0E1A] px-1.5 py-0.5 rounded">{src}</span>
+                        <span className="font-mono text-[12px] text-gray-400 bg-[#0A0E1A] px-1.5 py-0.5 rounded">{src}</span>
                         <span className="text-sm font-semibold text-[#E0E6ED]">{meta.label}</span>
                       </div>
                       <div className="mt-0.5 flex items-center gap-1">
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${qdrantOk ? "bg-emerald-500" : disk > 0 ? "bg-amber-500" : "bg-gray-700"}`} />
-                        <span className="text-[10px] text-gray-600">
+                        <span className="text-[12px] text-gray-400">
                           {qdrantOk ? "проіндексовано" : disk > 0 ? "потрібен реіндекс" : "немає даних"}
                         </span>
                       </div>
@@ -1063,15 +1063,15 @@ export default function SyncPage() {
                   <div className="mt-2 flex items-center gap-3 text-xs font-mono">
                     <span className={disk > 0 ? "text-[#E0E6ED]" : "text-gray-700"}>
                       {disk > 0 ? disk.toLocaleString("uk-UA") : "—"}
-                      <span className="text-[10px] text-gray-600 font-sans ml-1">файлів</span>
+                      <span className="text-[12px] text-gray-400 font-sans ml-1">файлів</span>
                     </span>
                     <span className="text-gray-700">·</span>
                     <span className={qdrantOk ? "text-[#C9A84C]" : "text-gray-700"}>
                       {fmtNum(qdrant)}
-                      <span className="text-[10px] text-gray-600 font-sans ml-1">чанків</span>
+                      <span className="text-[12px] text-gray-400 font-sans ml-1">чанків</span>
                     </span>
                     {(lawCounts[src] ?? 0) > 0 && (
-                      <span className="text-[10px] text-emerald-600">{lawCounts[src].toLocaleString("uk-UA")} зак.</span>
+                      <span className="text-[12px] text-emerald-600">{lawCounts[src].toLocaleString("uk-UA")} зак.</span>
                     )}
                   </div>
 
@@ -1079,12 +1079,12 @@ export default function SyncPage() {
                   <div className="mt-1.5 flex items-center gap-4">
                     <div className="flex items-center gap-1.5">
                       <StatusDot running={!!sc?.running} canResume={!!sc?.can_resume} />
-                      <span className="text-[10px] text-gray-600">Скрап</span>
+                      <span className="text-[12px] text-gray-400">Скрап</span>
                       <StatusLabel running={!!sc?.running} canResume={!!sc?.can_resume} pauseRequested={!!sc?.pause_requested} />
                     </div>
                     <div className="flex items-center gap-1.5">
                       <StatusDot running={!!ri?.running} canResume={!!ri?.can_resume} />
-                      <span className="text-[10px] text-gray-600">Реінд</span>
+                      <span className="text-[12px] text-gray-400">Реінд</span>
                       <StatusLabel running={!!ri?.running} canResume={!!ri?.can_resume} pauseRequested={!!ri?.pause_requested} />
                     </div>
                   </div>
@@ -1096,7 +1096,7 @@ export default function SyncPage() {
           {/* ── Desktop table (≥ sm) ─────────────────────────────────────────── */}
           <div className="hidden sm:block">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 px-4 py-2 border-b border-white/5 text-[10px] text-gray-600 uppercase tracking-wide">
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 px-4 py-2 border-b border-white/5 text-[12px] text-gray-400 uppercase tracking-wide">
               <span>Джерело</span>
               <span className="text-right w-20">Файлів на диску</span>
               <span className="text-right w-20">Чанків у Qdrant</span>
@@ -1107,12 +1107,12 @@ export default function SyncPage() {
 
             {/* Rows */}
             {SOURCES.map(src => {
-              const sc     = scrapeStatus[src]
-              const ri     = reindxStatus[src]
-              const disk   = diskData[src]?.files ?? 0
+              const sc = scrapeStatus[src]
+              const ri = reindxStatus[src]
+              const disk = diskData[src]?.files ?? 0
               const qdrant = getQdrant(src)
-              const meta   = SRC[src]
-              const qdrantOk    = qdrant > 0
+              const meta = SRC[src]
+              const qdrantOk = qdrant > 0
               const isActiveLog = activeLog?.src === src
 
               return (
@@ -1123,9 +1123,9 @@ export default function SyncPage() {
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-[10px] text-gray-600 bg-[#0A0E1A] px-1 rounded">{src}</span>
+                      <span className="font-mono text-[12px] text-gray-400 bg-[#0A0E1A] px-1 rounded">{src}</span>
                       <span className="text-xs font-semibold text-[#E0E6ED] truncate">{meta.label}</span>
-                      {meta.note && <span className="text-[10px] text-gray-700">({meta.note})</span>}
+                      {meta.note && <span className="text-[12px] text-gray-700">({meta.note})</span>}
                     </div>
                     <div className="mt-1 flex items-center gap-1">
                       <span className={`w-1.5 h-1.5 rounded-full inline-block ${qdrantOk ? "bg-emerald-500" : disk > 0 ? "bg-amber-500" : "bg-gray-700"}`} />
@@ -1156,34 +1156,34 @@ export default function SyncPage() {
                   <div className="flex items-center justify-end gap-1.5 w-32" onClick={e => e.stopPropagation()}>
                     {sc?.running ? (
                       <button onClick={() => stopScrape(src)}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors">
+                        className="flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors">
                         <Square className="w-2.5 h-2.5" />С
                       </button>
                     ) : sc?.can_resume ? (
                       <button onClick={() => { resumeScrape(src); setActiveLog({ src, type: "scrape" }) }}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 transition-colors">
+                        className="flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 transition-colors">
                         <SkipForward className="w-2.5 h-2.5" />С
                       </button>
                     ) : (
                       <button onClick={() => startScrape(src)}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-blue-500/15 border border-blue-500/25 text-blue-400 hover:bg-blue-500/25 transition-colors">
+                        className="flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-blue-500/15 border border-blue-500/25 text-blue-400 hover:bg-blue-500/25 transition-colors">
                         <Play className="w-2.5 h-2.5" />С
                       </button>
                     )}
                     {ri?.running ? (
                       <button onClick={() => stopReindex(src)}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors">
+                        className="flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors">
                         <Square className="w-2.5 h-2.5" />Р
                       </button>
                     ) : ri?.can_resume ? (
                       <button onClick={() => { resumeReindex(src); setActiveLog({ src, type: "reindex" }) }}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 transition-colors">
+                        className="flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 transition-colors">
                         <SkipForward className="w-2.5 h-2.5" />Р
                       </button>
                     ) : (
                       <button onClick={() => startReindex(src)}
                         disabled={!!reindxStatus[src]?.running || Object.values(reindxStatus).some(r => r.running)}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                        className="flex items-center gap-1 text-[12px] px-2 py-1 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
                         <Play className="w-2.5 h-2.5" />Р
                       </button>
                     )}
@@ -1194,7 +1194,7 @@ export default function SyncPage() {
           </div>
 
           {/* Legend */}
-          <div className="px-4 py-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-600">
+          <div className="px-4 py-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-400">
             <span><span className="text-blue-400 font-bold">С</span> — Скрапінг (диск)</span>
             <span><span className="text-amber-400 font-bold">Р</span> — Реіндекс (Qdrant)</span>
             <span><span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle" /> amber = призупинено</span>

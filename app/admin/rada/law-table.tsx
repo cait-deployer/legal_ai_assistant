@@ -16,10 +16,10 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
       <table className="w-full text-sm">
         <thead className="sticky top-0 z-10">
           <tr className="border-b border-[#C9A84C]/10 bg-[#0d1120]">
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-[40%]">Назва</th>
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-28">Статус</th>
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Категорія</th>
-            <th className="text-left px-4 py-3 text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden md:table-cell">ID закону</th>
+            <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-[40%]">Назва</th>
+            <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider w-28">Статус</th>
+            <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden sm:table-cell">Категорія</th>
+            <th className="text-left px-4 py-3 text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider hidden md:table-cell">ID закону</th>
             <th className="px-4 py-3 w-[90px]" />
           </tr>
         </thead>
@@ -46,7 +46,7 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                 </td>
 
                 <td className="px-4 py-3">
-                  <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap ${getStatusStyle(meta.status)}`}>
+                  <span className={`inline-flex items-center text-[12px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap ${getStatusStyle(meta.status)}`}>
                     {meta.status || "Невідомо"}
                   </span>
                 </td>
@@ -55,7 +55,7 @@ export function LawTable({ laws, activeId, onOpen }: Props) {
                   {meta.category ? (
                     <span
                       title={getCategoryLabel(meta.category)}
-                      className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border max-w-full ${getCategoryStyle(meta.category)}`}
+                      className={`inline-flex items-center text-[12px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border max-w-full ${getCategoryStyle(meta.category)}`}
                     >
                       <span className="truncate">{getCategoryLabel(meta.category)}</span>
                     </span>

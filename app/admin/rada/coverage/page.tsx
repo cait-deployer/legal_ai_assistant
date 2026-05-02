@@ -54,71 +54,71 @@ const SOURCE_TABS: {
   description: string
   color: string
 }[] = [
-  {
-    id: "rada",
-    label: "Верховна Рада",
-    shortLabel: "Рада",
-    icon: Scale,
-    description: "Закони та нормативні акти України з офіційного сайту Ради",
-    color: "text-[#C9A84C]",
-  },
-  {
-    id: "laws_ccu_v2",
-    label: "Конституційний суд",
-    shortLabel: "КСУ",
-    icon: Gavel,
-    description: "Рішення та висновки Конституційного суду України",
-    color: "text-violet-400",
-  },
-  {
-    id: "laws_wiki_v2",
-    label: "Вікіпедія",
-    shortLabel: "Вікі",
-    icon: BookOpen,
-    description: "Правові статті з україномовної Вікіпедії",
-    color: "text-sky-400",
-  },
-  {
-    id: "laws_supreme_v2",
-    label: "Верховний суд",
-    shortLabel: "ВСУ",
-    icon: Building2,
-    description: "Рішення та постанови Верховного суду України",
-    color: "text-emerald-400",
-  },
-  {
-    id: "laws_positions_v2",
-    label: "Правові позиції ВС",
-    shortLabel: "Позиції",
-    icon: BookMarked,
-    description: "Відформульовані правові позиції Верховного Суду",
-    color: "text-orange-400",
-  },
-  {
-    id: "laws_kmu_v2",
-    label: "Кабінет Міністрів",
-    shortLabel: "КМУ",
-    icon: Landmark,
-    description: "Постанови та розпорядження Кабінету Міністрів України",
-    color: "text-blue-400",
-  },
-  {
-    id: "laws_mod_v2",
-    label: "Міноборони",
-    shortLabel: "МОД",
-    icon: Database,
-    description: "Накази та нормативні документи Міністерства оборони України",
-    color: "text-red-400",
-  },
-  {
-    id: "laws_zir_v2",
-    label: "Реєстр ДПС",
-    shortLabel: "ЗІР",
-    icon: FileText,
-    description: "Офіційні роз'яснення Державної податкової служби України",
-    color: "text-teal-400",
-  },
-]
+    {
+      id: "rada",
+      label: "Верховна Рада",
+      shortLabel: "Рада",
+      icon: Scale,
+      description: "Закони та нормативні акти України з офіційного сайту Ради",
+      color: "text-[#C9A84C]",
+    },
+    {
+      id: "laws_ccu_v2",
+      label: "Конституційний суд",
+      shortLabel: "КСУ",
+      icon: Gavel,
+      description: "Рішення та висновки Конституційного суду України",
+      color: "text-violet-400",
+    },
+    {
+      id: "laws_wiki_v2",
+      label: "Вікіпедія",
+      shortLabel: "Вікі",
+      icon: BookOpen,
+      description: "Правові статті з україномовної Вікіпедії",
+      color: "text-sky-400",
+    },
+    {
+      id: "laws_supreme_v2",
+      label: "Верховний суд",
+      shortLabel: "ВСУ",
+      icon: Building2,
+      description: "Рішення та постанови Верховного суду України",
+      color: "text-emerald-400",
+    },
+    {
+      id: "laws_positions_v2",
+      label: "Правові позиції ВС",
+      shortLabel: "Позиції",
+      icon: BookMarked,
+      description: "Відформульовані правові позиції Верховного Суду",
+      color: "text-orange-400",
+    },
+    {
+      id: "laws_kmu_v2",
+      label: "Кабінет Міністрів",
+      shortLabel: "КМУ",
+      icon: Landmark,
+      description: "Постанови та розпорядження Кабінету Міністрів України",
+      color: "text-blue-400",
+    },
+    {
+      id: "laws_mod_v2",
+      label: "Міноборони",
+      shortLabel: "МОД",
+      icon: Database,
+      description: "Накази та нормативні документи Міністерства оборони України",
+      color: "text-red-400",
+    },
+    {
+      id: "laws_zir_v2",
+      label: "Реєстр ДПС",
+      shortLabel: "ЗІР",
+      icon: FileText,
+      description: "Офіційні роз'яснення Державної податкової служби України",
+      color: "text-teal-400",
+    },
+  ]
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -148,10 +148,10 @@ function fmtRelative(iso: string | null): string {
 
 function healthConfig(h: SectionHealth) {
   switch (h) {
-    case "good":     return { icon: CheckCircle2,  cls: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: "Добре" }
-    case "warning":  return { icon: AlertTriangle, cls: "text-amber-400",   bg: "bg-amber-500/10 border-amber-500/20",   label: "Неповне" }
-    case "critical": return { icon: XCircle,       cls: "text-red-400",     bg: "bg-red-500/10 border-red-500/20",       label: "Критично" }
-    default:         return { icon: HelpCircle,    cls: "text-[#C9A84C]/50", bg: "bg-[#C9A84C]/5 border-[#C9A84C]/10", label: "Невідомо" }
+    case "good": return { icon: CheckCircle2, cls: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: "Добре" }
+    case "warning": return { icon: AlertTriangle, cls: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20", label: "Неповне" }
+    case "critical": return { icon: XCircle, cls: "text-red-400", bg: "bg-red-500/10 border-red-500/20", label: "Критично" }
+    default: return { icon: HelpCircle, cls: "text-[#C9A84C]/50", bg: "bg-[#C9A84C]/5 border-[#C9A84C]/10", label: "Невідомо" }
   }
 }
 
@@ -176,7 +176,7 @@ function StatCard({ icon: Icon, label, value, sub, accent }: {
       <div className="min-w-0">
         <p className="text-[9px] sm:text-[11px] font-black uppercase tracking-widest text-[#C9A84C]/60 leading-tight">{label}</p>
         <p className="text-base sm:text-xl font-bold text-white mt-0.5 truncate">{value}</p>
-        {sub && <p className="text-[10px] sm:text-xs text-[#E0E6ED]/50 mt-0.5 truncate">{sub}</p>}
+        {sub && <p className="text-[12px] sm:text-xs text-[#E0E6ED]/50 mt-0.5 truncate">{sub}</p>}
       </div>
     </div>
   )
@@ -208,17 +208,17 @@ function SourceDetailCard({ source, tab }: { source: OtherSource; tab: typeof SO
       {/* Stats grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-y divide-[#C9A84C]/10 sm:divide-y-0">
         <div className="px-6 py-5">
-          <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50">Документів у базі</p>
+          <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50">Документів у базі</p>
           <p className="text-3xl sm:text-4xl font-bold text-white mt-2 tabular-nums">{fmt(source.our_total)}</p>
           <p className="text-[11px] text-[#E0E6ED]/40 mt-1">унікальних документів</p>
         </div>
         <div className="px-6 py-5">
-          <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50">Останній скрапінг</p>
+          <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50">Останній скрапінг</p>
           <p className="text-base sm:text-lg font-bold text-white mt-2">{fmtRelative(source.last_scraped_at)}</p>
           <p className="text-[11px] text-[#E0E6ED]/40 mt-1">{fmtDate(source.last_scraped_at)}</p>
         </div>
         <div className="px-6 py-5 col-span-2 sm:col-span-1">
-          <p className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50">Остання синхронізація</p>
+          <p className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50">Остання синхронізація</p>
           <p className="text-base sm:text-lg font-bold text-white mt-2">{fmtRelative(source.last_sync_at)}</p>
           <p className="text-[11px] text-[#E0E6ED]/40 mt-1">{fmtDate(source.last_sync_at)}</p>
         </div>
@@ -243,8 +243,8 @@ function AllSourcesSummary({ data, activeTab, onTabChange }: {
   onTabChange: (t: SourceTab) => void
 }) {
   const radaSections = data.sections
-  const totalRadaOurs  = radaSections.reduce((s, r) => s + r.our_total, 0)
-  const avgCoverage    = radaSections.filter(s => s.coverage_pct != null).length
+  const totalRadaOurs = radaSections.reduce((s, r) => s + r.our_total, 0)
+  const avgCoverage = radaSections.filter(s => s.coverage_pct != null).length
     ? Math.round(radaSections.filter(s => s.coverage_pct != null).reduce((s, r) => s + (r.coverage_pct ?? 0), 0) / radaSections.filter(s => s.coverage_pct != null).length)
     : null
 
@@ -253,31 +253,30 @@ function AllSourcesSummary({ data, activeTab, onTabChange }: {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
       {SOURCE_TABS.map(tab => {
-        const isRada   = tab.id === "rada"
-        const count    = isRada ? totalRadaOurs : (sourceMap[tab.id]?.our_total ?? 0)
-        const health   = isRada
+        const isRada = tab.id === "rada"
+        const count = isRada ? totalRadaOurs : (sourceMap[tab.id]?.our_total ?? 0)
+        const health = isRada
           ? (avgCoverage != null ? (avgCoverage >= 80 ? "good" : avgCoverage >= 40 ? "warning" : "critical") : "unknown") as SectionHealth
           : (sourceMap[tab.id]?.health ?? "unknown") as SectionHealth
-        const hc       = healthConfig(health)
-        const HIcon    = hc.icon
-        const TabIcon  = tab.icon
+        const hc = healthConfig(health)
+        const HIcon = hc.icon
+        const TabIcon = tab.icon
         const isActive = activeTab === tab.id
 
         return (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`text-left rounded-2xl border p-4 transition-all ${
-              isActive
+            className={`text-left rounded-2xl border p-4 transition-all ${isActive
                 ? "border-[#C9A84C]/40 bg-[#C9A84C]/8 shadow-lg shadow-[#C9A84C]/5"
                 : "border-[#C9A84C]/10 bg-[#0d1120]/60 hover:border-[#C9A84C]/25 hover:bg-[#0d1120]"
-            }`}
+              }`}
           >
             <div className="flex items-center justify-between mb-3">
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isActive ? "bg-[#C9A84C]/15" : "bg-[#C9A84C]/8"}`}>
                 <TabIcon className={`w-4 h-4 ${isActive ? tab.color : "text-[#C9A84C]/60"}`} />
               </div>
-              <span className={`flex items-center gap-1 text-[10px] font-bold ${hc.cls}`}>
+              <span className={`flex items-center gap-1 text-[12px] font-bold ${hc.cls}`}>
                 <HIcon className="w-3 h-3" />
                 <span className="hidden sm:inline">{hc.label}</span>
               </span>
@@ -285,7 +284,7 @@ function AllSourcesSummary({ data, activeTab, onTabChange }: {
             <p className={`text-lg sm:text-xl font-bold tabular-nums ${isActive ? "text-white" : "text-[#E0E6ED]/80"}`}>
               {fmt(count)}
             </p>
-            <p className="text-[10px] font-semibold text-[#C9A84C]/60 mt-0.5">
+            <p className="text-[12px] font-semibold text-[#C9A84C]/60 mt-0.5">
               {tab.shortLabel}
               {isRada && avgCoverage != null && (
                 <span className={`ml-1.5 ${hc.cls}`}>{avgCoverage}%</span>
@@ -303,22 +302,22 @@ function AllSourcesSummary({ data, activeTab, onTabChange }: {
 function RadaTab({ data }: { data: CoverageData }) {
   const [filter, setFilter] = useState<SectionHealth | "all">("all")
   const sections = data.sections
-  const visible  = filter === "all" ? sections : sections.filter(s => s.health === filter)
+  const visible = filter === "all" ? sections : sections.filter(s => s.health === filter)
 
-  const totalRada  = sections.reduce((s, r) => s + (r.rada_total ?? 0), 0)
-  const totalOurs  = sections.reduce((s, r) => s + r.our_total, 0)
+  const totalRada = sections.reduce((s, r) => s + (r.rada_total ?? 0), 0)
+  const totalOurs = sections.reduce((s, r) => s + r.our_total, 0)
   const totalRestr = sections.reduce((s, r) => s + r.our_restricted, 0)
-  const avgCov     = sections.filter(s => s.coverage_pct != null).length
+  const avgCov = sections.filter(s => s.coverage_pct != null).length
     ? Math.round(sections.filter(s => s.coverage_pct != null).reduce((s, r) => s + (r.coverage_pct ?? 0), 0) / sections.filter(s => s.coverage_pct != null).length)
     : null
-  const goodCount  = sections.filter(s => s.health === "good").length
-  const warnCount  = sections.filter(s => s.health === "warning").length
-  const critCount  = sections.filter(s => s.health === "critical").length
+  const goodCount = sections.filter(s => s.health === "good").length
+  const warnCount = sections.filter(s => s.health === "warning").length
+  const critCount = sections.filter(s => s.health === "critical").length
 
   const FILTERS: { key: SectionHealth | "all"; label: string; count?: number }[] = [
-    { key: "all",      label: "Всі",      count: sections.length },
-    { key: "good",     label: "Добре",    count: goodCount },
-    { key: "warning",  label: "Неповне",  count: warnCount },
+    { key: "all", label: "Всі", count: sections.length },
+    { key: "good", label: "Добре", count: goodCount },
+    { key: "warning", label: "Неповне", count: warnCount },
     { key: "critical", label: "Критично", count: critCount },
   ]
 
@@ -326,10 +325,10 @@ function RadaTab({ data }: { data: CoverageData }) {
     <div className="flex flex-col gap-4 sm:gap-5">
       {/* Stat cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-3">
-        <StatCard icon={TrendingUp} label="Середнє покриття"     value={avgCov != null ? `${avgCov}%` : "—"} />
-        <StatCard icon={FileText}   label="Документів у нас"     value={fmt(totalOurs)} sub={`з ~${fmt(totalRada)} на Раді`} />
-        <StatCard icon={Lock}       label="ДСК зафіксовано"      value={fmt(totalRestr)} sub="службового використання" />
-        <StatCard icon={Clock}      label="Остання синхронізація" value={fmtRelative(data.last_sync_at)} sub={fmtDate(data.last_sync_at)} />
+        <StatCard icon={TrendingUp} label="Середнє покриття" value={avgCov != null ? `${avgCov}%` : "—"} />
+        <StatCard icon={FileText} label="Документів у нас" value={fmt(totalOurs)} sub={`з ~${fmt(totalRada)} на Раді`} />
+        <StatCard icon={Lock} label="ДСК зафіксовано" value={fmt(totalRestr)} sub="службового використання" />
+        <StatCard icon={Clock} label="Остання синхронізація" value={fmtRelative(data.last_sync_at)} sub={fmtDate(data.last_sync_at)} />
       </div>
 
       {/* Filter pills */}
@@ -341,11 +340,10 @@ function RadaTab({ data }: { data: CoverageData }) {
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}
-              className={`h-8 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 shrink-0 ${
-                isActive
+              className={`h-8 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 shrink-0 ${isActive
                   ? "bg-[#C9A84C]/15 border-[#C9A84C]/40 text-[#C9A84C]"
                   : "border-[#C9A84C]/15 text-[#E0E6ED]/60 hover:border-[#C9A84C]/30 hover:text-[#E0E6ED]"
-              }`}
+                }`}
             >
               {hc && <hc.icon className={`w-3 h-3 ${isActive ? hc.cls : ""}`} />}
               {f.label}
@@ -355,7 +353,7 @@ function RadaTab({ data }: { data: CoverageData }) {
             </button>
           )
         })}
-        <span className="ml-auto text-[10px] text-[#C9A84C]/30 font-medium hidden sm:block whitespace-nowrap">
+        <span className="ml-auto text-[12px] text-[#C9A84C]/30 font-medium hidden sm:block whitespace-nowrap">
           Дані кешуються 24 год. · натисніть «Оновити з Ради» для свіжих даних
         </span>
       </div>
@@ -373,25 +371,24 @@ function RadaTab({ data }: { data: CoverageData }) {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-[#E0E6ED] truncate">{s.label}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] font-mono text-[#C9A84C]/40">{s.code}</span>
+                  <span className="text-[12px] font-mono text-[#C9A84C]/40">{s.code}</span>
                   <div className="flex-1"><CoverageBar pct={s.coverage_pct} /></div>
                 </div>
-                <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+                <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">
                   У нас: <span className="text-[#E0E6ED]/70 font-semibold">{fmt(s.our_total)}</span>
                   {s.rada_total != null && <> / Рада: {s.rada_estimated ? "~" : ""}{fmt(s.rada_total)}</>}
                   {s.our_restricted > 0 && <> · <Lock className="w-2.5 h-2.5 text-amber-400 inline" /> {s.our_restricted}</>}
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <p className={`text-lg font-bold tabular-nums ${
-                  s.coverage_pct == null ? "text-[#C9A84C]/40"
+                <p className={`text-lg font-bold tabular-nums ${s.coverage_pct == null ? "text-[#C9A84C]/40"
                     : s.coverage_pct >= 80 ? "text-emerald-400"
-                    : s.coverage_pct >= 40 ? "text-amber-400"
-                    : "text-red-400"
-                }`}>
+                      : s.coverage_pct >= 40 ? "text-amber-400"
+                        : "text-red-400"
+                  }`}>
                   {s.coverage_pct != null ? `${s.coverage_pct}%` : "—"}
                 </p>
-                <p className="text-[10px] text-[#E0E6ED]/40">{fmtRelative(s.last_scraped_at)}</p>
+                <p className="text-[12px] text-[#E0E6ED]/40">{fmtRelative(s.last_scraped_at)}</p>
               </div>
             </div>
           )
@@ -403,7 +400,7 @@ function RadaTab({ data }: { data: CoverageData }) {
 
       {/* DESKTOP table */}
       <div className="hidden sm:block rounded-2xl border border-[#C9A84C]/15 overflow-hidden">
-        <div className="grid grid-cols-[1fr_repeat(4,auto)_auto] gap-4 px-5 py-2.5 bg-[#C9A84C]/5 border-b border-[#C9A84C]/10 text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/50">
+        <div className="grid grid-cols-[1fr_repeat(4,auto)_auto] gap-4 px-5 py-2.5 bg-[#C9A84C]/5 border-b border-[#C9A84C]/10 text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/50">
           <span>Розділ</span>
           <span className="text-right w-20">На Раді</span>
           <span className="text-right w-16">У нас</span>
@@ -424,7 +421,7 @@ function RadaTab({ data }: { data: CoverageData }) {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-[#E0E6ED] truncate">{s.label}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] font-mono text-[#C9A84C]/40">{s.code}</span>
+                      <span className="text-[12px] font-mono text-[#C9A84C]/40">{s.code}</span>
                       <CoverageBar pct={s.coverage_pct} />
                     </div>
                   </div>
@@ -442,12 +439,11 @@ function RadaTab({ data }: { data: CoverageData }) {
                     </span>
                   ) : "—"}
                 </span>
-                <span className={`text-right w-20 text-sm font-bold ${
-                  s.coverage_pct == null ? "text-[#C9A84C]/40"
+                <span className={`text-right w-20 text-sm font-bold ${s.coverage_pct == null ? "text-[#C9A84C]/40"
                     : s.coverage_pct >= 80 ? "text-emerald-400"
-                    : s.coverage_pct >= 40 ? "text-amber-400"
-                    : "text-red-400"
-                }`}>
+                      : s.coverage_pct >= 40 ? "text-amber-400"
+                        : "text-red-400"
+                  }`}>
                   {s.coverage_pct != null ? `${s.coverage_pct}%` : "—"}
                 </span>
                 <span className="text-right w-24 text-xs text-[#E0E6ED]/40">
@@ -469,7 +465,7 @@ function RadaTab({ data }: { data: CoverageData }) {
           const HIcon = hc.icon
           const desc = h === "good" ? "≥ 80% документів є в базі"
             : h === "warning" ? "40–79% документів є в базі"
-            : "< 40% документів є в базі"
+              : "< 40% документів є в базі"
           return (
             <span key={h} className="flex items-center gap-1.5">
               <HIcon className={`w-3.5 h-3.5 ${hc.cls}`} /> {hc.label} — {desc}
@@ -487,10 +483,10 @@ function RadaTab({ data }: { data: CoverageData }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CoveragePage() {
-  const [data, setData]           = useState<CoverageData | null>(null)
-  const [loading, setLoading]     = useState(true)
+  const [data, setData] = useState<CoverageData | null>(null)
+  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [error, setError]         = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<SourceTab>("rada")
 
   const load = useCallback(async (forceRefresh = false) => {
@@ -533,7 +529,7 @@ export default function CoveragePage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {data?.cache_age_sec != null && (
-            <span className="text-[10px] font-black uppercase tracking-widest text-[#C9A84C]/40 hidden sm:block">
+            <span className="text-[12px] font-black uppercase tracking-widest text-[#C9A84C]/40 hidden sm:block">
               Рада: {Math.round(data.cache_age_sec / 3600)} год. тому
             </span>
           )}
@@ -562,13 +558,13 @@ export default function CoveragePage() {
       {loading && (
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-            {[0,1,2,3,4,5].map(i => (
-              <div key={i} className="h-24 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i*60}ms` }} />
+            {[0, 1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-24 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i * 60}ms` }} />
             ))}
           </div>
           <div className="grid gap-2 sm:gap-3 mt-2">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-14 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i*40}ms` }} />
+              <div key={i} className="h-14 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i * 40}ms` }} />
             ))}
           </div>
         </div>

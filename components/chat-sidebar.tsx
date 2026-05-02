@@ -107,9 +107,8 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
     <>
       {/* Mobile backdrop */}
       <div
-        className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300 ${
-          isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
+        className={`fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300 ${isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+          }`}
         onClick={onClose}
       />
 
@@ -160,7 +159,7 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
           {chatsLoading && (
             <div className="flex flex-col items-center justify-center pt-10 gap-3">
               <Loader2 className="w-5 h-5 animate-spin text-[#C9A84C]/50" />
-              <span className="text-[10px] text-[#C9A84C]/70 uppercase tracking-widest">Завантаження...</span>
+              <span className="text-[12px] text-[#C9A84C]/70 uppercase tracking-widest">Завантаження...</span>
             </div>
           )}
 
@@ -173,7 +172,7 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
 
           {groups.map(group => (
             <div key={group.label} className="space-y-1">
-              <p className="text-[10px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.2em] px-3 mb-2">
+              <p className="text-[12px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.2em] px-3 mb-2">
                 {group.label}
               </p>
               {group.items.map(chat => (
@@ -182,11 +181,10 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
                   onClick={() => handleSelect(chat.id)}
                   onMouseEnter={() => setHovered(chat.id)}
                   onMouseLeave={() => setHovered(null)}
-                  className={`w-full flex items-center gap-3 px-3 py-3 md:py-2.5 rounded-xl text-left transition-all duration-200 group relative ${
-                    currentChatId === chat.id
+                  className={`w-full flex items-center gap-3 px-3 py-3 md:py-2.5 rounded-xl text-left transition-all duration-200 group relative ${currentChatId === chat.id
                       ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/20 shadow-lg shadow-black/20"
                       : "text-[#A0AEC0] hover:bg-[#C9A84C]/5 hover:text-[#E0E6ED]"
-                  }`}
+                    }`}
                 >
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 transition-all ${currentChatId === chat.id ? "bg-[#C9A84C]" : "bg-transparent group-hover:bg-[#C9A84C]/30"}`} />
                   <span className="flex-1 text-xs font-medium truncate">{chat.title}</span>
@@ -233,7 +231,7 @@ export function ChatSidebar({ currentChatId, onNewChat, onSelectChat, navigateOn
             </div>
             <div className="min-w-0">
               <p className="text-sm font-bold text-[#E0E6ED] truncate leading-none mb-1">{displayName}</p>
-              <p className="text-[10px] text-[#C9A84C]/50 truncate font-medium">{profile?.email}</p>
+              <p className="text-[12px] text-[#C9A84C]/50 truncate font-medium">{profile?.email}</p>
             </div>
           </div>
         </div>

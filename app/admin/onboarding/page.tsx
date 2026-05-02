@@ -21,14 +21,14 @@ type Response = { segments: string[]; role: string | null; sub_role: string | nu
 
 const STEP_TABS: { key: string; label: string }[] = [
   { key: "segments", label: "Сфери" },
-  { key: "roles",    label: "Ролі" },
-  { key: "sub_roles",label: "Спеціалізації" },
+  { key: "roles", label: "Ролі" },
+  { key: "sub_roles", label: "Спеціалізації" },
 ]
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5 flex flex-col gap-1">
-      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60">{label}</p>
+      <p className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/60">{label}</p>
       <p className="text-2xl font-serif font-bold text-white">{value}</p>
       {sub && <p className="text-xs text-[#E0E6ED]/40">{sub}</p>}
     </div>
@@ -182,11 +182,10 @@ export default function OnboardingAdminPage() {
           <button
             key={key}
             onClick={() => setActiveTab(key)}
-            className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-[0.15em] transition-all ${
-              activeTab === key
+            className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-[0.15em] transition-all ${activeTab === key
                 ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/30"
                 : "text-[#C9A84C]/50 hover:text-[#C9A84C]/70"
-            }`}
+              }`}
           >
             {label}
           </button>
@@ -204,11 +203,10 @@ export default function OnboardingAdminPage() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveStep(tab.key)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${
-                    activeStep === tab.key
+                  className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all border ${activeStep === tab.key
                       ? "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/30"
                       : "text-[#E0E6ED]/50 border-[#C9A84C]/10 hover:border-[#C9A84C]/20 hover:text-[#E0E6ED]/70"
-                  }`}
+                    }`}
                 >
                   {tab.label} ({options.filter(o => o.step_key === tab.key).length})
                 </button>
@@ -254,16 +252,16 @@ export default function OnboardingAdminPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-[#E0E6ED]">{opt.label}</span>
-                          <span className="text-[10px] font-mono text-[#C9A84C]/40 bg-[#C9A84C]/5 px-1.5 py-0.5 rounded-md">{opt.value}</span>
+                          <span className="text-[12px] font-mono text-[#C9A84C]/40 bg-[#C9A84C]/5 px-1.5 py-0.5 rounded-md">{opt.value}</span>
                           {opt.icon && (
-                            <span className="text-[10px] text-[#E0E6ED]/30">{opt.icon}</span>
+                            <span className="text-[12px] text-[#E0E6ED]/30">{opt.icon}</span>
                           )}
                         </div>
                         {opt.description && (
                           <p className="text-xs text-[#E0E6ED]/40 mt-0.5 truncate">{opt.description}</p>
                         )}
                         {opt.parent_value && (
-                          <p className="text-[10px] text-[#C9A84C]/50 mt-0.5">→ {opt.parent_value}</p>
+                          <p className="text-[12px] text-[#C9A84C]/50 mt-0.5">→ {opt.parent_value}</p>
                         )}
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -304,7 +302,7 @@ export default function OnboardingAdminPage() {
 
             {/* Segment breakdown */}
             <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-5">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4 flex items-center gap-2">
+              <h3 className="text-[12px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/70 mb-4 flex items-center gap-2">
                 <BarChart3 className="w-4 h-4" /> Розподіл по сегментах
               </h3>
               <div className="space-y-2.5">
@@ -346,18 +344,18 @@ export default function OnboardingAdminPage() {
                         {(r.segments ?? []).map(s => {
                           const opt = options.find(o => o.value === s)
                           return (
-                            <span key={s} className="px-2 py-0.5 rounded-lg bg-[#C9A84C]/8 text-[#C9A84C]/70 border border-[#C9A84C]/10 text-[10px] font-bold">
+                            <span key={s} className="px-2 py-0.5 rounded-lg bg-[#C9A84C]/8 text-[#C9A84C]/70 border border-[#C9A84C]/10 text-[12px] font-bold">
                               {opt?.label ?? s}
                             </span>
                           )
                         })}
                         {r.role && (
-                          <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/10 text-[10px] font-bold">
+                          <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/10 text-[12px] font-bold">
                             {r.role}
                           </span>
                         )}
                         {r.sub_role && (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 text-[10px] font-bold">
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 text-[12px] font-bold">
                             {r.sub_role}
                           </span>
                         )}
@@ -377,7 +375,7 @@ export default function OnboardingAdminPage() {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setModal(null)} />
           <div className="relative w-full max-w-md bg-[#0d1120] border border-[#C9A84C]/30 rounded-[2rem] p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">
+              <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">
                 {modal === "add" ? "Новий варіант" : "Редагувати варіант"}
               </p>
               <button onClick={() => setModal(null)} className="text-[#C9A84C]/40 hover:text-[#C9A84C]">
@@ -388,7 +386,7 @@ export default function OnboardingAdminPage() {
             <div className="space-y-3">
               {modal === "add" && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Value (key)</label>
+                  <label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Value (key)</label>
                   <input
                     value={form.value}
                     onChange={e => setForm(f => ({ ...f, value: e.target.value }))}
@@ -398,7 +396,7 @@ export default function OnboardingAdminPage() {
                 </div>
               )}
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Label (назва)</label>
+                <label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Label (назва)</label>
                 <input
                   value={form.label}
                   onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
@@ -407,7 +405,7 @@ export default function OnboardingAdminPage() {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Опис</label>
+                <label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Опис</label>
                 <input
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
@@ -417,7 +415,7 @@ export default function OnboardingAdminPage() {
               </div>
               {activeStep === "segments" && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Іконка Lucide</label>
+                  <label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-wider">Іконка Lucide</label>
                   <input
                     value={form.icon}
                     onChange={e => setForm(f => ({ ...f, icon: e.target.value }))}
@@ -428,7 +426,7 @@ export default function OnboardingAdminPage() {
               )}
               {activeStep === "sub_roles" && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-wider">
+                  <label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-wider">
                     Прив'язка до сегмента (parent_value)
                   </label>
                   <select

@@ -64,17 +64,17 @@ type Filters = {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TIER_CFG: Record<string, { label: string; bg: string; text: string; border: string }> = {
-  free:     { label: "Free",     bg: "bg-[#C9A84C]/5",   text: "text-[#C9A84C]/70",  border: "border-[#C9A84C]/20" },
-  daily:    { label: "Daily",    bg: "bg-blue-500/10",   text: "text-blue-400",       border: "border-blue-500/20"  },
-  standard: { label: "Standard", bg: "bg-amber-500/10",  text: "text-amber-400",      border: "border-amber-500/20" },
-  pro:      { label: "Pro",      bg: "bg-purple-500/10", text: "text-purple-400",     border: "border-purple-500/20"},
+  free: { label: "Free", bg: "bg-[#C9A84C]/5", text: "text-[#C9A84C]/70", border: "border-[#C9A84C]/20" },
+  daily: { label: "Daily", bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/20" },
+  standard: { label: "Standard", bg: "bg-amber-500/10", text: "text-amber-400", border: "border-amber-500/20" },
+  pro: { label: "Pro", bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/20" },
 }
 
 const SORTABLE: Record<string, string> = {
-  subscription_tier:   "Тариф",
+  subscription_tier: "Тариф",
   requests_this_month: "Запити",
-  last_active_at:      "Активність",
-  created_at:          "Зареєстрований",
+  last_active_at: "Активність",
+  created_at: "Зареєстрований",
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -91,12 +91,12 @@ function formatRelative(iso: string | null): { text: string; cls: string } {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
   const h = Math.floor(mins / 60)
   const d = Math.floor(h / 24)
-  if (mins < 2)   return { text: "Щойно",        cls: "text-emerald-400" }
-  if (mins < 60)  return { text: `${mins} хв тому`, cls: "text-emerald-400" }
-  if (h < 24)     return { text: `${h} год тому`,   cls: "text-emerald-400" }
-  if (d < 7)      return { text: `${d} дн тому`,    cls: "text-amber-400"   }
-  if (d < 30)     return { text: `${d} дн тому`,    cls: "text-[#E0E6ED]/50"}
-  return             { text: `${d} дн тому`,    cls: "text-red-400/70"  }
+  if (mins < 2) return { text: "Щойно", cls: "text-emerald-400" }
+  if (mins < 60) return { text: `${mins} хв тому`, cls: "text-emerald-400" }
+  if (h < 24) return { text: `${h} год тому`, cls: "text-emerald-400" }
+  if (d < 7) return { text: `${d} дн тому`, cls: "text-amber-400" }
+  if (d < 30) return { text: `${d} дн тому`, cls: "text-[#E0E6ED]/50" }
+  return { text: `${d} дн тому`, cls: "text-red-400/70" }
 }
 
 function formatDate(iso: string) {
@@ -108,10 +108,10 @@ function formatDate(iso: string) {
 function parseBrowser(ua: string | null) {
   if (!ua) return "—"
   const os = ua.includes("Windows") ? "Windows"
-           : ua.includes("Mac")     ? "macOS"
-           : ua.includes("Linux")   ? "Linux"
-           : ua.includes("Android") ? "Android"
-           : ua.includes("iPhone")  ? "iOS" : "?"
+    : ua.includes("Mac") ? "macOS"
+      : ua.includes("Linux") ? "Linux"
+        : ua.includes("Android") ? "Android"
+          : ua.includes("iPhone") ? "iOS" : "?"
   const m = ua.match(/(?:Chrome|Firefox|Safari|Edge|OPR)\/([\d]+)/)
   const browser = m ? ua.match(/(Chrome|Firefox|Safari|Edge|OPR)/)?.[0] ?? "?" : "?"
   const ver = m?.[1] ?? ""
@@ -127,7 +127,7 @@ function initials(u: User) {
 function TierBadge({ tier }: { tier: string }) {
   const c = TIER_CFG[tier] ?? TIER_CFG.free
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border ${c.bg} ${c.text} ${c.border}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[12px] font-black uppercase tracking-wider border ${c.bg} ${c.text} ${c.border}`}>
       {c.label}
     </span>
   )
@@ -141,14 +141,14 @@ function SortTh({
   const active = sort.col === col
   return (
     <th
-      className={`px-4 py-3 text-left text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider cursor-pointer select-none hover:text-[#C9A84C] transition-colors group ${className}`}
+      className={`px-4 py-3 text-left text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider cursor-pointer select-none hover:text-[#C9A84C] transition-colors group ${className}`}
       onClick={() => onSort(col)}
     >
       <span className="inline-flex items-center gap-1">
         {label}
         {active
           ? sort.dir === "asc"
-            ? <ArrowUp   className="w-3 h-3 text-[#C9A84C]" />
+            ? <ArrowUp className="w-3 h-3 text-[#C9A84C]" />
             : <ArrowDown className="w-3 h-3 text-[#C9A84C]" />
           : <ArrowUpDown className="w-3 h-3 opacity-25 group-hover:opacity-60" />
         }
@@ -159,7 +159,7 @@ function SortTh({
 
 function Th({ label, className = "" }: { label: string; className?: string }) {
   return (
-    <th className={`px-4 py-3 text-left text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider ${className}`}>
+    <th className={`px-4 py-3 text-left text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider ${className}`}>
       {label}
     </th>
   )
@@ -170,7 +170,7 @@ function StatCard({ label, value, sub, accent = false }: {
 }) {
   return (
     <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-2xl p-4 min-w-0">
-      <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2 truncate">{label}</p>
+      <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2 truncate">{label}</p>
       <p className={`text-2xl font-serif font-bold ${accent ? "text-emerald-400" : "text-[#C9A84C]"}`}>{value}</p>
       {sub && <p className="text-[11px] text-[#E0E6ED]/35 mt-1 truncate">{sub}</p>}
     </div>
@@ -218,13 +218,13 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
       <span className="text-xs text-[#E0E6ED]/40 shrink-0">{label}</span>
       {value
         ? <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-        : <X     className="w-4 h-4 text-[#E0E6ED]/20 shrink-0" />}
+        : <X className="w-4 h-4 text-[#E0E6ED]/20 shrink-0" />}
     </div>
   )
 }
 
 type ChatRow = { id: string; title: string | null; created_at: string; updated_at: string; context_summary: string | null }
-type MsgRow  = { id: string; role: string; content: string; created_at: string }
+type MsgRow = { id: string; role: string; content: string; created_at: string }
 
 type EditForm = { subscription_tier: string; monthly_limit: string; bonus_requests: string; is_beta_tester: boolean }
 
@@ -233,16 +233,16 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
   const effectiveLimit = user.monthly_limit !== null ? user.monthly_limit + (user.bonus_requests ?? 0) : null
   const pct = effectiveLimit ? Math.min(100, Math.round((user.requests_this_month / effectiveLimit) * 100)) : 0
 
-  const [chats, setChats]               = useState<ChatRow[]>([])
+  const [chats, setChats] = useState<ChatRow[]>([])
   const [chatsLoading, setChatsLoading] = useState(true)
-  const [openChat, setOpenChat]         = useState<ChatRow | null>(null)
-  const [messages, setMessages]         = useState<MsgRow[]>([])
-  const [msgsLoading, setMsgsLoading]   = useState(false)
+  const [openChat, setOpenChat] = useState<ChatRow | null>(null)
+  const [messages, setMessages] = useState<MsgRow[]>([])
+  const [msgsLoading, setMsgsLoading] = useState(false)
   const msgsEndRef = useRef<HTMLDivElement>(null)
 
-  const [isBanned, setIsBanned]         = useState(false)
-  const [editOpen, setEditOpen]         = useState(false)
-  const [editForm, setEditForm]         = useState<EditForm>({
+  const [isBanned, setIsBanned] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState<EditForm>({
     subscription_tier: user.subscription_tier,
     monthly_limit: user.monthly_limit !== null ? String(user.monthly_limit) : "",
     bonus_requests: String(user.bonus_requests ?? 0),
@@ -251,8 +251,8 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
   const [confirmBetaToggle, setConfirmBetaToggle] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [confirmBan, setConfirmBan]       = useState(false)
-  const [actionError, setActionError]   = useState<string | null>(null)
+  const [confirmBan, setConfirmBan] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`/api/admin/users/${user.id}`)
@@ -261,7 +261,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
         if (typeof d.is_banned === "boolean") setIsBanned(d.is_banned)
         if (typeof d.is_beta_tester === "boolean") setEditForm(f => ({ ...f, is_beta_tester: d.is_beta_tester }))
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [user.id])
 
   useEffect(() => {
@@ -370,7 +370,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                   <p className="text-sm font-semibold text-[#E0E6ED] truncate">
                     {openChat.title || "Новий чат"}
                   </p>
-                  <p className="text-[10px] text-[#6B7CA3]">
+                  <p className="text-[12px] text-[#6B7CA3]">
                     {new Date(openChat.updated_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </div>
@@ -383,7 +383,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
               {openChat.context_summary && (
                 <div className="shrink-0 mx-4 my-3 p-3 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/15">
                   <p className="text-[9px] font-black uppercase tracking-[0.2em] text-[#C9A84C]/50 mb-1.5">Архів контексту</p>
-                  <p className="text-[10px] text-[#E0E6ED]/50 leading-relaxed line-clamp-4">{openChat.context_summary}</p>
+                  <p className="text-[12px] text-[#E0E6ED]/50 leading-relaxed line-clamp-4">{openChat.context_summary}</p>
                 </div>
               )}
 
@@ -404,11 +404,10 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                       className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                     >
                       <div
-                        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words ${
-                          msg.role === "user"
+                        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words ${msg.role === "user"
                             ? "bg-[#C9A84C]/15 border border-[#C9A84C]/25 text-[#E0E6ED]/90 rounded-tr-sm"
                             : "bg-[#0A0E1A] border border-[#C9A84C]/10 text-[#E0E6ED]/75 rounded-tl-sm"
-                        }`}
+                          }`}
                       >
                         {msg.content}
                       </div>
@@ -441,7 +440,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
           {/* Tier + provider */}
           <div className="flex items-center gap-2 flex-wrap">
             <TierBadge tier={user.subscription_tier} />
-            <span className="inline-flex items-center gap-1 text-[10px] text-[#E0E6ED]/40 border border-[#C9A84C]/10 rounded-lg px-2 py-0.5">
+            <span className="inline-flex items-center gap-1 text-[12px] text-[#E0E6ED]/40 border border-[#C9A84C]/10 rounded-lg px-2 py-0.5">
               {user.auth_provider === "google" ? <Globe className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
               {user.auth_provider}
             </span>
@@ -449,7 +448,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
 
           {/* Activity */}
           <section>
-            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Активність</p>
+            <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Активність</p>
             <div>
               {/* Requests progress */}
               <div className="mb-3 p-3 bg-[#C9A84C]/5 border border-[#C9A84C]/10 rounded-xl">
@@ -466,7 +465,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                   </div>
                 )}
                 {user.limit_reset_at && (
-                  <p className="text-[10px] text-[#E0E6ED]/30 mt-1.5">
+                  <p className="text-[12px] text-[#E0E6ED]/30 mt-1.5">
                     Скинеться {formatDate(user.limit_reset_at)}
                   </p>
                 )}
@@ -483,18 +482,18 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
 
           {/* Profile */}
           <section>
-            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Профіль</p>
-            <BoolRow label="Онбординг пройдено"   value={user.is_onboarded}      />
-            <BoolRow label="Email підтверджено"    value={user.email_confirmed}   />
-            <BoolRow label="Тріал використано"     value={user.trial_used}        />
-            <BoolRow label="Маркетинг погоджено"   value={user.marketing_consent} />
+            <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Профіль</p>
+            <BoolRow label="Онбординг пройдено" value={user.is_onboarded} />
+            <BoolRow label="Email підтверджено" value={user.email_confirmed} />
+            <BoolRow label="Тріал використано" value={user.trial_used} />
+            <BoolRow label="Маркетинг погоджено" value={user.marketing_consent} />
             <DrawerRow label="Зареєстрований" value={formatDate(user.created_at)} />
           </section>
 
           {/* Onboarding + AI profile */}
           {(user.role || user.sub_role?.length || user.segment?.length || user.ai_personal_prompt) && (
             <section>
-              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Онбординг та AI профіль</p>
+              <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Онбординг та AI профіль</p>
 
               {user.role && (
                 <div className="flex items-center justify-between gap-4 py-2 border-b border-[#C9A84C]/5">
@@ -508,7 +507,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                   <span className="text-xs text-[#E0E6ED]/40 shrink-0">Спеціалізація</span>
                   <div className="flex flex-wrap gap-1 justify-end">
                     {user.sub_role.map(s => (
-                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{labels[s] ?? s}</span>
+                      <span key={s} className="text-[12px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{labels[s] ?? s}</span>
                     ))}
                   </div>
                 </div>
@@ -519,7 +518,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                   <span className="text-xs text-[#E0E6ED]/40 shrink-0">Сфера</span>
                   <div className="flex flex-wrap gap-1 justify-end">
                     {user.segment.map(s => (
-                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{labels[s] ?? s}</span>
+                      <span key={s} className="text-[12px] px-1.5 py-0.5 rounded-md bg-[#C9A84C]/8 border border-[#C9A84C]/15 text-[#C9A84C]/70">{labels[s] ?? s}</span>
                     ))}
                   </div>
                 </div>
@@ -527,7 +526,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
 
               {user.ai_personal_prompt && (
                 <div className="mt-3">
-                  <p className="text-[10px] text-[#E0E6ED]/30 uppercase tracking-wider mb-1.5">AI промпт</p>
+                  <p className="text-[12px] text-[#E0E6ED]/30 uppercase tracking-wider mb-1.5">AI промпт</p>
                   <div className="bg-[#0A0E1A]/80 border border-[#C9A84C]/10 rounded-xl p-3 text-xs text-[#E0E6ED]/60 leading-relaxed max-h-40 overflow-y-auto">
                     {user.ai_personal_prompt}
                   </div>
@@ -538,7 +537,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
 
           {/* Technical */}
           <section>
-            <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Технічне</p>
+            <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-3">Технічне</p>
             <DrawerRow label="IP" value={user.last_ip} mono />
             <DrawerRow
               label="Місто"
@@ -552,9 +551,9 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
           {/* Chats */}
           <section>
             <div className="flex items-center gap-2 mb-3">
-              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Чати</p>
+              <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Чати</p>
               {!chatsLoading && (
-                <span className="text-[10px] text-[#6B7CA3] bg-[#C9A84C]/5 border border-[#C9A84C]/10 rounded-full px-1.5 py-0.5">
+                <span className="text-[12px] text-[#6B7CA3] bg-[#C9A84C]/5 border border-[#C9A84C]/10 rounded-full px-1.5 py-0.5">
                   {chats.length}
                 </span>
               )}
@@ -576,7 +575,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                     <MessageSquare className="w-3.5 h-3.5 text-[#C9A84C]/40 group-hover:text-[#C9A84C]/70 shrink-0 mt-0.5 transition-colors" />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs text-[#E0E6ED]/80 truncate group-hover:text-[#E0E6ED] transition-colors">{chat.title || "Новий чат"}</p>
-                      <p className="text-[10px] text-[#6B7CA3]">
+                      <p className="text-[12px] text-[#6B7CA3]">
                         {new Date(chat.updated_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </p>
                     </div>
@@ -598,17 +597,16 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
           <div className="flex gap-2">
             <button
               onClick={() => { setEditOpen(true); setActionError(null) }}
-              className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border border-[#C9A84C]/25 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:border-[#C9A84C]/50 hover:bg-[#C9A84C]/5 text-[10px] font-bold uppercase tracking-wider transition-all"
+              className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border border-[#C9A84C]/25 text-[#C9A84C]/70 hover:text-[#C9A84C] hover:border-[#C9A84C]/50 hover:bg-[#C9A84C]/5 text-[12px] font-bold uppercase tracking-wider transition-all"
             >
               <Pencil className="w-3.5 h-3.5" /> Редагувати
             </button>
             <button
               onClick={() => { setConfirmBan(true); setActionError(null) }}
-              className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${
-                isBanned
+              className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border text-[12px] font-bold uppercase tracking-wider transition-all ${isBanned
                   ? "border-emerald-500/30 text-emerald-400/70 hover:text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/5"
                   : "border-amber-500/30 text-amber-400/70 hover:text-amber-400 hover:border-amber-500/60 hover:bg-amber-500/5"
-              }`}
+                }`}
             >
               {isBanned ? <ShieldCheck className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
               {isBanned ? "Розблокувати" : "Заблокувати"}
@@ -652,7 +650,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <div className="flex gap-2">
                   <button
                     onClick={() => setConfirmBetaToggle(false)}
-                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[10px] font-bold uppercase tracking-wider transition-all"
+                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[12px] font-bold uppercase tracking-wider transition-all"
                   >
                     Скасувати
                   </button>
@@ -661,7 +659,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                       setEditForm(f => ({ ...f, is_beta_tester: !f.is_beta_tester }))
                       setConfirmBetaToggle(false)
                     }}
-                    className="flex-1 h-10 rounded-xl bg-[#C9A84C] hover:bg-[#C9A84C]/90 text-[#0A0E1A] text-[10px] font-black uppercase tracking-wider transition-all"
+                    className="flex-1 h-10 rounded-xl bg-[#C9A84C] hover:bg-[#C9A84C]/90 text-[#0A0E1A] text-[12px] font-black uppercase tracking-wider transition-all"
                   >
                     Підтвердити
                   </button>
@@ -701,14 +699,14 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <div className="flex gap-2">
                   <button
                     onClick={() => setConfirmBan(false)}
-                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[10px] font-bold uppercase tracking-wider transition-all"
+                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[12px] font-bold uppercase tracking-wider transition-all"
                   >
                     Скасувати
                   </button>
                   <button
                     onClick={() => { setConfirmBan(false); handleToggleBan() }}
                     disabled={actionLoading}
-                    className={`flex-1 h-10 rounded-xl text-white text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5 ${isBanned ? "bg-emerald-600 hover:bg-emerald-700" : "bg-amber-600 hover:bg-amber-700"}`}
+                    className={`flex-1 h-10 rounded-xl text-white text-[12px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5 ${isBanned ? "bg-emerald-600 hover:bg-emerald-700" : "bg-amber-600 hover:bg-amber-700"}`}
                   >
                     {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isBanned ? "Розблокувати" : "Заблокувати"}
                   </button>
@@ -742,14 +740,14 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <div className="flex gap-2">
                   <button
                     onClick={() => setConfirmDelete(false)}
-                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[10px] font-bold uppercase tracking-wider transition-all"
+                    className="flex-1 h-10 rounded-xl border border-[#C9A84C]/20 text-[#E0E6ED]/60 hover:border-[#C9A84C]/40 text-[12px] font-bold uppercase tracking-wider transition-all"
                   >
                     Скасувати
                   </button>
                   <button
                     onClick={handleDelete}
                     disabled={actionLoading}
-                    className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+                    className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[12px] font-bold uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
                   >
                     {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Trash2 className="w-3.5 h-3.5" /> Видалити</>}
                   </button>
@@ -791,7 +789,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Тариф</label>
+                  <label className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Тариф</label>
                   <select
                     value={editForm.subscription_tier}
                     onChange={e => setEditForm(f => ({ ...f, subscription_tier: e.target.value }))}
@@ -805,7 +803,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Місячний ліміт</label>
+                  <label className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Місячний ліміт</label>
                   <input
                     type="number"
                     min={0}
@@ -817,7 +815,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Бонусні запити</label>
+                  <label className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em]">Бонусні запити</label>
                   <input
                     type="number"
                     min={0}
@@ -831,21 +829,19 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <div className="flex items-center justify-between p-4 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/15">
                   <div>
                     <p className="text-xs font-bold text-[#E0E6ED]">Бета-тестер</p>
-                    <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">Повний PRO-доступ + обов&apos;язковий відгук після кожної відповіді</p>
+                    <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">Повний PRO-доступ + обов&apos;язковий відгук після кожної відповіді</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setConfirmBetaToggle(true)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors focus:outline-none ${
-                      editForm.is_beta_tester
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors focus:outline-none ${editForm.is_beta_tester
                         ? "bg-[#C9A84C] border-[#C9A84C]"
                         : "bg-[#0A0E1A] border-[#C9A84C]/30"
-                    }`}
+                      }`}
                   >
                     <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform mt-0.5 ${
-                        editForm.is_beta_tester ? "translate-x-5" : "translate-x-0.5"
-                      }`}
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform mt-0.5 ${editForm.is_beta_tester ? "translate-x-5" : "translate-x-0.5"
+                        }`}
                     />
                   </button>
                 </div>
@@ -855,7 +851,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <button
                   onClick={handleSaveEdit}
                   disabled={actionLoading}
-                  className="w-full h-10 rounded-xl bg-[#C9A84C] hover:bg-[#C9A84C]/90 text-[#0A0E1A] text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+                  className="w-full h-10 rounded-xl bg-[#C9A84C] hover:bg-[#C9A84C]/90 text-[#0A0E1A] text-[12px] font-black uppercase tracking-wider transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
                 >
                   {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Save className="w-3.5 h-3.5" /> Зберегти</>}
                 </button>
@@ -871,18 +867,18 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
-  const [users, setUsers]           = useState<User[]>([])
-  const [total, setTotal]           = useState(0)
-  const [stats, setStats]           = useState<Stats | null>(null)
-  const [loading, setLoading]       = useState(true)
+  const [users, setUsers] = useState<User[]>([])
+  const [total, setTotal] = useState(0)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(true)
-  const [rawSearch, setRawSearch]   = useState("")
+  const [rawSearch, setRawSearch] = useState("")
   const [debouncedSearch, setDebounced] = useState("")
-  const [filters, setFilters]       = useState<Filters>({ tier: "", onboarded: "", confirmed: "", activity: "", provider: "" })
-  const [sort, setSort]             = useState<SortState>({ col: "created_at", dir: "desc" })
-  const [page, setPage]             = useState(1)
-  const [selected, setSelected]     = useState<User | null>(null)
-  const [statsOpen, setStatsOpen]   = useState(false)
+  const [filters, setFilters] = useState<Filters>({ tier: "", onboarded: "", confirmed: "", activity: "", provider: "" })
+  const [sort, setSort] = useState<SortState>({ col: "created_at", dir: "desc" })
+  const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<User | null>(null)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [onboardingLabels, setOnboardingLabels] = useState<Record<string, string>>({})
   const PER_PAGE = 25
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -903,7 +899,7 @@ export default function UsersPage() {
         for (const opt of (d.options ?? [])) map[opt.value] = opt.label
         setOnboardingLabels(map)
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [])
 
   // Fetch stats (once)
@@ -911,7 +907,7 @@ export default function UsersPage() {
     fetch("/api/admin/users/stats")
       .then((r) => r.json())
       .then((d) => setStats(d))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setStatsLoading(false))
   }, [])
 
@@ -919,16 +915,16 @@ export default function UsersPage() {
   const fetchUsers = useCallback(async () => {
     setLoading(true)
     const p = new URLSearchParams({
-      search:   debouncedSearch,
-      tier:     filters.tier,
+      search: debouncedSearch,
+      tier: filters.tier,
       onboarded: filters.onboarded,
       confirmed: filters.confirmed,
-      activity:  filters.activity,
-      provider:  filters.provider,
-      sort_by:   sort.col,
-      sort_dir:  sort.dir,
-      page:      String(page),
-      per_page:  String(PER_PAGE),
+      activity: filters.activity,
+      provider: filters.provider,
+      sort_by: sort.col,
+      sort_dir: sort.dir,
+      page: String(page),
+      per_page: String(PER_PAGE),
     })
     try {
       const r = await fetch(`/api/admin/users?${p}`)
@@ -956,7 +952,7 @@ export default function UsersPage() {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
-  const tierItems  = ["", "free", "daily", "standard", "pro"]
+  const tierItems = ["", "free", "daily", "standard", "pro"]
 
   return (
     <div className="flex flex-col gap-0">
@@ -999,7 +995,7 @@ export default function UsersPage() {
             ))
           ) : stats ? (
             <>
-              <StatCard label="Всього юзерів"    value={stats.total} />
+              <StatCard label="Всього юзерів" value={stats.total} />
               <StatCard label="Активних (7д)" value={stats.active_7d} accent sub={`${stats.total ? Math.round((stats.active_7d / stats.total) * 100) : 0}% від усіх`} />
               <StatCard label="Без онбордингу" value={stats.not_onboarded} />
               <StatCard label="Тріал" value={stats.trial_used} />
@@ -1034,11 +1030,10 @@ export default function UsersPage() {
               <button
                 key={t}
                 onClick={() => setFilter("tier", t)}
-                className={`px-3 h-7 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
-                  filters.tier === t
+                className={`px-3 h-7 rounded-lg text-[12px] font-black uppercase tracking-wider transition-all ${filters.tier === t
                     ? "bg-[#C9A84C] text-[#0A0E1A]"
                     : "text-[#E0E6ED]/50 hover:text-[#E0E6ED]"
-                }`}
+                  }`}
               >
                 {t || "Всі"}
               </button>
@@ -1049,8 +1044,8 @@ export default function UsersPage() {
             value={filters.onboarded}
             onChange={(v) => setFilter("onboarded", v)}
             options={[
-              { value: "",      label: "Онбординг: всі" },
-              { value: "true",  label: "✓ Пройшли" },
+              { value: "", label: "Онбординг: всі" },
+              { value: "true", label: "✓ Пройшли" },
               { value: "false", label: "✗ Не пройшли" },
             ]}
           />
@@ -1059,10 +1054,10 @@ export default function UsersPage() {
             value={filters.activity}
             onChange={(v) => setFilter("activity", v)}
             options={[
-              { value: "",         label: "Активність: вся"  },
-              { value: "today",    label: "Сьогодні"         },
-              { value: "7d",       label: "За 7 днів"        },
-              { value: "30d",      label: "За 30 днів"       },
+              { value: "", label: "Активність: вся" },
+              { value: "today", label: "Сьогодні" },
+              { value: "7d", label: "За 7 днів" },
+              { value: "30d", label: "За 30 днів" },
               { value: "inactive", label: "Неактивні (>30д)" },
             ]}
           />
@@ -1071,9 +1066,9 @@ export default function UsersPage() {
             value={filters.confirmed}
             onChange={(v) => setFilter("confirmed", v)}
             options={[
-              { value: "",      label: "Email: всі"          },
-              { value: "true",  label: "✓ Підтверджений"     },
-              { value: "false", label: "✗ Не підтверджений"  },
+              { value: "", label: "Email: всі" },
+              { value: "true", label: "✓ Підтверджений" },
+              { value: "false", label: "✗ Не підтверджений" },
             ]}
           />
 
@@ -1081,9 +1076,9 @@ export default function UsersPage() {
             value={filters.provider}
             onChange={(v) => setFilter("provider", v)}
             options={[
-              { value: "",       label: "Провайдер: всі" },
-              { value: "email",  label: "📧 Email"       },
-              { value: "google", label: "G Google"       },
+              { value: "", label: "Провайдер: всі" },
+              { value: "email", label: "📧 Email" },
+              { value: "google", label: "G Google" },
             ]}
           />
         </div>
@@ -1097,7 +1092,7 @@ export default function UsersPage() {
             <p className="text-sm text-[#E0E6ED]/60">
               {loading ? "Завантаження..." : `${total} ${total === 1 ? "юзер" : total < 5 ? "юзери" : "юзерів"}`}
             </p>
-            <p className="text-[10px] font-black text-[#C9A84C]/40 uppercase tracking-widest">
+            <p className="text-[12px] font-black text-[#C9A84C]/40 uppercase tracking-widest">
               Сторінка {page} з {totalPages}
             </p>
           </div>
@@ -1128,13 +1123,13 @@ export default function UsersPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[#E0E6ED]/90 truncate">{user.full_name || user.email}</p>
-                      {user.full_name && <p className="text-[10px] text-[#E0E6ED]/40 truncate">{user.email}</p>}
+                      {user.full_name && <p className="text-[12px] text-[#E0E6ED]/40 truncate">{user.email}</p>}
                     </div>
                     <div className="text-right shrink-0">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border ${tier.bg} ${tier.text} ${tier.border}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[12px] font-black uppercase tracking-wider border ${tier.bg} ${tier.text} ${tier.border}`}>
                         {tier.label}
                       </span>
-                      <p className={`text-[10px] mt-0.5 ${rel.cls}`}>{rel.text}</p>
+                      <p className={`text-[12px] mt-0.5 ${rel.cls}`}>{rel.text}</p>
                     </div>
                   </div>
                 )
@@ -1148,12 +1143,12 @@ export default function UsersPage() {
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-[#C9A84C]/10 bg-[#0d1120]">
                   <Th label="Юзер" />
-                  <SortTh col="subscription_tier"   label="Тариф"       sort={sort} onSort={handleSort} />
-                  <SortTh col="requests_this_month" label="Запити"      sort={sort} onSort={handleSort} className="hidden md:table-cell" />
-                  <SortTh col="last_active_at"      label="Активність"  sort={sort} onSort={handleSort} />
-                  <SortTh col="created_at"          label="Реєстрація"  sort={sort} onSort={handleSort} className="hidden sm:table-cell" />
-                  <Th label="Місто"   className="hidden lg:table-cell" />
-                  <Th label="Статус"  className="hidden sm:table-cell" />
+                  <SortTh col="subscription_tier" label="Тариф" sort={sort} onSort={handleSort} />
+                  <SortTh col="requests_this_month" label="Запити" sort={sort} onSort={handleSort} className="hidden md:table-cell" />
+                  <SortTh col="last_active_at" label="Активність" sort={sort} onSort={handleSort} />
+                  <SortTh col="created_at" label="Реєстрація" sort={sort} onSort={handleSort} className="hidden sm:table-cell" />
+                  <Th label="Місто" className="hidden lg:table-cell" />
+                  <Th label="Статус" className="hidden sm:table-cell" />
                 </tr>
               </thead>
               <tbody>
@@ -1212,7 +1207,7 @@ export default function UsersPage() {
                               <span className="text-xs text-[#E0E6ED]/80 tabular-nums font-medium">
                                 {u.requests_this_month}
                               </span>
-                              <span className="text-[10px] text-[#E0E6ED]/30">
+                              <span className="text-[12px] text-[#E0E6ED]/30">
                                 /{rowLimit ?? "∞"}
                               </span>
                             </div>
@@ -1287,11 +1282,10 @@ export default function UsersPage() {
                   <button
                     key={p}
                     onClick={() => setPage(p)}
-                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all ${
-                      p === page
+                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all ${p === page
                         ? "bg-[#C9A84C] text-[#0A0E1A]"
                         : "text-[#E0E6ED]/40 hover:text-[#E0E6ED] hover:bg-[#C9A84C]/10"
-                    }`}
+                      }`}
                   >
                     {p}
                   </button>
@@ -1311,7 +1305,7 @@ export default function UsersPage() {
         </div>{/* end table card */}
 
         {/* Legend */}
-        <div className="shrink-0 flex items-center gap-4 text-[10px] text-[#E0E6ED]/30 pb-2">
+        <div className="shrink-0 flex items-center gap-4 text-[12px] text-[#E0E6ED]/30 pb-2">
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> Виконано
           </span>

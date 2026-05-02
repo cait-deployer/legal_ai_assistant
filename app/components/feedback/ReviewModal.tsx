@@ -111,7 +111,7 @@ export function ReviewModal({ rewardEligible, rewardAmount = 5, onClose, onLater
                   <p className="text-xs leading-relaxed text-[#E0E6ED]/70">
                     Оцініть URAI зараз, і ми автоматично додамо бонусні запити до вашого рахунку.
                   </p>
-                  <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.14em] text-[#C9A84C]/60">
+                  <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.14em] text-[#C9A84C]/60">
                     Нараховується один раз
                   </p>
                 </div>
@@ -192,7 +192,7 @@ export function ReviewModal({ rewardEligible, rewardAmount = 5, onClose, onLater
                 className="w-full resize-none bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-[#E0E6ED] placeholder-[#E0E6ED]/30 focus:outline-none focus:border-[#C9A84C]/40 transition-colors"
               />
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-medium">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[12px] font-medium">
                 <span className={rating > 0 ? "text-[#C9A84C]" : "text-[#E0E6ED]/35"}>1. Оцінка</span>
                 <span className={selectedTags.length > 0 ? "text-[#C9A84C]" : "text-[#E0E6ED]/35"}>2. Пункт відгуку</span>
                 <span className={trimmedText.length >= MIN_REVIEW_TEXT_LENGTH ? "text-[#C9A84C]" : "text-[#E0E6ED]/35"}>

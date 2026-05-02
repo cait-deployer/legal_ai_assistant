@@ -89,7 +89,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
 
   const tier = profile.subscription_tier
   const isBasicPlus = tier !== "free"
-  const isProPlus   = tier === "pro"
+  const isProPlus = tier === "pro"
 
   const handleSaveStyle = async () => {
     setStyleSaving(true); setStyleError(""); setStyleSaved(false)
@@ -153,7 +153,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tour_completed: false }),
-    }).catch(() => {})
+    }).catch(() => { })
     router.push("/chat")
   }
 
@@ -167,7 +167,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl font-serif font-bold text-[#E0E6ED]">{fullName || "Користувач"}</h2>
             {profile.is_beta_tester && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-[#C9A84C]/15 border border-[#C9A84C]/40 text-[#C9A84C]">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[12px] font-black uppercase tracking-wider bg-[#C9A84C]/15 border border-[#C9A84C]/40 text-[#C9A84C]">
                 <Zap className="w-2.5 h-2.5" />
                 Beta
               </span>
@@ -175,19 +175,19 @@ function ProfileTab({ profile }: { profile: Profile }) {
           </div>
           <p className="text-sm text-[#C9A84C]/60 font-medium">{profile.email}</p>
           {profile.is_beta_tester && (
-            <p className="text-[10px] text-[#E0E6ED]/35 mt-1">Учасник програми бета-тестування</p>
+            <p className="text-[12px] text-[#E0E6ED]/35 mt-1">Учасник програми бета-тестування</p>
           )}
         </div>
       </div>
 
       <div className="space-y-6">
         <div className="space-y-2">
-          <Label className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Повне ім&apos;я</Label>
+          <Label className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Повне ім&apos;я</Label>
           <Input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Іваненко Іван Іванович" className="bg-[#0d1120] border-[#C9A84C]/20 rounded-2xl h-12 text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0" />
         </div>
 
         <div className="space-y-2">
-          <Label className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Ваша роль</Label>
+          <Label className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Ваша роль</Label>
           <div className="grid grid-cols-1 gap-2">
             {ROLES.map(r => (
               <button key={r.value} onClick={() => setRole(r.value)} className={`px-5 py-3 rounded-xl border text-left text-sm font-bold transition-all ${role === r.value ? "border-[#C9A84C] bg-[#C9A84C]/10 text-[#C9A84C]" : "border-[#C9A84C]/10 bg-[#0d1120]/40 text-[#E0E6ED]/60 hover:border-[#C9A84C]/30"}`}>
@@ -201,10 +201,10 @@ function ProfileTab({ profile }: { profile: Profile }) {
         </div>
 
         <div className="space-y-3">
-          <Label className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Сфери інтересів</Label>
+          <Label className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Сфери інтересів</Label>
           <div className="flex flex-wrap gap-2">
             {ALL_SEGMENTS.map(s => (
-              <button key={s} onClick={() => toggleSegment(s)} className={`px-4 py-2 rounded-full border text-[10px] font-black transition-all uppercase tracking-wider ${segments.includes(s) ? "border-[#C9A84C] bg-[#C9A84C] text-[#0A0E1A]" : "border-[#C9A84C]/20 text-[#C9A84C]/60 hover:border-[#C9A84C]/40"}`}>
+              <button key={s} onClick={() => toggleSegment(s)} className={`px-4 py-2 rounded-full border text-[12px] font-black transition-all uppercase tracking-wider ${segments.includes(s) ? "border-[#C9A84C] bg-[#C9A84C] text-[#0A0E1A]" : "border-[#C9A84C]/20 text-[#C9A84C]/60 hover:border-[#C9A84C]/40"}`}>
                 {SEGMENT_LABELS[s]}
               </button>
             ))}
@@ -262,7 +262,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
               placeholder="Опишіть себе як юриста: спеціалізацію, досвід, на що звертати увагу у відповідях..."
               className="w-full bg-[#0A0E1A]/80 border border-[#C9A84C]/15 hover:border-[#C9A84C]/30 focus:border-[#C9A84C]/50 rounded-2xl px-4 py-3 text-sm text-[#E0E6ED] placeholder:text-[#E0E6ED]/25 outline-none transition-colors resize-none pb-7"
             />
-            <span className={`absolute bottom-2.5 right-3.5 text-[10px] font-mono transition-colors ${aiPrompt.length >= AI_PROMPT_MAX ? "text-red-400" : aiPrompt.length >= AI_PROMPT_MAX * 0.85 ? "text-amber-400" : "text-[#E0E6ED]/30"}`}>
+            <span className={`absolute bottom-2.5 right-3.5 text-[12px] font-mono transition-colors ${aiPrompt.length >= AI_PROMPT_MAX ? "text-red-400" : aiPrompt.length >= AI_PROMPT_MAX * 0.85 ? "text-amber-400" : "text-[#E0E6ED]/30"}`}>
               {aiPrompt.length}/{AI_PROMPT_MAX}
             </span>
           </div>
@@ -304,25 +304,24 @@ function ProfileTab({ profile }: { profile: Profile }) {
 
         {/* Length */}
         <div className="space-y-2">
-          <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Довжина відповіді</p>
+          <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Довжина відповіді</p>
           <div className="space-y-2">
             {([
-              { value: "short",    label: "Коротко",       desc: "Суть за 1–2 абзаци",                   lock: false },
-              { value: "standard", label: "Стандарт",      desc: "Збалансована відповідь",                lock: false },
-              { value: "detailed", label: "Розгорнуто",    desc: "З деталями, нюансами та виключеннями", lock: !isBasicPlus, plan: "Daily+" },
-              { value: "full",     label: "Повний аналіз", desc: "Глибокий розбір на 1–2 сторінки",      lock: !isProPlus,   plan: "Pro" },
+              { value: "short", label: "Коротко", desc: "Суть за 1–2 абзаци", lock: false },
+              { value: "standard", label: "Стандарт", desc: "Збалансована відповідь", lock: false },
+              { value: "detailed", label: "Розгорнуто", desc: "З деталями, нюансами та виключеннями", lock: !isBasicPlus, plan: "Daily+" },
+              { value: "full", label: "Повний аналіз", desc: "Глибокий розбір на 1–2 сторінки", lock: !isProPlus, plan: "Pro" },
             ] as const).map(opt => (
               <button
                 key={opt.value}
                 onClick={() => !opt.lock && setResponseLength(opt.value)}
                 disabled={opt.lock}
-                className={`w-full px-4 py-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${
-                  responseLength === opt.value && !opt.lock
+                className={`w-full px-4 py-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${responseLength === opt.value && !opt.lock
                     ? "border-[#C9A84C] bg-[#C9A84C]/10"
                     : opt.lock
-                    ? "border-[#C9A84C]/8 bg-transparent opacity-50 cursor-not-allowed"
-                    : "border-[#C9A84C]/10 bg-[#0d1120]/40 hover:border-[#C9A84C]/30"
-                }`}
+                      ? "border-[#C9A84C]/8 bg-transparent opacity-50 cursor-not-allowed"
+                      : "border-[#C9A84C]/10 bg-[#0d1120]/40 hover:border-[#C9A84C]/30"
+                  }`}
               >
                 <div>
                   <p className={`text-sm font-bold ${responseLength === opt.value && !opt.lock ? "text-[#C9A84C]" : "text-[#E0E6ED]/80"}`}>{opt.label}</p>
@@ -332,8 +331,8 @@ function ProfileTab({ profile }: { profile: Profile }) {
                   {opt.lock
                     ? <span className="text-[9px] font-black text-[#C9A84C]/40 border border-[#C9A84C]/20 rounded-full px-2 py-0.5 uppercase tracking-wider">🔒 {opt.plan}</span>
                     : responseLength === opt.value
-                    ? <CheckCircle2 className="w-4 h-4 text-[#C9A84C]" />
-                    : null
+                      ? <CheckCircle2 className="w-4 h-4 text-[#C9A84C]" />
+                      : null
                   }
                 </div>
               </button>
@@ -343,23 +342,22 @@ function ProfileTab({ profile }: { profile: Profile }) {
 
         {/* Language style */}
         <div className="space-y-2">
-          <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Мова відповіді</p>
+          <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Мова відповіді</p>
           <div className="space-y-2">
             {([
               { value: "legal", label: "Юридична мова", desc: "Точні терміни НПА, як у законодавстві", lock: false },
-              { value: "plain", label: "Простою мовою", desc: "Без жаргону, зрозуміло клієнту",         lock: false },
+              { value: "plain", label: "Простою мовою", desc: "Без жаргону, зрозуміло клієнту", lock: false },
             ] as const).map(opt => (
               <button
                 key={opt.value}
                 onClick={() => !opt.lock && setResponseLang(opt.value)}
                 disabled={opt.lock}
-                className={`w-full px-4 py-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${
-                  responseLang === opt.value && !opt.lock
+                className={`w-full px-4 py-3 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${responseLang === opt.value && !opt.lock
                     ? "border-[#C9A84C] bg-[#C9A84C]/10"
                     : opt.lock
-                    ? "border-[#C9A84C]/8 bg-transparent opacity-50 cursor-not-allowed"
-                    : "border-[#C9A84C]/10 bg-[#0d1120]/40 hover:border-[#C9A84C]/30"
-                }`}
+                      ? "border-[#C9A84C]/8 bg-transparent opacity-50 cursor-not-allowed"
+                      : "border-[#C9A84C]/10 bg-[#0d1120]/40 hover:border-[#C9A84C]/30"
+                  }`}
               >
                 <div>
                   <p className={`text-sm font-bold ${responseLang === opt.value && !opt.lock ? "text-[#C9A84C]" : "text-[#E0E6ED]/80"}`}>{opt.label}</p>
@@ -464,13 +462,13 @@ function SecurityTab({ profile }: { profile: Profile }) {
   return (
     <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="space-y-10 max-w-xl pb-10">
       <section className="space-y-4">
-        <Label className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Остання активність</Label>
+        <Label className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Остання активність</Label>
         <div className="p-6 rounded-3xl bg-[#0d1120]/60 border border-[#C9A84C]/10 backdrop-blur-md flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-[#C9A84C]/10 border border-[#C9A84C]/20 flex items-center justify-center text-[#C9A84C]"><Monitor className="w-5 h-5" /></div>
             <div>
               <p className="text-sm font-bold text-[#E0E6ED]">{formatUA(profile.user_agent)} · {formatOS(profile.user_agent)}</p>
-              <p className="text-[10px] text-[#C9A84C]/60 flex items-center gap-1 mt-0.5">
+              <p className="text-[12px] text-[#C9A84C]/60 flex items-center gap-1 mt-0.5">
                 <MapPin className="w-3 h-3" />
                 {profile.last_city && profile.last_country ? `${profile.last_city}, ${profile.last_country}` : profile.last_ip ?? "Місце невідоме"}
               </p>
@@ -481,7 +479,7 @@ function SecurityTab({ profile }: { profile: Profile }) {
       </section>
 
       <section className="space-y-6">
-        <Label className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Зміна пароля</Label>
+        <Label className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Зміна пароля</Label>
         {profile.auth_provider !== 'email' ? (
           <div className="p-5 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/15 flex items-start gap-4">
             <Shield className="w-5 h-5 text-[#C9A84C]/70 mt-0.5" />
@@ -507,8 +505,8 @@ function SecurityTab({ profile }: { profile: Profile }) {
       </section>
 
       <section className="space-y-4">
-        <Label className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Сесія</Label>
-        <button onClick={handleLogout} className="h-12 gap-2 w-full flex items-center justify-center rounded-2xl bg-[#0d1120] border border-[#C9A84C]/25 hover:border-[#C9A84C]/60 hover:bg-[#C9A84C]/5 text-[#E0E6ED] uppercase font-black text-[10px] tracking-widest transition-all active:scale-95">
+        <Label className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] ml-1">Сесія</Label>
+        <button onClick={handleLogout} className="h-12 gap-2 w-full flex items-center justify-center rounded-2xl bg-[#0d1120] border border-[#C9A84C]/25 hover:border-[#C9A84C]/60 hover:bg-[#C9A84C]/5 text-[#E0E6ED] uppercase font-black text-[12px] tracking-widest transition-all active:scale-95">
           <LogOut className="w-4 h-4 text-[#C9A84C]" /> Вийти з акаунта
         </button>
       </section>
@@ -520,14 +518,14 @@ function SecurityTab({ profile }: { profile: Profile }) {
         </div>
         <p className="text-xs text-red-400/60 leading-relaxed">Видалення акаунта призведе до повної втрати історії чатів та налаштувань. Дія незворотна.</p>
         {!showDeleteZone ? (
-          <button onClick={() => setShowDeleteZone(true)} className="w-full bg-transparent border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 rounded-xl font-black uppercase tracking-widest text-[10px] h-12 transition-all active:scale-95">ВИДАЛИТИ АКАУНТ</button>
+          <button onClick={() => setShowDeleteZone(true)} className="w-full bg-transparent border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 rounded-xl font-black uppercase tracking-widest text-[12px] h-12 transition-all active:scale-95">ВИДАЛИТИ АКАУНТ</button>
         ) : (
           <div className="space-y-4">
-            <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest">Введіть DELETE для підтвердження:</p>
+            <p className="text-[12px] text-red-400 font-bold uppercase tracking-widest">Введіть DELETE для підтвердження:</p>
             <Input value={deleteConfirm} onChange={e => setDeleteConfirm(e.target.value)} placeholder="DELETE" className="bg-[#0A0E1A] border-red-500/40 text-center text-red-400 rounded-xl font-mono focus-visible:ring-0" />
             <div className="flex gap-2">
-              <button onClick={() => { setShowDeleteZone(false); setDeleteConfirm("") }} className="flex-1 rounded-xl bg-[#0d1120] border border-[#C9A84C]/20 text-[#E0E6ED]/70 hover:border-[#C9A84C]/40 text-[10px] font-bold h-10 transition-all">СКАСУВАТИ</button>
-              <button onClick={handleDelete} disabled={deleteConfirm !== 'DELETE' || deleting} className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold h-10 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+              <button onClick={() => { setShowDeleteZone(false); setDeleteConfirm("") }} className="flex-1 rounded-xl bg-[#0d1120] border border-[#C9A84C]/20 text-[#E0E6ED]/70 hover:border-[#C9A84C]/40 text-[12px] font-bold h-10 transition-all">СКАСУВАТИ</button>
+              <button onClick={handleDelete} disabled={deleteConfirm !== 'DELETE' || deleting} className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[12px] font-bold h-10 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
                 {deleting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "ВИДАЛИТИ"}
               </button>
             </div>
@@ -556,17 +554,17 @@ function UsageTab({ profile }: { profile: Profile }) {
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 max-w-xl pb-10">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="p-8 rounded-[2rem] bg-[#0d1120]/60 border border-[#C9A84C]/10 backdrop-blur-md">
-          <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] mb-4 text-center">Всього консультацій</p>
+          <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] mb-4 text-center">Всього консультацій</p>
           <div className="flex flex-col items-center gap-1">
             <span className="text-5xl font-serif font-bold text-[#E0E6ED]">{profile.total_requests}</span>
-            <span className="text-[10px] text-[#C9A84C]/50 font-bold uppercase">за весь час</span>
+            <span className="text-[12px] text-[#C9A84C]/50 font-bold uppercase">за весь час</span>
           </div>
         </div>
         <div className="p-8 rounded-[2rem] bg-[#0d1120]/60 border border-[#C9A84C]/10 backdrop-blur-md">
-          <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] mb-4 text-center">Місячний ліміт</p>
+          <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] mb-4 text-center">Місячний ліміт</p>
           <div className="flex flex-col items-center gap-1">
             <span className="text-5xl font-serif font-bold text-[#C9A84C]">{isUnlim ? "∞" : effectiveLimit}</span>
-            <span className="text-[10px] text-[#C9A84C]/50 font-bold uppercase">{isUnlim ? "необмежено" : isFree ? "одноразово" : "запитів на 30 днів"}</span>
+            <span className="text-[12px] text-[#C9A84C]/50 font-bold uppercase">{isUnlim ? "необмежено" : isFree ? "одноразово" : "запитів на 30 днів"}</span>
           </div>
         </div>
       </div>
@@ -595,12 +593,12 @@ function UsageTab({ profile }: { profile: Profile }) {
           )}
 
           <div className="flex justify-between items-center mt-8">
-            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] flex items-center gap-2">
+            <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] flex items-center gap-2">
               {daysLeft !== null
                 ? <><Clock className="w-3.5 h-3.5" /> Скидання через {daysLeft} дн.</>
                 : <><Clock className="w-3.5 h-3.5" /> Одноразовий ліміт</>}
             </p>
-            <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">
+            <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em]">
               {isUnlim ? "Безліміт активний" : `Залишилось ${effectiveLimit! - used} запитів`}
             </p>
           </div>
@@ -637,7 +635,7 @@ function BillingTab({ profile }: { profile: Profile }) {
   const [loadingPlans, setLoadingPlans] = useState(true)
 
   useEffect(() => {
-    fetch("/api/plans").then(r => r.json()).then(setPlans).catch(() => {}).finally(() => setLoadingPlans(false))
+    fetch("/api/plans").then(r => r.json()).then(setPlans).catch(() => { }).finally(() => setLoadingPlans(false))
   }, [])
 
   const currentTier = profile.subscription_tier
@@ -653,12 +651,12 @@ function BillingTab({ profile }: { profile: Profile }) {
       {/* Plans grid */}
       {loadingPlans ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {[0,1,2,3].map(i => <div key={i} className="h-96 rounded-[2rem] bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i*70}ms` }} />)}
+          {[0, 1, 2, 3].map(i => <div key={i} className="h-96 rounded-[2rem] bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i * 70}ms` }} />)}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-8">
           {plans.map(plan => {
-            const isCurrent = plan.id === currentTier || (plan.id === "pro" && ["pro","ultra"].includes(currentTier))
+            const isCurrent = plan.id === currentTier || (plan.id === "pro" && ["pro", "ultra"].includes(currentTier))
             const { price, period } = priceLabel(plan)
             const benefitsByCategory = plan.benefits.reduce((acc, b) => {
               if (!acc[b.category]) acc[b.category] = []
@@ -669,13 +667,12 @@ function BillingTab({ profile }: { profile: Profile }) {
             return (
               <div
                 key={plan.id}
-                className={`relative flex flex-col rounded-[2rem] border-2 p-6 transition-all duration-300 ${
-                  isCurrent
+                className={`relative flex flex-col rounded-[2rem] border-2 p-6 transition-all duration-300 ${isCurrent
                     ? "border-[#C9A84C] bg-[#C9A84C]/5 shadow-2xl shadow-[#C9A84C]/10"
                     : plan.badge_color === "emerald"
-                    ? "border-emerald-500/20 bg-[#0d1120]/60 hover:border-emerald-500/40"
-                    : "border-[#C9A84C]/10 bg-[#0d1120]/60 hover:border-[#C9A84C]/25"
-                }`}
+                      ? "border-emerald-500/20 bg-[#0d1120]/60 hover:border-emerald-500/40"
+                      : "border-[#C9A84C]/10 bg-[#0d1120]/60 hover:border-[#C9A84C]/25"
+                  }`}
               >
                 {/* Active badge */}
                 {isCurrent && (
@@ -686,11 +683,10 @@ function BillingTab({ profile }: { profile: Profile }) {
 
                 {/* Plan badge */}
                 {plan.badge_text && !isCurrent && (
-                  <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-wider whitespace-nowrap border ${
-                    plan.badge_color === "emerald"
+                  <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-wider whitespace-nowrap border ${plan.badge_color === "emerald"
                       ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                       : "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/30"
-                  }`}>
+                    }`}>
                     {plan.badge_text}
                   </div>
                 )}
@@ -727,14 +723,14 @@ function BillingTab({ profile }: { profile: Profile }) {
 
                 {/* Main benefit */}
                 {plan.main_benefit && (
-                  <p className="text-[10px] text-[#C9A84C]/50 mb-4 leading-relaxed">
+                  <p className="text-[12px] text-[#C9A84C]/50 mb-4 leading-relaxed">
                     → {plan.main_benefit}
                   </p>
                 )}
 
                 {/* Extra text (Pro) */}
                 {plan.extra_text && (
-                  <p className="text-[10px] text-[#E0E6ED]/30 mb-4 leading-relaxed whitespace-pre-line">
+                  <p className="text-[12px] text-[#E0E6ED]/30 mb-4 leading-relaxed whitespace-pre-line">
                     {plan.extra_text}
                   </p>
                 )}
@@ -742,13 +738,12 @@ function BillingTab({ profile }: { profile: Profile }) {
                 {/* Button */}
                 <button
                   disabled={isCurrent}
-                  className={`w-full h-12 rounded-2xl font-black uppercase tracking-[0.15em] text-[10px] transition-all active:scale-95 ${
-                    isCurrent
+                  className={`w-full h-12 rounded-2xl font-black uppercase tracking-[0.15em] text-[12px] transition-all active:scale-95 ${isCurrent
                       ? "bg-[#C9A84C] text-[#0A0E1A] cursor-default"
                       : plan.price_uah === 0
-                      ? "bg-[#C9A84C]/10 border border-[#C9A84C]/30 text-[#C9A84C] hover:bg-[#C9A84C]/20"
-                      : "bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/30 cursor-not-allowed"
-                  }`}
+                        ? "bg-[#C9A84C]/10 border border-[#C9A84C]/30 text-[#C9A84C] hover:bg-[#C9A84C]/20"
+                        : "bg-[#C9A84C]/5 border border-[#C9A84C]/10 text-[#C9A84C]/30 cursor-not-allowed"
+                    }`}
                 >
                   {isCurrent ? "Активний" : plan.price_uah === 0 ? plan.button_text : `${plan.button_text} (незабаром)`}
                 </button>
@@ -766,7 +761,7 @@ function BillingTab({ profile }: { profile: Profile }) {
       {/* Transaction history placeholder */}
       <div className="p-8 rounded-[2rem] bg-[#0d1120]/40 border border-[#C9A84C]/10 text-center flex flex-col items-center gap-4">
         <History className="w-6 h-6 text-[#C9A84C]/20" />
-        <p className="text-[10px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.25em]">Історія транзакцій</p>
+        <p className="text-[12px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.25em]">Історія транзакцій</p>
         <p className="text-xs text-white/30 italic">Архів платежів поки що порожній</p>
       </div>
     </motion.div>
@@ -801,7 +796,7 @@ function SettingsPage() {
             {!profile ? (
               <div className="flex flex-col items-center justify-center py-20 gap-4">
                 <Loader2 className="w-10 h-10 animate-spin text-[#C9A84C]" />
-                <span className="text-[10px] font-black text-[#C9A84C] uppercase tracking-[0.4em] animate-pulse">Синхронізація профілю...</span>
+                <span className="text-[12px] font-black text-[#C9A84C] uppercase tracking-[0.4em] animate-pulse">Синхронізація профілю...</span>
               </div>
             ) : (
               <Tabs defaultValue={activeTab} className="space-y-12">

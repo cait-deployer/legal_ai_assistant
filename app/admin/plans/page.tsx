@@ -39,11 +39,10 @@ function PeriodLabel({ period }: { period: string }) {
 
 function Badge({ text, color }: { text: string; color: string }) {
   return (
-    <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border whitespace-nowrap ${
-      color === "emerald"
+    <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border whitespace-nowrap ${color === "emerald"
         ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
         : "bg-[#C9A84C]/10 text-[#C9A84C] border-[#C9A84C]/20"
-    }`}>
+      }`}>
       {text}
     </span>
   )
@@ -60,11 +59,10 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
     <div
       ref={setNodeRef}
       style={style}
-      className={`rounded-2xl border transition-all ${
-        isDragging
+      className={`rounded-2xl border transition-all ${isDragging
           ? "border-[#C9A84C]/40 bg-[#0d1120] shadow-2xl shadow-black/40"
           : "border-[#C9A84C]/10 bg-[#0d1120]/60 hover:border-[#C9A84C]/25"
-      }`}
+        }`}
     >
       {/* ── MOBILE layout ── */}
       <div className="flex sm:hidden items-center gap-3 px-3 py-3">
@@ -76,7 +74,7 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
 
         {/* Number */}
         <div className="w-6 h-6 rounded-md bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
-          <span className="text-[10px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
+          <span className="text-[12px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
         </div>
 
         {/* Name + details */}
@@ -85,7 +83,7 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
             <span className="font-serif font-bold text-white text-sm">{plan.name}</span>
             {plan.badge_text && <Badge text={plan.badge_text} color={plan.badge_color} />}
           </div>
-          <p className="text-[10px] text-[#E0E6ED]/40 mt-0.5">
+          <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">
             {plan.request_limit == null ? "∞ запитів" : `${plan.request_limit} запитів`}
             {" · "}{featureCount} фіч
           </p>
@@ -95,7 +93,7 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
         <div className="flex items-center gap-2 shrink-0">
           <div className="text-right">
             <p className="text-sm font-bold text-[#C9A84C] leading-tight">{priceLabel}</p>
-            {periodLabel && <p className="text-[10px] text-[#E0E6ED]/40">{periodLabel}</p>}
+            {periodLabel && <p className="text-[12px] text-[#E0E6ED]/40">{periodLabel}</p>}
           </div>
           {plan.is_active
             ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -117,7 +115,7 @@ function SortablePlanRow({ plan, featureCount }: { plan: Plan; featureCount: num
         </button>
 
         <div className="w-7 h-7 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0">
-          <span className="text-[10px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
+          <span className="text-[12px] font-black text-[#C9A84C]/60">{plan.sort_order + 1}</span>
         </div>
 
         <div className="flex-1 min-w-0">
@@ -249,8 +247,8 @@ export default function PlansListPage() {
 
       {loading ? (
         <div className="space-y-3">
-          {[0,1,2,3].map(i => (
-            <div key={i} className="h-16 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i*70}ms` }} />
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="h-16 rounded-2xl bg-[#C9A84C]/5 animate-pulse" style={{ animationDelay: `${i * 70}ms` }} />
           ))}
         </div>
       ) : (
@@ -265,7 +263,7 @@ export default function PlansListPage() {
         </DndContext>
       )}
 
-      <p className="text-center text-[10px] text-[#C9A84C]/30 font-black uppercase tracking-widest pt-4">
+      <p className="text-center text-[12px] text-[#C9A84C]/30 font-black uppercase tracking-widest pt-4">
         {plans.length} тарифів
       </p>
     </div>

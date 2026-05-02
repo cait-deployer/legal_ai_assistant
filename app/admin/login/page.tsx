@@ -51,7 +51,7 @@ function LoginForm() {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="username" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Логін</Label>
+          <Label htmlFor="username" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Логін</Label>
           <Input
             id="username"
             type="text"
@@ -66,7 +66,7 @@ function LoginForm() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
+          <Label htmlFor="password" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
           <div className="relative">
             <Input
               id="password"
@@ -146,7 +146,7 @@ export default function AdminLoginPage() {
         </Suspense>
 
         <p className="text-center mt-6">
-          <a href="/chat" className="text-[10px] font-black text-[#C9A84C]/70 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-colors inline-flex items-center gap-1.5">
+          <a href="/chat" className="text-[12px] font-black text-[#C9A84C]/70 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-colors inline-flex items-center gap-1.5">
             ← Назад до чату
           </a>
         </p>

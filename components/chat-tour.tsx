@@ -180,7 +180,7 @@ export function ChatTour({ onComplete, onSidebarOpen, onSidebarClose }: ChatTour
       const t = setTimeout(run, 50)
       return () => clearTimeout(t)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, mounted])
 
   const handleComplete = useCallback(() => {
@@ -289,9 +289,8 @@ export function ChatTour({ onComplete, onSidebarOpen, onSidebarClose }: ChatTour
               {NON_WELCOME.map((_, i) => (
                 <div
                   key={i}
-                  className={`h-1.5 rounded-full transition-all duration-300 ${
-                    i === dotIndex ? 'w-5 bg-[#C9A84C]' : 'w-1.5 bg-[#C9A84C]/20'
-                  }`}
+                  className={`h-1.5 rounded-full transition-all duration-300 ${i === dotIndex ? 'w-5 bg-[#C9A84C]' : 'w-1.5 bg-[#C9A84C]/20'
+                    }`}
                 />
               ))}
             </div>
@@ -315,7 +314,7 @@ export function ChatTour({ onComplete, onSidebarOpen, onSidebarClose }: ChatTour
               )}
               <button
                 onClick={handleComplete}
-                className="text-[#C9A84C]/30 hover:text-[#C9A84C]/60 text-[10px] font-black uppercase tracking-wider transition-all"
+                className="text-[#C9A84C]/30 hover:text-[#C9A84C]/60 text-[12px] font-black uppercase tracking-wider transition-all"
               >
                 Пропустити
               </button>

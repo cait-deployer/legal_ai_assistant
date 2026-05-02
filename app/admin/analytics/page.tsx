@@ -48,10 +48,10 @@ interface AnalyticsData {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SENTIMENT_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  neutral:   { label: "Нейтральний", color: "#6B7CA3", icon: Meh },
-  urgent:    { label: "Терміново",   color: "#F59E0B", icon: AlertCircle },
-  frustrated:{ label: "Засмучений",  color: "#EF4444", icon: Frown },
-  positive:  { label: "Позитивний",  color: "#10B981", icon: Smile },
+  neutral: { label: "Нейтральний", color: "#6B7CA3", icon: Meh },
+  urgent: { label: "Терміново", color: "#F59E0B", icon: AlertCircle },
+  frustrated: { label: "Засмучений", color: "#EF4444", icon: Frown },
+  positive: { label: "Позитивний", color: "#10B981", icon: Smile },
 }
 
 const CATEGORY_COLORS = [
@@ -88,7 +88,7 @@ function StatCard({
       <div className="min-w-0">
         <p className="text-[9px] sm:text-xs text-[#6B7CA3] font-medium uppercase tracking-widest mb-0.5 leading-tight">{label}</p>
         <p className="text-xl sm:text-2xl font-bold text-[#E0E6ED]">{value}</p>
-        {sub && <p className="text-[10px] sm:text-xs text-[#6B7CA3] mt-0.5 truncate">{sub}</p>}
+        {sub && <p className="text-[12px] sm:text-xs text-[#6B7CA3] mt-0.5 truncate">{sub}</p>}
       </div>
     </motion.div>
   )
@@ -117,7 +117,7 @@ function DailyChart({ data }: { data: { date: string; count: number }[] }) {
         const pct = Math.round((count / max) * 100)
         return (
           <div key={date} className="flex-1 flex flex-col items-center gap-1 group">
-            <span className="text-[10px] text-[#6B7CA3] opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[12px] text-[#6B7CA3] opacity-0 group-hover:opacity-100 transition-opacity">
               {count}
             </span>
             <div className="w-full flex items-end" style={{ height: "72px" }}>
@@ -129,7 +129,7 @@ function DailyChart({ data }: { data: { date: string; count: number }[] }) {
                 style={{ background: count > 0 ? "#C9A84C" : "#1a2035" }}
               />
             </div>
-            <span className="text-[10px] text-[#6B7CA3]">{formatDate(date)}</span>
+            <span className="text-[12px] text-[#6B7CA3]">{formatDate(date)}</span>
           </div>
         )
       })}
@@ -184,7 +184,7 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
           <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
             {/* Question */}
             <div>
-              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Запит</p>
+              <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Запит</p>
               <div className="bg-[#C9A84C]/5 border border-[#C9A84C]/15 rounded-xl px-4 py-3 text-sm text-[#E0E6ED]/90 leading-relaxed">
                 {row.query_text}
               </div>
@@ -192,7 +192,7 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
 
             {/* Answer */}
             <div>
-              <p className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Відповідь</p>
+              <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Відповідь</p>
               <div className="bg-[#1a2035] border border-[#C9A84C]/10 rounded-xl px-4 py-3 text-sm text-[#E0E6ED]/75 leading-relaxed whitespace-pre-wrap">
                 {row.ai_response ?? <span className="text-[#6B7CA3] italic">Відповідь не збережена</span>}
               </div>
@@ -253,11 +253,10 @@ export default function AnalyticsPage() {
             <button
               key={d}
               onClick={() => setDays(d)}
-              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                days === d
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${days === d
                   ? "bg-[#C9A84C] text-[#0A0E1A]"
                   : "text-[#6B7CA3] hover:text-[#E0E6ED]"
-              }`}
+                }`}
             >
               {d}д
             </button>
@@ -454,14 +453,14 @@ export default function AnalyticsPage() {
                     <p className="text-sm text-[#E0E6ED]/80 line-clamp-2 mb-1">{row.query_text}</p>
                     <div className="flex items-center gap-2 flex-wrap">
                       {row.category && (
-                        <span className="bg-[#C9A84C]/10 text-[#C9A84C] px-2 py-0.5 rounded-full text-[10px] font-medium">{row.category}</span>
+                        <span className="bg-[#C9A84C]/10 text-[#C9A84C] px-2 py-0.5 rounded-full text-[12px] font-medium">{row.category}</span>
                       )}
                       {sentCfg && (
                         <span className="flex items-center gap-1 text-[10px]" style={{ color: sentCfg.color }}>
                           <sentCfg.icon className="w-3 h-3" />{sentCfg.label}
                         </span>
                       )}
-                      <span className="text-[10px] text-[#6B7CA3] ml-auto">
+                      <span className="text-[12px] text-[#6B7CA3] ml-auto">
                         {new Date(row.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </span>
                     </div>
@@ -513,7 +512,7 @@ export default function AnalyticsPage() {
                         <td className="px-4 py-3 text-center">
                           {row.complexity_score ? (
                             <span className="font-bold" style={{
-                              color: ["","#10B981","#6EE7B7","#F59E0B","#F87171","#EF4444"][row.complexity_score] ?? "#6B7CA3"
+                              color: ["", "#10B981", "#6EE7B7", "#F59E0B", "#F87171", "#EF4444"][row.complexity_score] ?? "#6B7CA3"
                             }}>
                               {"★".repeat(row.complexity_score)}
                             </span>

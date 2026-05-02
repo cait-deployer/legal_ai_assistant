@@ -34,7 +34,7 @@ export function LegalLayout({ title, subtitle, updatedDate, children }: LegalLay
       {/* Hero */}
       <div className="border-b border-[#C9A84C]/10 bg-[#0d1120] py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto">
-          <p className="text-[#C9A84C] text-[10px] font-black uppercase tracking-[0.25em] mb-3">
+          <p className="text-[#C9A84C] text-[12px] font-black uppercase tracking-[0.25em] mb-3">
             Юридичний документ
           </p>
           <h1 className="font-serif text-3xl sm:text-4xl font-bold text-[#E0E6ED] mb-3">

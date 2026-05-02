@@ -27,14 +27,14 @@ const RADA_COLLECTIONS = [
 ]
 
 const SOURCE_LABELS: Record<string, string> = {
-  rada:      "Верховна Рада (~15 500 законів)",
-  kmu:       "Кабінет Міністрів",
-  ccu:       "Конституційний суд",
-  supreme:   "Верховний суд",
-  wiki:      "Legal Aid Wiki (юридичні терміни)",
+  rada: "Верховна Рада (~15 500 законів)",
+  kmu: "Кабінет Міністрів",
+  ccu: "Конституційний суд",
+  supreme: "Верховний суд",
+  wiki: "Legal Aid Wiki (юридичні терміни)",
   positions: "Правові позиції ВС (~12 800 позицій)",
-  mod:       "Міністерство оборони (~210 документів)",
-  zir:       "ЗІР ДПС (~5 900 питань-відповідей)",
+  mod: "Міністерство оборони (~210 документів)",
+  zir: "ЗІР ДПС (~5 900 питань-відповідей)",
 }
 
 const DEFAULT_SOURCE_STATE: SourceState = {
@@ -72,10 +72,10 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
       onScroll={handleScroll}
       className="font-mono text-[11px] h-[400px] overflow-y-auto bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 p-3 space-y-0.5"
     >
-      {logs.length === 0 && <span className="text-gray-600">Очікування запуску...</span>}
+      {logs.length === 0 && <span className="text-gray-400">Очікування запуску...</span>}
       {logs.map((l, i) => (
         <div key={i} className="flex gap-2">
-          <span className="text-gray-600 shrink-0">{new Date(l.ts).toLocaleTimeString("uk-UA")}</span>
+          <span className="text-gray-400 shrink-0">{new Date(l.ts).toLocaleTimeString("uk-UA")}</span>
           <span className={levelColor(l.level)}>{l.message}</span>
         </div>
       ))}
@@ -88,18 +88,18 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
 function RunningBadge({ running, paused }: { running: boolean; paused: boolean }) {
   if (running && paused)
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Зупиняється
       </span>
     )
   if (running)
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Виконується
       </span>
     )
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-500/20 text-gray-400 border border-gray-500/30">
+    <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-500/20 text-gray-400 border border-gray-500/30">
       <span className="w-1.5 h-1.5 rounded-full bg-gray-500" /> Зупинено
     </span>
   )
@@ -113,12 +113,12 @@ function SourcePanel({ source, state, onRefresh }: {
   onRefresh: () => Promise<void>
 }) {
   const [logsOpen, setLogsOpen] = useState(false)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState("")
-  const [radaCol, setRadaCol]   = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [radaCol, setRadaCol] = useState("")
 
   const stats = state.resume_progress?.stats ?? {}
-  const idx   = state.resume_progress?.inner_idx ?? 0
+  const idx = state.resume_progress?.inner_idx ?? 0
 
   async function doAction(endpoint: string, body: Record<string, string>) {
     setLoading(true); setError("")
@@ -142,7 +142,7 @@ function SourcePanel({ source, state, onRefresh }: {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="text-sm font-bold text-[#E0E6ED] uppercase tracking-wider">{source}</span>
-          <span className="ml-2 text-xs text-gray-500 hidden sm:inline">{SOURCE_LABELS[source]}</span>
+          <span className="ml-2 text-xs text-gray-400 hidden sm:inline">{SOURCE_LABELS[source]}</span>
         </div>
         <RunningBadge running={state.running} paused={state.pause_requested} />
       </div>
@@ -150,7 +150,7 @@ function SourcePanel({ source, state, onRefresh }: {
       {state.resume_progress && (
         <div className="space-y-1">
           <div className="grid grid-cols-5 gap-1 text-center">
-            {(["ok","empty","restricted","error","skipped"] as const).map(k => {
+            {(["ok", "empty", "restricted", "error", "skipped"] as const).map(k => {
               const colors: Record<string, string> = {
                 ok: "text-emerald-400 bg-emerald-500/10",
                 empty: "text-amber-400 bg-amber-500/10",
@@ -164,12 +164,12 @@ function SourcePanel({ source, state, onRefresh }: {
               return (
                 <div key={k} className={`rounded-lg py-1.5 px-1 ${colors[k]}`}>
                   <div className="text-sm font-bold">{stats[k] ?? 0}</div>
-                  <div className="text-[10px] opacity-70">{labels[k]}</div>
+                  <div className="text-[12px] opacity-70">{labels[k]}</div>
                 </div>
               )
             })}
           </div>
-          <div className="text-xs text-gray-500">Позиція: <b className="text-gray-300">{idx}</b></div>
+          <div className="text-xs text-gray-400">Позиція: <b className="text-gray-300">{idx}</b></div>
         </div>
       )}
 
@@ -249,7 +249,7 @@ export default function ScraperPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Скрапер</h1>
-            <p className="text-xs sm:text-sm text-gray-500 mt-1">Крок 1 — завантаження текстів на диск /root/laws_raw/</p>
+            <p className="text-xs sm:text-sm text-gray-400 mt-1">Крок 1 — завантаження текстів на диск /root/laws_raw/</p>
           </div>
           <button onClick={fetchStatus}
             className="px-3 py-1.5 rounded-lg bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] text-xs hover:bg-[#1e293b] transition-colors">

@@ -21,14 +21,14 @@ type AllReindexStatus = Record<string, ReindexSourceState>
 const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"]
 
 const SOURCE_LABELS: Record<string, string> = {
-  rada:      "Верховна Рада (~15 500 законів)",
-  kmu:       "Кабінет Міністрів",
-  ccu:       "Конституційний суд",
-  supreme:   "Верховний суд",
-  wiki:      "Legal Aid Wiki",
+  rada: "Верховна Рада (~15 500 законів)",
+  kmu: "Кабінет Міністрів",
+  ccu: "Конституційний суд",
+  supreme: "Верховний суд",
+  wiki: "Legal Aid Wiki",
   positions: "Правові позиції ВС (~12 800 позицій)",
-  mod:       "Міністерство оборони (~210 документів)",
-  zir:       "ЗІР ДПС (~5 900 питань-відповідей)",
+  mod: "Міністерство оборони (~210 документів)",
+  zir: "ЗІР ДПС (~5 900 питань-відповідей)",
 }
 
 const DEFAULT_STATE: ReindexSourceState = {
@@ -63,10 +63,10 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
   return (
     <div ref={containerRef} onScroll={handleScroll}
       className="font-mono text-[11px] h-[400px] overflow-y-auto bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 p-3 space-y-0.5">
-      {logs.length === 0 && <span className="text-gray-600">Очікування запуску...</span>}
+      {logs.length === 0 && <span className="text-gray-400">Очікування запуску...</span>}
       {logs.map((l, i) => (
         <div key={i} className="flex gap-2">
-          <span className="text-gray-600 shrink-0">{new Date(l.ts).toLocaleTimeString("uk-UA")}</span>
+          <span className="text-gray-400 shrink-0">{new Date(l.ts).toLocaleTimeString("uk-UA")}</span>
           <span className={levelColor(l.level)}>{l.message}</span>
         </div>
       ))}
@@ -79,18 +79,18 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
 function RunningBadge({ running, paused }: { running: boolean; paused: boolean }) {
   if (running && paused)
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Зупиняється
       </span>
     )
   if (running)
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Виконується
       </span>
     )
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-500/20 text-gray-400 border border-gray-500/30">
+    <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-500/20 text-gray-400 border border-gray-500/30">
       <span className="w-1.5 h-1.5 rounded-full bg-gray-500" /> Зупинено
     </span>
   )
@@ -104,9 +104,9 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
   collectionsReady: boolean | null
   onRefresh: () => Promise<void>
 }) {
-  const [logsOpen, setLogsOpen]   = useState(false)
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState("")
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
   const [stoppedAt, setStoppedAt] = useState<string | null>(null)
   const prevRunning = useRef(state.running)
 
@@ -158,7 +158,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
     setLoading(false)
   }
 
-  const stats   = state.resume_progress?.stats ?? {}
+  const stats = state.resume_progress?.stats ?? {}
   const fileIdx = state.resume_progress?.file_idx
 
   return (
@@ -166,7 +166,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="text-sm font-bold text-[#E0E6ED] uppercase tracking-wider">{source}</span>
-          <span className="ml-2 text-xs text-gray-500 hidden sm:inline">{SOURCE_LABELS[source]}</span>
+          <span className="ml-2 text-xs text-gray-400 hidden sm:inline">{SOURCE_LABELS[source]}</span>
         </div>
         <RunningBadge running={state.running} paused={state.pause_requested} />
       </div>
@@ -176,7 +176,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
-                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                   <th className="pb-1 pr-3">Законів</th>
                   <th className="pb-1 pr-3">Чанків</th>
                   <th className="pb-1 pr-3 text-emerald-400">Завантажено</th>
@@ -196,7 +196,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
             </table>
           </div>
           {fileIdx != null && (
-            <div className="text-xs text-gray-500">Позиція: <b className="text-gray-300">{fileIdx}</b></div>
+            <div className="text-xs text-gray-400">Позиція: <b className="text-gray-300">{fileIdx}</b></div>
           )}
         </div>
       )}
@@ -212,7 +212,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
             <span className="font-bold text-red-300">ЗУПИНЕНО о {stoppedAt}</span>
             {state.can_resume && <span className="text-amber-400">— прогрес збережено</span>}
           </div>
-          <button onClick={() => setStoppedAt(null)} className="text-gray-600 hover:text-gray-400 text-xs">✕</button>
+          <button onClick={() => setStoppedAt(null)} className="text-gray-400 hover:text-gray-400 text-xs">✕</button>
         </div>
       )}
 
@@ -267,10 +267,10 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function ReindexPage() {
-  const [allStatus, setAllStatus]               = useState<AllReindexStatus>({})
+  const [allStatus, setAllStatus] = useState<AllReindexStatus>({})
   const [collectionsReady, setCollectionsReady] = useState<boolean | null>(null)
-  const [initLoading, setInitLoading]           = useState(false)
-  const [initError, setInitError]               = useState("")
+  const [initLoading, setInitLoading] = useState(false)
+  const [initError, setInitError] = useState("")
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchStatus = useCallback(async () => {
@@ -296,7 +296,7 @@ export default function ReindexPage() {
     checkCollections()
   }, [fetchStatus, checkCollections])
 
-  const anyRunning  = SOURCES.some(s => allStatus[s]?.running)
+  const anyRunning = SOURCES.some(s => allStatus[s]?.running)
   const anyStopping = SOURCES.some(s => allStatus[s]?.running && allStatus[s]?.pause_requested)
 
   useEffect(() => {
@@ -326,7 +326,7 @@ export default function ReindexPage() {
       <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Реіндекс</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">Крок 2 — диск → чанки → gemini-embedding-001 → Qdrant v2</p>
+          <p className="text-xs sm:text-sm text-gray-400 mt-1">Крок 2 — диск → чанки → gemini-embedding-001 → Qdrant v2</p>
         </div>
 
         <div className="bg-[#0d1120] rounded-2xl border border-[#C9A84C]/20 p-5 space-y-3">
@@ -339,11 +339,11 @@ export default function ReindexPage() {
                 <span className="text-gray-400"> — створює 20 _v2 колекцій у Qdrant. </span>
                 {collectionsReady === true && <span className="text-emerald-400 font-bold">✅ Вже зроблено!</span>}
                 {collectionsReady === false && <span className="text-amber-400">Потрібно зробити один раз.</span>}
-                {collectionsReady === null && <span className="text-gray-500">Перевірка...</span>}
+                {collectionsReady === null && <span className="text-gray-400">Перевірка...</span>}
               </div>
             </div>
             <div className="flex gap-3">
-              <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30" : "bg-gray-700/50 text-gray-500 border border-gray-600/30"}`}>2</span>
+              <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30" : "bg-gray-700/50 text-gray-400 border border-gray-600/30"}`}>2</span>
               <div>
                 <span className="font-semibold">Реіндекс по джерелах</span>
                 <span className="text-gray-400"> — читає тексти з диску, ділить на чанки, ембедить, завантажує у Qdrant. </span>
@@ -351,7 +351,7 @@ export default function ReindexPage() {
               </div>
             </div>
           </div>
-          <div className="text-xs text-gray-500 border-t border-[#C9A84C]/10 pt-3">
+          <div className="text-xs text-gray-400 border-t border-[#C9A84C]/10 pt-3">
             ⚠️ Запускай реіндекс тільки після завершення скрапінгу (<a href="/admin/scraper" className="text-[#C9A84C] hover:underline">Скрапер</a>)
           </div>
         </div>
@@ -373,7 +373,7 @@ export default function ReindexPage() {
         {collectionsReady === true && (
           <div className="bg-emerald-500/10 rounded-xl border border-emerald-500/20 px-4 py-3 text-sm text-emerald-300 font-medium flex items-center justify-between">
             <span>✅ 20 _v2 колекцій Qdrant існують. Крок 1 виконано.</span>
-            <button onClick={fetchStatus} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Оновити</button>
+            <button onClick={fetchStatus} className="text-xs text-gray-400 hover:text-gray-300 transition-colors">Оновити</button>
           </div>
         )}
 

@@ -20,11 +20,11 @@ type AnalyticsState = {
 const SOURCES = ["rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod", "zir"]
 
 const STATUS_BADGE: Record<string, string> = {
-  ok:         "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
-  empty:      "bg-amber-500/20 text-amber-300 border border-amber-500/30",
+  ok: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+  empty: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
   restricted: "bg-blue-500/20 text-blue-300 border border-blue-500/30",
-  error:      "bg-red-500/20 text-red-300 border border-red-500/30",
-  skipped:    "bg-gray-500/20 text-gray-300 border border-gray-500/30",
+  error: "bg-red-500/20 text-red-300 border border-red-500/30",
+  skipped: "bg-gray-500/20 text-gray-300 border border-gray-500/30",
 }
 
 const STATUS_FILTER_MAP: Record<string, string> = {
@@ -34,14 +34,14 @@ const STATUS_FILTER_MAP: Record<string, string> = {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function DataAnalyticsPage() {
-  const [data, setData]             = useState<AnalyticsState | null>(null)
-  const [loading, setLoading]       = useState(false)
+  const [data, setData] = useState<AnalyticsState | null>(null)
+  const [loading, setLoading] = useState(false)
   const [filterStatus, setFilterStatus] = useState("")
   const [filterSource, setFilterSource] = useState("")
-  const [offset, setOffset]         = useState(0)
+  const [offset, setOffset] = useState(0)
   const [qdrantOpen, setQdrantOpen] = useState(false)
-  const [colStats, setColStats]     = useState<{ total: number; collections: Record<string, number> } | null>(null)
-  const [colOpen, setColOpen]       = useState(true)
+  const [colStats, setColStats] = useState<{ total: number; collections: Record<string, number> } | null>(null)
+  const [colOpen, setColOpen] = useState(true)
   const lawsRef = useRef<HTMLDivElement>(null)
   const PAGE_SIZE = 50
 
@@ -62,8 +62,8 @@ export default function DataAnalyticsPage() {
     fetch("/api/admin/v2/disk/by-collection")
       .then(r => r.ok ? r.json() : null)
       .then(d => d && setColStats(d))
-      .catch(() => {})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => { })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleCardClick(label: string) {
@@ -75,21 +75,21 @@ export default function DataAnalyticsPage() {
   }
 
   function handleFilter() { setOffset(0); fetchData(0, filterStatus, filterSource) }
-  function handlePrev()   { const o = Math.max(0, offset - PAGE_SIZE); setOffset(o); fetchData(o, filterStatus, filterSource) }
-  function handleNext()   { const o = offset + PAGE_SIZE; setOffset(o); fetchData(o, filterStatus, filterSource) }
+  function handlePrev() { const o = Math.max(0, offset - PAGE_SIZE); setOffset(o); fetchData(o, filterStatus, filterSource) }
+  function handleNext() { const o = offset + PAGE_SIZE; setOffset(o); fetchData(o, filterStatus, filterSource) }
 
-  const summary      = data?.summary
-  const bySource     = data?.by_source ?? {}
-  const qdrantV2     = data?.qdrant_v2 ?? {}
-  const laws         = data?.laws ?? []
+  const summary = data?.summary
+  const bySource = data?.by_source ?? {}
+  const qdrantV2 = data?.qdrant_v2 ?? {}
+  const laws = data?.laws ?? []
   const totalFiltered = data?.total_filtered ?? 0
 
   const summaryCards = [
-    { label: "Всього",   value: summary?.total      ?? 0, color: "text-[#C9A84C]",   ring: "ring-[#C9A84C]/50",   filterVal: "" },
-    { label: "OK",       value: summary?.ok         ?? 0, color: "text-emerald-400", ring: "ring-emerald-400/50", filterVal: "ok" },
-    { label: "Порожній", value: summary?.empty      ?? 0, color: "text-amber-400",   ring: "ring-amber-400/50",   filterVal: "empty" },
-    { label: "Обмежено", value: summary?.restricted ?? 0, color: "text-blue-400",    ring: "ring-blue-400/50",    filterVal: "restricted" },
-    { label: "Помилка",  value: summary?.error      ?? 0, color: "text-red-400",     ring: "ring-red-400/50",     filterVal: "error" },
+    { label: "Всього", value: summary?.total ?? 0, color: "text-[#C9A84C]", ring: "ring-[#C9A84C]/50", filterVal: "" },
+    { label: "OK", value: summary?.ok ?? 0, color: "text-emerald-400", ring: "ring-emerald-400/50", filterVal: "ok" },
+    { label: "Порожній", value: summary?.empty ?? 0, color: "text-amber-400", ring: "ring-amber-400/50", filterVal: "empty" },
+    { label: "Обмежено", value: summary?.restricted ?? 0, color: "text-blue-400", ring: "ring-blue-400/50", filterVal: "restricted" },
+    { label: "Помилка", value: summary?.error ?? 0, color: "text-red-400", ring: "ring-red-400/50", filterVal: "error" },
   ]
 
   return (
@@ -97,7 +97,7 @@ export default function DataAnalyticsPage() {
       <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Аналітика даних</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">Статус скрапінгу і кількість векторів у Qdrant v2</p>
+          <p className="text-xs sm:text-sm text-gray-400 mt-1">Статус скрапінгу і кількість векторів у Qdrant v2</p>
         </div>
 
         {/* Summary cards */}
@@ -106,11 +106,10 @@ export default function DataAnalyticsPage() {
             const active = filterStatus === card.filterVal
             return (
               <button key={card.label} onClick={() => handleCardClick(card.label)}
-                className={`bg-[#111827] rounded-2xl border p-3 sm:p-4 text-center transition-all hover:scale-[1.03] active:scale-[0.98] cursor-pointer ${
-                  active ? `border-[#C9A84C]/40 ring-2 ${card.ring}` : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"
-                }`}>
+                className={`bg-[#111827] rounded-2xl border p-3 sm:p-4 text-center transition-all hover:scale-[1.03] active:scale-[0.98] cursor-pointer ${active ? `border-[#C9A84C]/40 ring-2 ${card.ring}` : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"
+                  }`}>
                 <div className={`text-2xl sm:text-3xl font-black ${card.color}`}>{card.value.toLocaleString()}</div>
-                <div className="text-[10px] sm:text-xs text-gray-500 mt-1 uppercase tracking-wider">{card.label}</div>
+                <div className="text-[12px] sm:text-xs text-gray-400 mt-1 uppercase tracking-wider">{card.label}</div>
                 {active && <div className="text-[9px] text-[#C9A84C] mt-1 font-bold">↓ фільтр</div>}
               </button>
             )
@@ -124,7 +123,7 @@ export default function DataAnalyticsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                  <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                     <th className="pb-2 pr-3">Джерело</th>
                     <th className="pb-2 pr-3 text-emerald-400">OK</th>
                     <th className="pb-2 pr-3 text-amber-400 hidden sm:table-cell">Порожній</th>
@@ -154,13 +153,13 @@ export default function DataAnalyticsPage() {
             <button onClick={() => setQdrantOpen(o => !o)}
               className="w-full flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-[#C9A84C]/5 transition-colors">
               <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Qdrant v2 колекції</h3>
-              <span className="text-gray-500 text-lg leading-none">{qdrantOpen ? "▲" : "▼"}</span>
+              <span className="text-gray-400 text-lg leading-none">{qdrantOpen ? "▲" : "▼"}</span>
             </button>
             {qdrantOpen && (
               <div className="px-4 sm:px-6 pb-4 overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead>
-                    <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                    <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                       <th className="pb-2 pr-4">Колекція</th>
                       <th className="pb-2 text-right">Точок</th>
                     </tr>
@@ -192,15 +191,15 @@ export default function DataAnalyticsPage() {
               className="w-full flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-[#C9A84C]/5 transition-colors">
               <div>
                 <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider text-left">Рада — файли по колекціях</h3>
-                <p className="text-xs text-gray-500 mt-0.5 text-left">Всього на диску: {colStats.total.toLocaleString()} файлів</p>
+                <p className="text-xs text-gray-400 mt-0.5 text-left">Всього на диску: {colStats.total.toLocaleString()} файлів</p>
               </div>
-              <span className="text-gray-500 text-lg leading-none">{colOpen ? "▲" : "▼"}</span>
+              <span className="text-gray-400 text-lg leading-none">{colOpen ? "▲" : "▼"}</span>
             </button>
             {colOpen && (
               <div className="px-4 sm:px-6 pb-4 space-y-2">
                 {Object.entries(colStats.collections).map(([col, count]) => {
-                  const max     = Math.max(...Object.values(colStats.collections))
-                  const pct     = max > 0 ? Math.round((count / max) * 100) : 0
+                  const max = Math.max(...Object.values(colStats.collections))
+                  const pct = max > 0 ? Math.round((count / max) * 100) : 0
                   const isEmpty = count === 0
                   const shortName = col.replace("_v2", "").replace("laws_", "").replace("rada_", "")
                   return (
@@ -232,7 +231,7 @@ export default function DataAnalyticsPage() {
             </h3>
             {filterStatus && (
               <button onClick={() => { setFilterStatus(""); setOffset(0); fetchData(0, "", filterSource) }}
-                className="text-xs text-gray-500 hover:text-gray-300 underline transition-colors">
+                className="text-xs text-gray-400 hover:text-gray-300 underline transition-colors">
                 скинути фільтр
               </button>
             )}
@@ -240,7 +239,7 @@ export default function DataAnalyticsPage() {
 
           <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500 uppercase tracking-wider">Статус</label>
+              <label className="text-xs text-gray-400 uppercase tracking-wider">Статус</label>
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
                 className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED]">
                 <option value="">Усі</option>
@@ -251,7 +250,7 @@ export default function DataAnalyticsPage() {
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500 uppercase tracking-wider">Джерело</label>
+              <label className="text-xs text-gray-400 uppercase tracking-wider">Джерело</label>
               <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
                 className="bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED]">
                 <option value="">Усі</option>
@@ -273,7 +272,7 @@ export default function DataAnalyticsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead>
-                    <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                    <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                       <th className="pb-2 pr-3">ID</th>
                       <th className="pb-2 pr-3 hidden sm:table-cell">Джерело</th>
                       <th className="pb-2 pr-3">Статус</th>
@@ -284,21 +283,21 @@ export default function DataAnalyticsPage() {
                   <tbody className="divide-y divide-[#C9A84C]/5">
                     {laws.map(law => (
                       <tr key={law.law_id} className="text-[#E0E6ED] hover:bg-[#C9A84C]/5">
-                        <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400 max-w-[100px] sm:max-w-[140px] truncate">{law.law_id}</td>
+                        <td className="py-1.5 pr-3 font-mono text-[12px] text-gray-400 max-w-[100px] sm:max-w-[140px] truncate">{law.law_id}</td>
                         <td className="py-1.5 pr-3 hidden sm:table-cell">{law.source}</td>
                         <td className="py-1.5 pr-3">
-                          <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_BADGE[law.status] ?? STATUS_BADGE.error}`}>
+                          <span className={`inline-flex px-1.5 py-0.5 rounded text-[12px] font-bold ${STATUS_BADGE[law.status] ?? STATUS_BADGE.error}`}>
                             {law.status}
                           </span>
                         </td>
                         <td className="py-1.5 pr-3 max-w-[140px] sm:max-w-[260px] truncate text-gray-300">{law.title || "—"}</td>
-                        <td className="py-1.5 max-w-[140px] truncate text-gray-500 hidden sm:table-cell">{law.reason || "—"}</td>
+                        <td className="py-1.5 max-w-[140px] truncate text-gray-400 hidden sm:table-cell">{law.reason || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div className="flex items-center justify-between text-xs text-gray-500 pt-2">
+              <div className="flex items-center justify-between text-xs text-gray-400 pt-2">
                 <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, totalFiltered)} з {totalFiltered}</span>
                 <div className="flex gap-2">
                   <button onClick={handlePrev} disabled={offset === 0 || loading}
@@ -309,7 +308,7 @@ export default function DataAnalyticsPage() {
               </div>
             </>
           ) : (
-            <div className="text-sm text-gray-600 py-4 text-center">
+            <div className="text-sm text-gray-400 py-4 text-center">
               {loading ? "Завантаження..." : "Немає результатів. Натисніть «Завантажити» для пошуку."}
             </div>
           )}

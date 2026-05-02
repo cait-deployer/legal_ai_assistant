@@ -27,7 +27,7 @@ type ReviewRow = {
 }
 
 type MessageDetail = {
-  ai_message:   { id: string; role: string; content: string; created_at: string } | null
+  ai_message: { id: string; role: string; content: string; created_at: string } | null
   user_message: { id: string; role: string; content: string; created_at: string } | null
 }
 
@@ -77,7 +77,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
           <div className="space-y-3">
             {row.tags?.length > 0 && (
               <div>
-                <p className="text-[10px] text-[#E0E6ED]/40 uppercase tracking-wider mb-1.5">Теги</p>
+                <p className="text-[12px] text-[#E0E6ED]/40 uppercase tracking-wider mb-1.5">Теги</p>
                 <div className="flex flex-wrap gap-1.5">
                   {row.tags.map(tag => (
                     <span key={tag} className="px-2 py-1 rounded-full bg-[#C9A84C]/15 border border-[#C9A84C]/30 text-[#C9A84C] text-xs">{tag}</span>
@@ -87,7 +87,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
             )}
             {(row.feedback_text || row.audio_transcription) && (
               <div>
-                <p className="text-[10px] text-[#E0E6ED]/40 uppercase tracking-wider mb-1.5">Коментар</p>
+                <p className="text-[12px] text-[#E0E6ED]/40 uppercase tracking-wider mb-1.5">Коментар</p>
                 <p className="text-sm text-[#E0E6ED]/80 bg-white/5 rounded-xl px-4 py-3">
                   {row.feedback_text ?? row.audio_transcription}
                 </p>
@@ -100,7 +100,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
 
           {/* Message context */}
           <div>
-            <p className="text-[10px] text-[#E0E6ED]/40 uppercase tracking-wider mb-3">Контекст повідомлення</p>
+            <p className="text-[12px] text-[#E0E6ED]/40 uppercase tracking-wider mb-3">Контекст повідомлення</p>
 
             {loading ? (
               <div className="flex items-center gap-2 text-[#E0E6ED]/40 text-sm">
@@ -117,7 +117,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
                       <User className="w-3.5 h-3.5 text-[#E0E6ED]/60" />
                     </div>
                     <div className="flex-1 bg-white/5 rounded-xl px-4 py-3">
-                      <p className="text-[10px] text-[#E0E6ED]/40 mb-1">Питання користувача</p>
+                      <p className="text-[12px] text-[#E0E6ED]/40 mb-1">Питання користувача</p>
                       <p className="text-sm text-[#E0E6ED]/90 whitespace-pre-wrap">{detail.user_message.content}</p>
                     </div>
                   </div>
@@ -127,7 +127,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
                     <Bot className="w-3.5 h-3.5 text-[#C9A84C]" />
                   </div>
                   <div className="flex-1 bg-white/5 rounded-xl px-4 py-3">
-                    <p className="text-[10px] text-[#E0E6ED]/40 mb-1">Відповідь URAI</p>
+                    <p className="text-[12px] text-[#E0E6ED]/40 mb-1">Відповідь URAI</p>
                     <p className="text-sm text-[#E0E6ED]/90 whitespace-pre-wrap line-clamp-[12]">
                       {detail.ai_message.content}
                     </p>
@@ -139,7 +139,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
 
           {/* IDs for debugging */}
           <div className="pt-2 border-t border-white/5">
-            <p className="text-[10px] text-[#E0E6ED]/20 font-mono">
+            <p className="text-[12px] text-[#E0E6ED]/20 font-mono">
               message_id: {row.message_id} · chat_id: {row.chat_id}
             </p>
           </div>
@@ -150,10 +150,10 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
 }
 
 export default function FeedbackAdminPage() {
-  const [tab, setTab]       = useState<"message" | "review">("message")
-  const [rows, setRows]     = useState<(MessageFeedbackRow | ReviewRow)[]>([])
-  const [total, setTotal]   = useState(0)
-  const [page, setPage]     = useState(0)
+  const [tab, setTab] = useState<"message" | "review">("message")
+  const [rows, setRows] = useState<(MessageFeedbackRow | ReviewRow)[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<MessageFeedbackRow | null>(null)
 

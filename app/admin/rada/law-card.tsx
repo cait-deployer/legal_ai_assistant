@@ -132,11 +132,11 @@ export function LawCard({ law, isActive, onOpen }: Props) {
 
           {/* status + category badges */}
           <div className="flex flex-wrap gap-1.5">
-            <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${getStatusStyle(meta.status)}`}>
+            <span className={`inline-flex items-center text-[12px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${getStatusStyle(meta.status)}`}>
               {meta.status || "Невідомо"}
             </span>
             {meta.category && (
-              <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${getCategoryStyle(meta.category)}`}>
+              <span className={`inline-flex items-center text-[12px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${getCategoryStyle(meta.category)}`}>
                 {getCategoryLabel(meta.category)}
               </span>
             )}

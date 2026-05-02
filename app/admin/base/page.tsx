@@ -15,11 +15,11 @@ import { LawTable } from "../rada/law-table"
 import type { Law } from "../rada/laws-list"
 
 function getSourceLabel(law_id: string) {
-  if ((law_id ?? "").startsWith("sc_"))   return "Верховний Суд"
+  if ((law_id ?? "").startsWith("sc_")) return "Верховний Суд"
   if ((law_id ?? "").startsWith("wiki_")) return "Wiki"
-  if ((law_id ?? "").startsWith("ccu_"))  return "КСУ"
-  if ((law_id ?? "").startsWith("lpd_"))  return "Позиції ВС"
-  if ((law_id ?? "").startsWith("kmu_"))  return "КМУ"
+  if ((law_id ?? "").startsWith("ccu_")) return "КСУ"
+  if ((law_id ?? "").startsWith("lpd_")) return "Позиції ВС"
+  if ((law_id ?? "").startsWith("kmu_")) return "КМУ"
   return "РАДА"
 }
 
@@ -39,26 +39,26 @@ function getSourceStyle(law_id: string) {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SOURCE_OPTIONS = [
-  { value: "",       label: "Всі джерела" },
-  { value: "rada",   label: "РАДА" },
+  { value: "", label: "Всі джерела" },
+  { value: "rada", label: "РАДА" },
   { value: "supreme", label: "Верховний Суд" },
-  { value: "wiki",   label: "Wiki" },
-  { value: "ccu",    label: "КСУ" },
-  { value: "lpd",    label: "Позиції ВС" },
-  { value: "kmu",    label: "КМУ" },
+  { value: "wiki", label: "Wiki" },
+  { value: "ccu", label: "КСУ" },
+  { value: "lpd", label: "Позиції ВС" },
+  { value: "kmu", label: "КМУ" },
 ]
 
 // Маппінг кодів розділів Ради → читабельні назви
 const SECTION_LABELS: Record<string, string> = {
-  h1:  "Господарсько-процесуальне законодавство",
-  h2:  "Банки, фінанси, кредит, бюджет",
-  h3:  "Бухгалтерський облік, оподаткування, аудит",
-  h4:  "Державний та суспільний устрій",
-  h5:  "Цивільне та цивільно-процесуальне законодавство",
-  h6:  "Житлове законодавство",
-  h7:  "Транспорт, зв'язок, інформація",
-  h8:  "Законодавство про адмін. відповідальність",
-  h9:  "Природні ресурси, охорона довкілля",
+  h1: "Господарсько-процесуальне законодавство",
+  h2: "Банки, фінанси, кредит, бюджет",
+  h3: "Бухгалтерський облік, оподаткування, аудит",
+  h4: "Державний та суспільний устрій",
+  h5: "Цивільне та цивільно-процесуальне законодавство",
+  h6: "Житлове законодавство",
+  h7: "Транспорт, зв'язок, інформація",
+  h8: "Законодавство про адмін. відповідальність",
+  h9: "Природні ресурси, охорона довкілля",
   h10: "Ліцензування, сертифікація, патентування",
   h11: "Міжнародні відносини",
   h12: "Наука, освіта, культура",
@@ -177,11 +177,11 @@ function DocDetailContent({
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5 mt-3">
-          <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${getSourceStyle(meta.law_id)}`}>
+          <span className={`inline-flex items-center text-[12px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${getSourceStyle(meta.law_id)}`}>
             {getSourceLabel(meta.law_id)}
           </span>
           {meta.category && (
-            <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border bg-[#C9A84C]/5 text-[#C9A84C]/50 border-[#C9A84C]/10">
+            <span className="inline-flex items-center text-[12px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border bg-[#C9A84C]/5 text-[#C9A84C]/50 border-[#C9A84C]/10">
               {meta.category}
             </span>
           )}
@@ -197,7 +197,7 @@ function DocDetailContent({
               <Hash className="w-3.5 h-3.5 text-[#C9A84C]/50" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">ID</p>
+              <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider">ID</p>
               <p className="text-xs mt-0.5 font-mono break-all text-[#E0E6ED]/70">{meta.law_id}</p>
             </div>
           </div>
@@ -207,7 +207,7 @@ function DocDetailContent({
                 <Calendar className="w-3.5 h-3.5 text-[#C9A84C]/50" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Завантажено</p>
+                <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Завантажено</p>
                 <p className="text-xs mt-0.5 text-[#E0E6ED]/70">{scrapedAt}</p>
               </div>
             </div>
@@ -218,7 +218,7 @@ function DocDetailContent({
                 <Layers className="w-3.5 h-3.5 text-[#C9A84C]/50" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Частин тексту</p>
+                <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Частин тексту</p>
                 <p className="text-xs mt-0.5 text-[#E0E6ED]/70">{full.chunk_count}</p>
               </div>
             </div>
@@ -229,7 +229,7 @@ function DocDetailContent({
                 <ExternalLink className="w-3.5 h-3.5 text-[#C9A84C]/50" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Джерело</p>
+                <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-wider">Джерело</p>
                 <a href={meta.law_url} target="_blank" rel="noopener noreferrer"
                   className="text-xs mt-0.5 text-[#C9A84C] hover:text-[#E2C47A] hover:underline underline-offset-2 flex items-center gap-1 break-all transition-colors">
                   {(() => { try { return new URL(meta.law_url).hostname } catch { return meta.law_url } })()}
@@ -247,7 +247,7 @@ function DocDetailContent({
 
         {/* Full text column */}
         <div className={`space-y-2 ${expanded ? "flex-1 min-w-0" : ""}`}>
-          <p className="text-[10px] font-black uppercase tracking-wider text-[#C9A84C]/70 flex items-center gap-1.5">
+          <p className="text-[12px] font-black uppercase tracking-wider text-[#C9A84C]/70 flex items-center gap-1.5">
             <BookOpen className="w-3.5 h-3.5" /> Повний текст
           </p>
           {loading && (
@@ -424,7 +424,7 @@ export default function BasePage() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {lastUpdated && <span className="text-[10px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">{lastUpdated.toLocaleTimeString()}</span>}
+          {lastUpdated && <span className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-widest hidden sm:block">{lastUpdated.toLocaleTimeString()}</span>}
           <Button
             variant="ghost"
             size="sm"

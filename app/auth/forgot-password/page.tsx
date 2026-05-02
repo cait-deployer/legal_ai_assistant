@@ -103,7 +103,7 @@ function ForgotPasswordForm() {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
+          <Label htmlFor="email" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
           <Input
             id="email"
             type="email"
@@ -133,7 +133,7 @@ function ForgotPasswordForm() {
       <div className="mt-8 pt-6 border-t border-[#C9A84C]/10 text-center">
         <Link
           href="/auth/login"
-          className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all inline-flex items-center gap-2"
+          className="text-[12px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all inline-flex items-center gap-2"
         >
           <ArrowLeft className="w-3 h-3" /> Назад до входу
         </Link>

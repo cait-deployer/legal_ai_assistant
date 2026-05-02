@@ -87,7 +87,7 @@ function StatusBadge({ status }: { status?: string }) {
     if (!status || status === 'Невідомо') return null;
     const isActive = status.toLowerCase().includes('чинний') && !status.toLowerCase().includes('втратив');
     return (
-        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest mt-2 ${isActive ? 'bg-[#0A0E1A] text-emerald-400' : 'bg-[#0A0E1A] text-red-400'
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[12px] font-black uppercase tracking-widest mt-2 ${isActive ? 'bg-[#0A0E1A] text-emerald-400' : 'bg-[#0A0E1A] text-red-400'
             }`}>
             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-emerald-400' : 'bg-red-400'}`} />
             <span className="whitespace-nowrap mt-0.5">{status}</span>
@@ -110,7 +110,7 @@ function MarkdownText({ text, refs, onCitationOpen }: {
                         <button
                             key={`${i}-${j}`}
                             onClick={() => citation && onCitationOpen(citation)}
-                            className="inline-flex items-center justify-center align-middle mx-0.5 min-w-[22px] h-[22px] px-1.5 text-[10px] font-bold text-[#0A0E1A] bg-[#C9A84C] rounded hover:bg-[#E2C47A] shadow-[0_0_10px_rgba(201,168,76,0.3)] transition-all active:scale-90 touch-manipulation"
+                            className="inline-flex items-center justify-center align-middle mx-0.5 min-w-[22px] h-[22px] px-1.5 text-[12px] font-bold text-[#0A0E1A] bg-[#C9A84C] rounded hover:bg-[#E2C47A] shadow-[0_0_10px_rgba(201,168,76,0.3)] transition-all active:scale-90 touch-manipulation"
                         >
                             {num}
                         </button>
@@ -611,7 +611,7 @@ function ChatPage() {
                         {historyLoading ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 pt-20">
                                 <Loader2 className="w-8 h-8 animate-spin text-[#C9A84C]" />
-                                <p className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em]">Відновлення історії...</p>
+                                <p className="text-[12px] font-bold text-[#C9A84C] uppercase tracking-[0.3em]">Відновлення історії...</p>
                             </div>
                         ) : messages.length === 0 ? (
                             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center pt-6 md:pt-10">
@@ -637,49 +637,49 @@ function ChatPage() {
                                     const lastAiId = [..._arr].reverse().find(m => m.role === 'ai')?.id
                                     const isLastAi = msg.role === 'ai' && msg.id === lastAiId
                                     return (
-                                    <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex gap-2 md:gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                                        <div className={`h-8 w-8 md:h-10 md:w-10 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0 shadow-xl ${msg.role === 'ai' ? 'bg-[#0d1120] border border-[#C9A84C]/30 text-[#C9A84C]' : 'bg-[#C9A84C] text-[#0A0E1A]'
-                                            }`}>
-                                            {msg.role === 'ai' ? <Scale className="h-4 w-4 md:h-6 md:w-6" /> : <User className="h-4 w-4 md:h-6 md:w-6" />}
-                                        </div>
-                                        <div className={`max-w-[88%] md:max-w-[85%] space-y-1.5 md:space-y-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                                            <Card className={`p-3.5 md:p-5 text-sm leading-relaxed border-none shadow-2xl ${msg.role === 'user'
-                                                ? 'bg-[#C9A84C]/10 text-[#E0E6ED] rounded-3xl rounded-tr-none'
-                                                : 'bg-[#0d1120]/90 text-[#E0E6ED] rounded-3xl rounded-tl-none border-l-2 border-l-[#C9A84C] font-serif tracking-wide'
+                                        <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex gap-2 md:gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                                            <div className={`h-8 w-8 md:h-10 md:w-10 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0 shadow-xl ${msg.role === 'ai' ? 'bg-[#0d1120] border border-[#C9A84C]/30 text-[#C9A84C]' : 'bg-[#C9A84C] text-[#0A0E1A]'
                                                 }`}>
-                                                {msg.role === 'ai' ? (
-                                                    <div className="space-y-4">
-                                                        <MarkdownText text={msg.text} refs={msg.references ?? []} onCitationOpen={setActiveCitation} />
-                                                        {msg.templates && msg.templates.length > 0 && (
-                                                            <div className="mt-4 pt-4 border-t border-[#C9A84C]/10 space-y-2">
-                                                                <p className="text-[10px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.2em]">Доступні бланки:</p>
-                                                                {msg.templates.map((t, ti) => (
-                                                                    <a key={ti} href={t.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/20 hover:bg-[#C9A84C]/10 transition-all group">
-                                                                        <div className="bg-[#C9A84C] p-1.5 rounded-lg text-[#0A0E1A] group-hover:scale-110 transition-transform"><Plus className="w-4 h-4" /></div>
-                                                                        <div className="flex-1 min-w-0"><p className="text-xs font-bold truncate text-[#E0E6ED]">{t.title}</p></div>
-                                                                        <ExternalLink className="w-3.5 h-3.5 text-[#C9A84C]/70" />
-                                                                    </a>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                ) : msg.text}
-                                            </Card>
-                                            <span className="text-[10px] font-bold text-[#C9A84C]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Ви'}</span>
-                                            {msg.role === 'ai' && typeof msg.id === 'string' && currentChatId && (
-                                                <MessageFeedback
-                                                    messageId={msg.id}
-                                                    chatId={currentChatId}
-                                                    initialIsPositive={msg.feedback?.is_positive ?? null}
-                                                    betaMode={isBetaTester}
-                                                    autoOpen={pendingBetaFeedbackId === msg.id}
-                                                    onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
-                                                    showReviewButton={isLastAi && reviewTrigger.buttonVisible}
-                                                    onReviewOpen={reviewTrigger.reopen}
-                                                />
-                                            )}
-                                        </div>
-                                    </motion.div>
+                                                {msg.role === 'ai' ? <Scale className="h-4 w-4 md:h-6 md:w-6" /> : <User className="h-4 w-4 md:h-6 md:w-6" />}
+                                            </div>
+                                            <div className={`max-w-[88%] md:max-w-[85%] space-y-1.5 md:space-y-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                                                <Card className={`p-3.5 md:p-5 text-sm leading-relaxed border-none shadow-2xl ${msg.role === 'user'
+                                                    ? 'bg-[#C9A84C]/10 text-[#E0E6ED] rounded-3xl rounded-tr-none'
+                                                    : 'bg-[#0d1120]/90 text-[#E0E6ED] rounded-3xl rounded-tl-none border-l-2 border-l-[#C9A84C] font-serif tracking-wide'
+                                                    }`}>
+                                                    {msg.role === 'ai' ? (
+                                                        <div className="space-y-4">
+                                                            <MarkdownText text={msg.text} refs={msg.references ?? []} onCitationOpen={setActiveCitation} />
+                                                            {msg.templates && msg.templates.length > 0 && (
+                                                                <div className="mt-4 pt-4 border-t border-[#C9A84C]/10 space-y-2">
+                                                                    <p className="text-[12px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.2em]">Доступні бланки:</p>
+                                                                    {msg.templates.map((t, ti) => (
+                                                                        <a key={ti} href={t.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/20 hover:bg-[#C9A84C]/10 transition-all group">
+                                                                            <div className="bg-[#C9A84C] p-1.5 rounded-lg text-[#0A0E1A] group-hover:scale-110 transition-transform"><Plus className="w-4 h-4" /></div>
+                                                                            <div className="flex-1 min-w-0"><p className="text-xs font-bold truncate text-[#E0E6ED]">{t.title}</p></div>
+                                                                            <ExternalLink className="w-3.5 h-3.5 text-[#C9A84C]/70" />
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ) : msg.text}
+                                                </Card>
+                                                <span className="text-[12px] font-bold text-[#C9A84C]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Ви'}</span>
+                                                {msg.role === 'ai' && typeof msg.id === 'string' && currentChatId && (
+                                                    <MessageFeedback
+                                                        messageId={msg.id}
+                                                        chatId={currentChatId}
+                                                        initialIsPositive={msg.feedback?.is_positive ?? null}
+                                                        betaMode={isBetaTester}
+                                                        autoOpen={pendingBetaFeedbackId === msg.id}
+                                                        onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
+                                                        showReviewButton={isLastAi && reviewTrigger.buttonVisible}
+                                                        onReviewOpen={reviewTrigger.reopen}
+                                                    />
+                                                )}
+                                            </div>
+                                        </motion.div>
                                     )
                                 })}
                             </div>
@@ -690,7 +690,7 @@ function ChatPage() {
                                 <div className="h-10 w-10 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/20 flex items-center justify-center">
                                     <Loader2 className="h-5 w-5 animate-spin text-[#C9A84C]" />
                                 </div>
-                                <p key={loadingPhase} className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
+                                <p key={loadingPhase} className="text-[12px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
                                     {loadingStatus || LOADING_MESSAGES[loadingPhase]}
                                 </p>
                             </div>
@@ -700,7 +700,7 @@ function ChatPage() {
                                 <div className="h-10 w-10 rounded-2xl bg-[#0d1120] border border-[#C9A84C]/20 flex items-center justify-center">
                                     <Loader2 className="h-5 w-5 animate-spin text-[#C9A84C]" />
                                 </div>
-                                <p className="text-[10px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
+                                <p className="text-[12px] font-bold text-[#C9A84C] uppercase tracking-[0.3em] animate-pulse">
                                     Оновлюю контекст діалогу...
                                 </p>
                             </div>
@@ -797,12 +797,12 @@ function ChatPage() {
                                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                                     <StatusBadge status={activeCitation?.status} />
                                     {activeCitation?.rada_is_dead && (
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-900/80 text-red-200 border border-red-700/50">
+                                        <span className="px-2 py-0.5 rounded text-[12px] font-bold bg-red-900/80 text-red-200 border border-red-700/50">
                                             Втратив чинність
                                         </span>
                                     )}
                                     {activeCitation?.rada_doc_type && (
-                                        <span className="text-[10px] text-[#0A0E1A]/60">{activeCitation.rada_doc_type}</span>
+                                        <span className="text-[12px] text-[#0A0E1A]/60">{activeCitation.rada_doc_type}</span>
                                     )}
                                 </div>
                             </div>

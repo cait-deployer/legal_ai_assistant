@@ -96,7 +96,7 @@ function LoginForm() {
       body: JSON.stringify({
         fingerprint: btoa(`${navigator.userAgent}-${screen.width}x${screen.height}`).slice(0, 64),
       }),
-    }).catch(() => {})
+    }).catch(() => { })
 
     router.push(redirectTo)
     router.refresh()
@@ -210,7 +210,7 @@ function LoginForm() {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
+          <Label htmlFor="email" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Email</Label>
           <Input
             id="email"
             type="email"
@@ -226,10 +226,10 @@ function LoginForm() {
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label htmlFor="password" className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
+            <Label htmlFor="password" className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Пароль</Label>
             <Link
               href="/auth/forgot-password"
-              className="text-[10px] font-black text-[#C9A84C]/70 hover:text-[#C9A84C] uppercase tracking-wider transition-colors"
+              className="text-[12px] font-black text-[#C9A84C]/70 hover:text-[#C9A84C] uppercase tracking-wider transition-colors"
             >
               Забули пароль?
             </Link>
@@ -276,7 +276,7 @@ function LoginForm() {
         </Link>
       </p>
 
-      <p className="text-center text-[10px] text-white/25 mt-4 leading-relaxed">
+      <p className="text-center text-[12px] text-white/25 mt-4 leading-relaxed">
         <Link href="/terms" className="text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors underline-offset-2 hover:underline">
           Умови користування
         </Link>

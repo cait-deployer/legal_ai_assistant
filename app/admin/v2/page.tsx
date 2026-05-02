@@ -103,11 +103,11 @@ const RADA_COLLECTIONS = [
 ]
 
 const STATUS_BADGE: Record<string, string> = {
-  ok:         "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
-  empty:      "bg-amber-500/20 text-amber-300 border border-amber-500/30",
+  ok: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+  empty: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
   restricted: "bg-blue-500/20 text-blue-300 border border-blue-500/30",
-  error:      "bg-red-500/20 text-red-300 border border-red-500/30",
-  skipped:    "bg-gray-500/20 text-gray-300 border border-gray-500/30",
+  error: "bg-red-500/20 text-red-300 border border-red-500/30",
+  skipped: "bg-gray-500/20 text-gray-300 border border-gray-500/30",
 }
 
 // ── Log panel ──────────────────────────────────────────────────────────────────
@@ -142,11 +142,11 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
       className="font-mono text-[11px] h-[400px] overflow-y-auto bg-[#0A0E1A]/80 rounded-xl border border-[#C9A84C]/10 p-3 space-y-0.5"
     >
       {logs.length === 0 && (
-        <span className="text-gray-600">Очікування запуску...</span>
+        <span className="text-gray-400">Очікування запуску...</span>
       )}
       {logs.map((l, i) => (
         <div key={i} className="flex gap-2">
-          <span className="text-gray-600 shrink-0">
+          <span className="text-gray-400 shrink-0">
             {new Date(l.ts).toLocaleTimeString("uk-UA")}
           </span>
           <span className={levelColor(l.level)}>{l.message}</span>
@@ -161,20 +161,20 @@ function LogPanel({ logs }: { logs: LogEntry[] }) {
 function RunningBadge({ running, paused }: { running: boolean; paused: boolean }) {
   if (running && paused)
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
         Зупиняється
       </span>
     )
   if (running)
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+      <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         Виконується
       </span>
     )
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-500/20 text-gray-400 border border-gray-500/30">
+    <span className="inline-flex items-center gap-1 text-[12px] font-black uppercase tracking-wider px-2 py-1 rounded-lg bg-gray-500/20 text-gray-400 border border-gray-500/30">
       <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
       Зупинено
     </span>
@@ -184,14 +184,14 @@ function RunningBadge({ running, paused }: { running: boolean; paused: boolean }
 // ── Source labels ───────────────────────────────────────────────────────────────
 
 const SOURCE_LABELS: Record<string, string> = {
-  rada:      "Верховна Рада (~15 500 законів)",
-  kmu:       "Кабінет Міністрів",
-  ccu:       "Конституційний суд",
-  supreme:   "Верховний суд",
-  wiki:      "Legal Aid Wiki (юридичні терміни)",
+  rada: "Верховна Рада (~15 500 законів)",
+  kmu: "Кабінет Міністрів",
+  ccu: "Конституційний суд",
+  supreme: "Верховний суд",
+  wiki: "Legal Aid Wiki (юридичні терміни)",
   positions: "Правові позиції ВС (~12 800 позицій)",
-  mod:       "Міністерство оборони (~210 документів)",
-  zir:       "ЗІР ДПС (~5 900 питань-відповідей)",
+  mod: "Міністерство оборони (~210 документів)",
+  zir: "ЗІР ДПС (~5 900 питань-відповідей)",
 }
 
 const DEFAULT_SOURCE_STATE: SourceState = {
@@ -206,12 +206,12 @@ function SourcePanel({ source, state, onRefresh }: {
   onRefresh: () => Promise<void>
 }) {
   const [logsOpen, setLogsOpen] = useState(false)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState("")
-  const [radaCol, setRadaCol]   = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [radaCol, setRadaCol] = useState("")
 
   const stats = state.resume_progress?.stats ?? {}
-  const idx   = state.resume_progress?.inner_idx ?? 0
+  const idx = state.resume_progress?.inner_idx ?? 0
 
   async function doAction(endpoint: string, body: Record<string, string>) {
     setLoading(true); setError("")
@@ -236,7 +236,7 @@ function SourcePanel({ source, state, onRefresh }: {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="text-sm font-bold text-[#E0E6ED] uppercase tracking-wider">{source}</span>
-          <span className="ml-2 text-xs text-gray-500 hidden sm:inline">{SOURCE_LABELS[source]}</span>
+          <span className="ml-2 text-xs text-gray-400 hidden sm:inline">{SOURCE_LABELS[source]}</span>
         </div>
         <RunningBadge running={state.running} paused={state.pause_requested} />
       </div>
@@ -245,7 +245,7 @@ function SourcePanel({ source, state, onRefresh }: {
       {state.resume_progress && (
         <div className="space-y-1">
           <div className="grid grid-cols-5 gap-1 text-center">
-            {(["ok","empty","restricted","error","skipped"] as const).map(k => {
+            {(["ok", "empty", "restricted", "error", "skipped"] as const).map(k => {
               const colors: Record<string, string> = {
                 ok: "text-emerald-400 bg-emerald-500/10",
                 empty: "text-amber-400 bg-amber-500/10",
@@ -259,12 +259,12 @@ function SourcePanel({ source, state, onRefresh }: {
               return (
                 <div key={k} className={`rounded-lg py-1.5 px-1 ${colors[k]}`}>
                   <div className="text-sm font-bold">{stats[k] ?? 0}</div>
-                  <div className="text-[10px] opacity-70">{labels[k]}</div>
+                  <div className="text-[12px] opacity-70">{labels[k]}</div>
                 </div>
               )
             })}
           </div>
-          <div className="text-xs text-gray-500">Позиція: <b className="text-gray-300">{idx}</b></div>
+          <div className="text-xs text-gray-400">Позиція: <b className="text-gray-300">{idx}</b></div>
         </div>
       )}
 
@@ -389,8 +389,8 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
   onRefresh: () => Promise<void>
 }) {
   const [logsOpen, setLogsOpen] = useState(false)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
   const [stoppedAt, setStoppedAt] = useState<string | null>(null)
   const prevRunning = useRef(state.running)
 
@@ -454,7 +454,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="text-sm font-bold text-[#E0E6ED] uppercase tracking-wider">{source}</span>
-          <span className="ml-2 text-xs text-gray-500 hidden sm:inline">{SOURCE_LABELS[source]}</span>
+          <span className="ml-2 text-xs text-gray-400 hidden sm:inline">{SOURCE_LABELS[source]}</span>
         </div>
         <RunningBadge running={state.running} paused={state.pause_requested} />
       </div>
@@ -465,7 +465,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
-                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                   <th className="pb-1 pr-3">Законів</th>
                   <th className="pb-1 pr-3">Чанків</th>
                   <th className="pb-1 pr-3 text-emerald-400">Завантажено</th>
@@ -485,7 +485,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
             </table>
           </div>
           {fileIdx != null && (
-            <div className="text-xs text-gray-500">Позиція: <b className="text-gray-300">{fileIdx}</b></div>
+            <div className="text-xs text-gray-400">Позиція: <b className="text-gray-300">{fileIdx}</b></div>
           )}
         </div>
       )}
@@ -502,7 +502,7 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
             <span className="font-bold text-red-300">ЗУПИНЕНО о {stoppedAt}</span>
             {state.can_resume && <span className="text-amber-400">— прогрес збережено</span>}
           </div>
-          <button onClick={() => setStoppedAt(null)} className="text-gray-600 hover:text-gray-400 text-xs">✕</button>
+          <button onClick={() => setStoppedAt(null)} className="text-gray-400 hover:text-gray-400 text-xs">✕</button>
         </div>
       )}
 
@@ -575,10 +575,10 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
 // ── Reindex tab ────────────────────────────────────────────────────────────────
 
 function ReindexTab() {
-  const [allStatus, setAllStatus]           = useState<AllReindexStatus>({})
+  const [allStatus, setAllStatus] = useState<AllReindexStatus>({})
   const [collectionsReady, setCollectionsReady] = useState<boolean | null>(null)
-  const [initLoading, setInitLoading]       = useState(false)
-  const [initError, setInitError]           = useState("")
+  const [initLoading, setInitLoading] = useState(false)
+  const [initError, setInitError] = useState("")
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchStatus = useCallback(async () => {
@@ -650,11 +650,11 @@ function ReindexTab() {
               <span className="text-gray-400"> — створює 20 _v2 колекцій у Qdrant. </span>
               {collectionsReady === true && <span className="text-emerald-400 font-bold">✅ Вже зроблено!</span>}
               {collectionsReady === false && <span className="text-amber-400">Потрібно зробити один раз.</span>}
-              {collectionsReady === null && <span className="text-gray-500">Перевірка...</span>}
+              {collectionsReady === null && <span className="text-gray-400">Перевірка...</span>}
             </div>
           </div>
           <div className="flex gap-3">
-            <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30" : "bg-gray-700/50 text-gray-500 border border-gray-600/30"}`}>2</span>
+            <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${collectionsReady ? "bg-[#C9A84C]/20 text-[#C9A84C] border border-[#C9A84C]/30" : "bg-gray-700/50 text-gray-400 border border-gray-600/30"}`}>2</span>
             <div>
               <span className="font-semibold">Реіндекс по джерелах</span>
               <span className="text-gray-400"> — обирай кожне джерело окремо. Читає тексти з диску, ділить на чанки, ембедить через gemini-embedding-001, завантажує у Qdrant. </span>
@@ -662,7 +662,7 @@ function ReindexTab() {
             </div>
           </div>
         </div>
-        <div className="text-xs text-gray-500 border-t border-[#C9A84C]/10 pt-3">
+        <div className="text-xs text-gray-400 border-t border-[#C9A84C]/10 pt-3">
           ⚠️ Запускай реіндекс тільки після завершення скрапінгу (вкладка Скрапер)
         </div>
       </div>
@@ -688,7 +688,7 @@ function ReindexTab() {
       {collectionsReady === true && (
         <div className="bg-emerald-500/10 rounded-xl border border-emerald-500/20 px-4 py-3 text-sm text-emerald-300 font-medium flex items-center justify-between">
           <span>✅ 17 _v2 колекцій Qdrant існують. Крок 1 виконано.</span>
-          <button onClick={fetchStatus} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Оновити</button>
+          <button onClick={fetchStatus} className="text-xs text-gray-400 hover:text-gray-300 transition-colors">Оновити</button>
         </div>
       )}
 
@@ -751,8 +751,8 @@ function AnalyticsTab() {
     fetch("/api/admin/v2/disk/by-collection")
       .then(r => r.ok ? r.json() : null)
       .then(d => d && setColStats(d))
-      .catch(() => {})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => { })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleCardClick(label: string) {
@@ -787,11 +787,11 @@ function AnalyticsTab() {
   const totalFiltered = data?.total_filtered ?? 0
 
   const summaryCards = [
-    { label: "Всього",   value: summary?.total      ?? 0, color: "text-[#C9A84C]",   ring: "ring-[#C9A84C]/50",   filterVal: "" },
-    { label: "OK",       value: summary?.ok         ?? 0, color: "text-emerald-400", ring: "ring-emerald-400/50", filterVal: "ok" },
-    { label: "Порожній", value: summary?.empty      ?? 0, color: "text-amber-400",   ring: "ring-amber-400/50",   filterVal: "empty" },
-    { label: "Обмежено", value: summary?.restricted ?? 0, color: "text-blue-400",    ring: "ring-blue-400/50",    filterVal: "restricted" },
-    { label: "Помилка",  value: summary?.error      ?? 0, color: "text-red-400",     ring: "ring-red-400/50",     filterVal: "error" },
+    { label: "Всього", value: summary?.total ?? 0, color: "text-[#C9A84C]", ring: "ring-[#C9A84C]/50", filterVal: "" },
+    { label: "OK", value: summary?.ok ?? 0, color: "text-emerald-400", ring: "ring-emerald-400/50", filterVal: "ok" },
+    { label: "Порожній", value: summary?.empty ?? 0, color: "text-amber-400", ring: "ring-amber-400/50", filterVal: "empty" },
+    { label: "Обмежено", value: summary?.restricted ?? 0, color: "text-blue-400", ring: "ring-blue-400/50", filterVal: "restricted" },
+    { label: "Помилка", value: summary?.error ?? 0, color: "text-red-400", ring: "ring-red-400/50", filterVal: "error" },
   ]
 
   return (
@@ -804,12 +804,11 @@ function AnalyticsTab() {
             <button
               key={card.label}
               onClick={() => handleCardClick(card.label)}
-              className={`bg-[#111827] rounded-2xl border p-3 sm:p-4 text-center transition-all hover:scale-[1.03] active:scale-[0.98] cursor-pointer ${
-                active ? `border-[#C9A84C]/40 ring-2 ${card.ring}` : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"
-              }`}
+              className={`bg-[#111827] rounded-2xl border p-3 sm:p-4 text-center transition-all hover:scale-[1.03] active:scale-[0.98] cursor-pointer ${active ? `border-[#C9A84C]/40 ring-2 ${card.ring}` : "border-[#C9A84C]/10 hover:border-[#C9A84C]/30"
+                }`}
             >
               <div className={`text-2xl sm:text-3xl font-black ${card.color}`}>{card.value.toLocaleString()}</div>
-              <div className="text-[10px] sm:text-xs text-gray-500 mt-1 uppercase tracking-wider">{card.label}</div>
+              <div className="text-[12px] sm:text-xs text-gray-400 mt-1 uppercase tracking-wider">{card.label}</div>
               {active && <div className="text-[9px] text-[#C9A84C] mt-1 font-bold">↓ фільтр</div>}
             </button>
           )
@@ -823,7 +822,7 @@ function AnalyticsTab() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
-                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                   <th className="pb-2 pr-3">Джерело</th>
                   <th className="pb-2 pr-3 text-emerald-400">OK</th>
                   <th className="pb-2 pr-3 text-amber-400 hidden sm:table-cell">Порожній</th>
@@ -855,13 +854,13 @@ function AnalyticsTab() {
             className="w-full flex items-center justify-between px-4 sm:px-6 py-4 hover:bg-[#C9A84C]/5 transition-colors"
           >
             <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Qdrant v2 колекції</h3>
-            <span className="text-gray-500 text-lg leading-none">{qdrantOpen ? "▲" : "▼"}</span>
+            <span className="text-gray-400 text-lg leading-none">{qdrantOpen ? "▲" : "▼"}</span>
           </button>
           {qdrantOpen && (
             <div className="px-4 sm:px-6 pb-4 overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                  <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                     <th className="pb-2 pr-4">Колекція</th>
                     <th className="pb-2 text-right">Точок</th>
                   </tr>
@@ -895,9 +894,9 @@ function AnalyticsTab() {
           >
             <div>
               <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider text-left">Рада — файли по колекціях</h3>
-              <p className="text-xs text-gray-500 mt-0.5 text-left">Всього на диску: {colStats.total.toLocaleString()} файлів</p>
+              <p className="text-xs text-gray-400 mt-0.5 text-left">Всього на диску: {colStats.total.toLocaleString()} файлів</p>
             </div>
-            <span className="text-gray-500 text-lg leading-none">{colOpen ? "▲" : "▼"}</span>
+            <span className="text-gray-400 text-lg leading-none">{colOpen ? "▲" : "▼"}</span>
           </button>
           {colOpen && (
             <div className="px-4 sm:px-6 pb-4 space-y-2">
@@ -942,7 +941,7 @@ function AnalyticsTab() {
           {filterStatus && (
             <button
               onClick={() => { setFilterStatus(""); setOffset(0); fetchData(0, "", filterSource) }}
-              className="text-xs text-gray-500 hover:text-gray-300 underline transition-colors"
+              className="text-xs text-gray-400 hover:text-gray-300 underline transition-colors"
             >
               скинути фільтр
             </button>
@@ -951,7 +950,7 @@ function AnalyticsTab() {
 
         <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 uppercase tracking-wider">Статус</label>
+            <label className="text-xs text-gray-400 uppercase tracking-wider">Статус</label>
             <select
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value)}
@@ -965,7 +964,7 @@ function AnalyticsTab() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 uppercase tracking-wider">Джерело</label>
+            <label className="text-xs text-gray-400 uppercase tracking-wider">Джерело</label>
             <select
               value={filterSource}
               onChange={e => setFilterSource(e.target.value)}
@@ -996,7 +995,7 @@ function AnalyticsTab() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                  <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                     <th className="pb-2 pr-3">ID</th>
                     <th className="pb-2 pr-3 hidden sm:table-cell">Джерело</th>
                     <th className="pb-2 pr-3">Статус</th>
@@ -1007,15 +1006,15 @@ function AnalyticsTab() {
                 <tbody className="divide-y divide-[#C9A84C]/5">
                   {laws.map(law => (
                     <tr key={law.law_id} className="text-[#E0E6ED] hover:bg-[#C9A84C]/5">
-                      <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400 max-w-[100px] sm:max-w-[140px] truncate">{law.law_id}</td>
+                      <td className="py-1.5 pr-3 font-mono text-[12px] text-gray-400 max-w-[100px] sm:max-w-[140px] truncate">{law.law_id}</td>
                       <td className="py-1.5 pr-3 hidden sm:table-cell">{law.source}</td>
                       <td className="py-1.5 pr-3">
-                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_BADGE[law.status] ?? STATUS_BADGE.error}`}>
+                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[12px] font-bold ${STATUS_BADGE[law.status] ?? STATUS_BADGE.error}`}>
                           {law.status}
                         </span>
                       </td>
                       <td className="py-1.5 pr-3 max-w-[140px] sm:max-w-[260px] truncate text-gray-300">{law.title || "—"}</td>
-                      <td className="py-1.5 max-w-[140px] truncate text-gray-500 hidden sm:table-cell">{law.reason || "—"}</td>
+                      <td className="py-1.5 max-w-[140px] truncate text-gray-400 hidden sm:table-cell">{law.reason || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1023,7 +1022,7 @@ function AnalyticsTab() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between text-xs text-gray-500 pt-2">
+            <div className="flex items-center justify-between text-xs text-gray-400 pt-2">
               <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, totalFiltered)} з {totalFiltered}</span>
               <div className="flex gap-2">
                 <button
@@ -1044,7 +1043,7 @@ function AnalyticsTab() {
             </div>
           </>
         ) : (
-          <div className="text-sm text-gray-600 py-4 text-center">
+          <div className="text-sm text-gray-400 py-4 text-center">
             {loading ? "Завантаження..." : "Немає результатів. Натисніть «Завантажити» для пошуку."}
           </div>
         )}
@@ -1105,7 +1104,7 @@ function DiskTab() {
   useEffect(() => {
     fetchDisk()
     fetchFiles(0)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function handleSearch() {
@@ -1141,7 +1140,7 @@ function DiskTab() {
   }
 
   function SortIcon({ col }: { col: string }) {
-    if (sortBy !== col) return <span className="text-gray-600 ml-1">↕</span>
+    if (sortBy !== col) return <span className="text-gray-400 ml-1">↕</span>
     return <span className="text-[#C9A84C] ml-1">{order === "desc" ? "↓" : "↑"}</span>
   }
 
@@ -1170,8 +1169,8 @@ function DiskTab() {
                   className={`text-center rounded-xl border px-2 py-3 transition-colors hover:border-[#C9A84C]/40 cursor-pointer ${filterSource === src ? "border-[#C9A84C]/40 bg-[#C9A84C]/5 ring-1 ring-[#C9A84C]/30" : "border-[#C9A84C]/10 bg-[#0A0E1A]"}`}
                 >
                   <div className="text-base sm:text-lg font-black text-emerald-400">{s?.files?.toLocaleString() ?? 0}</div>
-                  <div className="text-[10px] text-gray-500 font-mono mt-0.5">{src}</div>
-                  <div className="text-[10px] text-gray-600">{s?.size_mb ?? 0} MB</div>
+                  <div className="text-[12px] text-gray-400 font-mono mt-0.5">{src}</div>
+                  <div className="text-[12px] text-gray-400">{s?.size_mb ?? 0} MB</div>
                 </button>
               )
             })}
@@ -1196,7 +1195,7 @@ function DiskTab() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSearch()}
-            className="flex-1 min-w-[220px] bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] placeholder:text-gray-600"
+            className="flex-1 min-w-[220px] bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] placeholder:text-gray-400"
           />
           <select
             value={filterSource}
@@ -1229,7 +1228,7 @@ function DiskTab() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead>
-                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                  <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                     <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort("law_id")}>
                       ID <SortIcon col="law_id" />
                     </th>
@@ -1247,11 +1246,11 @@ function DiskTab() {
                 <tbody className="divide-y divide-[#C9A84C]/5">
                   {files.map(f => (
                     <tr key={`${f.source}-${f.law_id}`} className="text-[#E0E6ED] hover:bg-[#C9A84C]/5 transition-colors">
-                      <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400 max-w-[90px] truncate">{f.law_id}</td>
-                      <td className="py-1.5 pr-3 text-gray-500 hidden sm:table-cell">{f.source}</td>
+                      <td className="py-1.5 pr-3 font-mono text-[12px] text-gray-400 max-w-[90px] truncate">{f.law_id}</td>
+                      <td className="py-1.5 pr-3 text-gray-400 hidden sm:table-cell">{f.source}</td>
                       <td className="py-1.5 pr-3 max-w-[140px] sm:max-w-[280px] truncate text-gray-300">{f.title || "—"}</td>
-                      <td className="py-1.5 pr-3 text-right text-gray-500 hidden sm:table-cell">{f.size_kb}</td>
-                      <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap hidden sm:table-cell">
+                      <td className="py-1.5 pr-3 text-right text-gray-400 hidden sm:table-cell">{f.size_kb}</td>
+                      <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap hidden sm:table-cell">
                         {new Date(f.mtime).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </td>
                       <td className="py-1.5">
@@ -1270,7 +1269,7 @@ function DiskTab() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+            <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
               <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, total)} з {total.toLocaleString()}</span>
               <div className="flex gap-2">
                 <button
@@ -1278,7 +1277,7 @@ function DiskTab() {
                   disabled={offset === 0 || filesLoading}
                   className="px-3 py-1 rounded bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] disabled:opacity-40 hover:bg-[#1e293b] transition-colors"
                 >← Назад</button>
-                <span className="px-2 py-1 text-gray-600">стор. {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(total / PAGE_SIZE)}</span>
+                <span className="px-2 py-1 text-gray-400">стор. {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(total / PAGE_SIZE)}</span>
                 <button
                   onClick={() => { const o = offset + PAGE_SIZE; setOffset(o); fetchFiles(o) }}
                   disabled={offset + PAGE_SIZE >= total || filesLoading}
@@ -1288,7 +1287,7 @@ function DiskTab() {
             </div>
           </>
         ) : (
-          <div className="text-sm text-gray-600 py-6 text-center">
+          <div className="text-sm text-gray-400 py-6 text-center">
             {filesLoading ? "Завантаження..." : total === 0 && search ? "Нічого не знайдено" : "Натисніть «Знайти» для пошуку"}
           </div>
         )}
@@ -1299,7 +1298,7 @@ function DiskTab() {
         <div id="law-preview" className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Перегляд тексту</h3>
-            <button onClick={() => { setPreview(null); setPreviewError("") }} className="text-gray-500 hover:text-gray-300 text-sm">✕ Закрити</button>
+            <button onClick={() => { setPreview(null); setPreviewError("") }} className="text-gray-400 hover:text-gray-300 text-sm">✕ Закрити</button>
           </div>
 
           {previewError && (
@@ -1310,16 +1309,16 @@ function DiskTab() {
             <div className="space-y-3">
               <div className="bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4 space-y-3">
                 {/* Title row */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
                   <span className="font-mono font-bold text-[#C9A84C]">{preview.law_id}</span>
                   <span>·</span><span>{preview.source}</span>
                   <span>·</span><span>{preview.size_kb} KB</span>
                   <span>·</span><span>{preview.chars.toLocaleString()} символів</span>
                   {!!preview.meta.law_url && (
                     <><span>·</span>
-                    <a href={String(preview.meta.law_url)} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
-                      Відкрити на сайті →
-                    </a></>
+                      <a href={String(preview.meta.law_url)} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
+                        Відкрити на сайті →
+                      </a></>
                   )}
                 </div>
                 {!!preview.meta.title && (
@@ -1328,17 +1327,17 @@ function DiskTab() {
                 {/* Metadata grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs">
                   {(([
-                    ["Статус",        preview.meta.status],
+                    ["Статус", preview.meta.status],
                     ["Тип документа", preview.meta.doc_type],
-                    ["Номер",         preview.meta.doc_number],
-                    ["Автор",         preview.meta.author],
-                    ["Дата прийняття",preview.meta.date_adopted],
-                    ["Набр. чинності",preview.meta.effective_date],
-                    ["Категорія",     preview.meta.category],
-                    ["Scraped at",    preview.meta.scraped_at],
+                    ["Номер", preview.meta.doc_number],
+                    ["Автор", preview.meta.author],
+                    ["Дата прийняття", preview.meta.date_adopted],
+                    ["Набр. чинності", preview.meta.effective_date],
+                    ["Категорія", preview.meta.category],
+                    ["Scraped at", preview.meta.scraped_at],
                   ] as [string, unknown][]).map(([label, val]) => !!val ? (
                     <div key={label} className="flex gap-1">
-                      <span className="text-gray-600 shrink-0">{label}:</span>
+                      <span className="text-gray-400 shrink-0">{label}:</span>
                       <span className={`truncate ${label === "Статус" && String(val).includes("Чинний") ? "text-emerald-400" : label === "Статус" ? "text-amber-400" : "text-gray-300"}`}>
                         {String(val)}
                       </span>
@@ -1347,10 +1346,10 @@ function DiskTab() {
                 </div>
                 {/* Boolean flags */}
                 <div className="flex flex-wrap gap-1.5">
-                  {!!preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
-                  {!!preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
-                  {!!preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
-                  {!!preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
+                  {!!preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[12px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
+                  {!!preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[12px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
+                  {!!preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[12px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
+                  {!!preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[12px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
                 </div>
               </div>
               <pre className="font-mono text-[11px] text-gray-300 whitespace-pre-wrap break-words max-h-[600px] overflow-y-auto leading-relaxed bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4">
@@ -1508,7 +1507,7 @@ function SourcesTab() {
           База знань URAI складається з 8 джерел. Кожне джерело — окремий тип юридичної інформації
           з власним скрапером, форматом зберігання і колекцією Qdrant.
         </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-500">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs text-gray-400">
           <div><span className="text-[#C9A84C] font-bold">~40 000+</span> документів загалом</div>
           <div><span className="text-[#C9A84C] font-bold">8</span> джерел скрапінгу</div>
           <div><span className="text-[#C9A84C] font-bold">20</span> колекцій Qdrant v2</div>
@@ -1543,17 +1542,17 @@ function SourcesTab() {
             {/* What / Why */}
             <div className="grid sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Що містить</div>
+                <div className="text-[12px] font-bold text-gray-400 uppercase tracking-wider">Що містить</div>
                 <p className="text-xs text-[#E0E6ED]/80 leading-relaxed">{src.what}</p>
               </div>
               <div className="space-y-1">
-                <div className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider">Навіщо боту</div>
+                <div className="text-[12px] font-bold text-amber-500/70 uppercase tracking-wider">Навіщо боту</div>
                 <p className="text-xs text-[#E0E6ED]/80 leading-relaxed">{src.why}</p>
               </div>
             </div>
 
             {/* Technical params */}
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 border-t border-white/5 pt-3">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-400 border-t border-white/5 pt-3">
               <span>Чанк: <b className="text-gray-400">{src.chunks}</b></span>
               <span>Truncate: <b className="text-gray-400">{src.truncate}</b></span>
               <span>Splitter: <b className="text-gray-400">{src.splitter}</b></span>
@@ -1581,7 +1580,7 @@ function SourcesTab() {
             </div>
           ))}
         </div>
-        <div className="text-xs text-gray-600 border-t border-[#C9A84C]/10 pt-3">
+        <div className="text-xs text-gray-400 border-t border-[#C9A84C]/10 pt-3">
           Правило: завжди спочатку скрапінг, потім реіндекс. Реіндекс читає файли один раз на старті — нові файли після запуску не підхоплюються.
         </div>
       </div>
@@ -1592,11 +1591,11 @@ function SourcesTab() {
 type Tab = "scraper" | "reindex" | "analytics" | "disk" | "sources"
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "scraper",   label: "Скрапер" },
-  { id: "reindex",   label: "Реіндекс" },
+  { id: "scraper", label: "Скрапер" },
+  { id: "reindex", label: "Реіндекс" },
   { id: "analytics", label: "Аналітика" },
-  { id: "disk",      label: "Диск" },
-  { id: "sources",   label: "Джерела" },
+  { id: "disk", label: "Диск" },
+  { id: "sources", label: "Джерела" },
 ]
 
 export default function V2AdminPage() {
@@ -1608,7 +1607,7 @@ export default function V2AdminPage() {
         {/* Header */}
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">V2 Панель</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
+          <p className="text-xs sm:text-sm text-gray-400 mt-1">
             gemini-embedding-001 · 3072 dims · 20 колекцій _v2
           </p>
         </div>
@@ -1619,11 +1618,10 @@ export default function V2AdminPage() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex-1 min-w-[70px] py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap ${
-                tab === t.id
-                  ? "bg-[#C9A84C] text-[#0A0E1A]"
-                  : "text-gray-400 hover:text-[#E0E6ED]"
-              }`}
+              className={`flex-1 min-w-[70px] py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap ${tab === t.id
+                ? "bg-[#C9A84C] text-[#0A0E1A]"
+                : "text-gray-400 hover:text-[#E0E6ED]"
+                }`}
             >
               {t.label}
             </button>
@@ -1631,11 +1629,11 @@ export default function V2AdminPage() {
         </div>
 
         {/* Tab content */}
-        {tab === "scraper"   && <ScraperTab />}
-        {tab === "reindex"   && <ReindexTab />}
+        {tab === "scraper" && <ScraperTab />}
+        {tab === "reindex" && <ReindexTab />}
         {tab === "analytics" && <AnalyticsTab />}
-        {tab === "disk"      && <DiskTab />}
-        {tab === "sources"   && <SourcesTab />}
+        {tab === "disk" && <DiskTab />}
+        {tab === "sources" && <SourcesTab />}
       </div>
     </div>
   )

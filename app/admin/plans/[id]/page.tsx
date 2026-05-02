@@ -287,7 +287,7 @@ export default function PlanEditPage() {
   if (loading) return (
     <div className="flex items-center justify-center h-full gap-3">
       <Loader2 className="w-6 h-6 animate-spin text-[#C9A84C]" />
-      <span className="text-[10px] font-black text-[#C9A84C] uppercase tracking-widest">Завантаження...</span>
+      <span className="text-[12px] font-black text-[#C9A84C] uppercase tracking-widest">Завантаження...</span>
     </div>
   )
 
@@ -337,8 +337,8 @@ export default function PlanEditPage() {
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-6 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-[0.15em] transition-all ${activeTab === tab
-                ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/30"
-                : "text-[#C9A84C]/50 hover:text-[#C9A84C]/70"
+              ? "bg-[#C9A84C]/10 text-[#C9A84C] border border-[#C9A84C]/30"
+              : "text-[#C9A84C]/50 hover:text-[#C9A84C]/70"
               }`}
           >
             {tab === "general" ? "Загальне" : tab === "features" ? "Фічі" : "Benefits"}
@@ -351,17 +351,17 @@ export default function PlanEditPage() {
         <div className="space-y-5 bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-[2rem] p-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Назва</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Назва</Label>
               <Input value={form.name ?? ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Ціна (грн)</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Ціна (грн)</Label>
               <Input type="number" value={form.price_uah ?? 0} onChange={e => setForm(f => ({ ...f, price_uah: Number(e.target.value) }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Період</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Період</Label>
               <select value={form.billing_period ?? "month"} onChange={e => setForm(f => ({ ...f, billing_period: e.target.value }))}
                 className="w-full h-11 px-3 rounded-xl border border-[#C9A84C]/20 bg-[#0A0E1A] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/50 text-sm">
                 <option value="forever">Назавжди (free)</option>
@@ -370,33 +370,33 @@ export default function PlanEditPage() {
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Ліміт запитів (порожньо = ∞)</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Ліміт запитів (порожньо = ∞)</Label>
               <Input type="number" value={form.request_limit ?? ""} placeholder="∞ (без обмежень)"
                 onChange={e => setForm(f => ({ ...f, request_limit: e.target.value === "" ? null : Number(e.target.value) }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Чанків документів (top_k)</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Чанків документів (top_k)</Label>
               <Input type="number" min={1} max={50} value={form.max_docs_retrieved ?? 5}
                 onChange={e => setForm(f => ({ ...f, max_docs_retrieved: Number(e.target.value) }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
-              <p className="text-[10px] text-[#E0E6ED]/30">Скільки документів підвантажується в контекст AI</p>
+              <p className="text-[12px] text-[#E0E6ED]/30">Скільки документів підвантажується в контекст AI</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Чанків шаблонів (top_k)</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Чанків шаблонів (top_k)</Label>
               <Input type="number" min={0} max={10} value={form.max_templates_retrieved ?? 1}
                 onChange={e => setForm(f => ({ ...f, max_templates_retrieved: Number(e.target.value) }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
-              <p className="text-[10px] text-[#E0E6ED]/30">Скільки шаблонів документів пропонується</p>
+              <p className="text-[12px] text-[#E0E6ED]/30">Скільки шаблонів документів пропонується</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Текст бейджа</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Текст бейджа</Label>
               <Input value={form.badge_text ?? ""} placeholder="Найпопулярніший"
                 onChange={e => setForm(f => ({ ...f, badge_text: e.target.value || null }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Колір бейджа</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Колір бейджа</Label>
               <select value={form.badge_color ?? "gold"} onChange={e => setForm(f => ({ ...f, badge_color: e.target.value }))}
                 className="w-full h-11 px-3 rounded-xl border border-[#C9A84C]/20 bg-[#0A0E1A] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/50 text-sm">
                 <option value="gold">Золотий</option>
@@ -404,23 +404,23 @@ export default function PlanEditPage() {
               </select>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Головна вигода (→ текст)</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Головна вигода (→ текст)</Label>
               <Input value={form.main_benefit ?? ""} onChange={e => setForm(f => ({ ...f, main_benefit: e.target.value }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Текст кнопки</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Текст кнопки</Label>
               <Input value={form.button_text ?? ""} onChange={e => setForm(f => ({ ...f, button_text: e.target.value }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Примітка під кнопкою</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Примітка під кнопкою</Label>
               <Input value={form.note_text ?? ""} placeholder="Без кредитної картки"
                 onChange={e => setForm(f => ({ ...f, note_text: e.target.value || null }))}
                 className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Маркетинговий текст (для Pro)</Label>
+              <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Маркетинговий текст (для Pro)</Label>
               <textarea value={form.extra_text ?? ""} rows={4}
                 onChange={e => setForm(f => ({ ...f, extra_text: e.target.value || null }))}
                 className="w-full px-4 py-3 rounded-xl border border-[#C9A84C]/20 bg-[#0A0E1A] text-[#E0E6ED] text-sm focus:outline-none focus:border-[#C9A84C]/50 resize-none" />
@@ -454,16 +454,16 @@ export default function PlanEditPage() {
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setEditingDef(null)} />
               <div className="relative w-full max-w-md bg-[#0d1120] border border-[#C9A84C]/30 rounded-[2rem] p-6 space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Редагування: <span className="text-[#C9A84C]">{editingDef.key}</span></p>
+                  <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Редагування: <span className="text-[#C9A84C]">{editingDef.key}</span></p>
                   <button onClick={() => setEditingDef(null)} className="text-[#C9A84C]/40 hover:text-[#C9A84C]"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Label (підпис)</Label>
+                  <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Label (підпис)</Label>
                   <Input value={defForm.label} onChange={e => setDefForm(f => ({ ...f, label: e.target.value }))}
                     className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Опис (для адмін-панелі)</Label>
+                  <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Опис (для адмін-панелі)</Label>
                   <Input value={defForm.description} onChange={e => setDefForm(f => ({ ...f, description: e.target.value }))}
                     className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
                 </div>
@@ -477,7 +477,7 @@ export default function PlanEditPage() {
 
           {Object.entries(grouped).map(([cat, defs]) => (
             <div key={cat} className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-[2rem] p-5 space-y-3">
-              <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">
+              <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">
                 {FEATURE_CATEGORY_LABELS[cat] ?? cat}
               </p>
               {defs.map(def => (
@@ -531,16 +531,16 @@ export default function PlanEditPage() {
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setEditingBenefit(null)} />
               <div className="relative w-full max-w-md bg-[#0d1120] border border-[#C9A84C]/30 rounded-[2rem] p-6 space-y-4 shadow-2xl">
                 <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Редагування benefit</p>
+                  <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Редагування benefit</p>
                   <button onClick={() => setEditingBenefit(null)} className="text-[#C9A84C]/40 hover:text-[#C9A84C]"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Текст</Label>
+                  <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Текст</Label>
                   <Input value={editBenefitForm.text} onChange={e => setEditBenefitForm(f => ({ ...f, text: e.target.value }))}
                     className="bg-[#0A0E1A] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] focus:border-[#C9A84C]/50 focus:ring-0 h-11" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Категорія</Label>
+                  <Label className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Категорія</Label>
                   <select value={editBenefitForm.category} onChange={e => setEditBenefitForm(f => ({ ...f, category: e.target.value }))}
                     className="w-full h-11 px-3 rounded-xl border border-[#C9A84C]/20 bg-[#0A0E1A] text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/50 text-sm">
                     {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -556,7 +556,7 @@ export default function PlanEditPage() {
 
           {/* Add new benefit */}
           {/* <div className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-[2rem] p-5 space-y-3">
-            <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Додати benefit</p>
+            <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">Додати benefit</p>
             <div className="flex gap-3">
               <Input value={newBenefitText} onChange={e => setNewBenefitText(e.target.value)}
                 placeholder="Текст пункту..."
@@ -581,7 +581,7 @@ export default function PlanEditPage() {
                 if (catBenefits.length === 0) return null
                 return (
                   <div key={cat} className="bg-[#0d1120]/60 border border-[#C9A84C]/10 rounded-[2rem] p-5 space-y-2">
-                    <p className="text-[10px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] mb-3">{catLabel}</p>
+                    <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em] mb-3">{catLabel}</p>
                     {catBenefits.map(b => (
                       <SortableBenefit
                         key={b.id}

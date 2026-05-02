@@ -78,7 +78,7 @@ export default function DiskPage() {
   useEffect(() => {
     fetchDisk()
     fetchFiles(0)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function handleSearch() {
@@ -114,7 +114,7 @@ export default function DiskPage() {
   }
 
   function SortIcon({ col }: { col: string }) {
-    if (sortBy !== col) return <span className="text-gray-600 ml-1">↕</span>
+    if (sortBy !== col) return <span className="text-gray-400 ml-1">↕</span>
     return <span className="text-[#C9A84C] ml-1">{order === "desc" ? "↓" : "↑"}</span>
   }
 
@@ -123,7 +123,7 @@ export default function DiskPage() {
       <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#C9A84C] tracking-tight">Диск</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">Файли на диску /root/laws_raw/ — перегляд і пошук</p>
+          <p className="text-xs sm:text-sm text-gray-400 mt-1">Файли на диску /root/laws_raw/ — перегляд і пошук</p>
         </div>
 
         {/* Disk summary */}
@@ -149,8 +149,8 @@ export default function DiskPage() {
                     className={`text-center rounded-xl border px-2 py-3 transition-colors hover:border-[#C9A84C]/40 cursor-pointer ${filterSource === src ? "border-[#C9A84C]/40 bg-[#C9A84C]/5 ring-1 ring-[#C9A84C]/30" : "border-[#C9A84C]/10 bg-[#0A0E1A]"}`}
                   >
                     <div className="text-base sm:text-lg font-black text-emerald-400">{s?.files?.toLocaleString() ?? 0}</div>
-                    <div className="text-[10px] text-gray-500 font-mono mt-0.5">{src}</div>
-                    <div className="text-[10px] text-gray-600">{s?.size_mb ?? 0} MB</div>
+                    <div className="text-[12px] text-gray-400 font-mono mt-0.5">{src}</div>
+                    <div className="text-[12px] text-gray-400">{s?.size_mb ?? 0} MB</div>
                   </button>
                 )
               })}
@@ -174,7 +174,7 @@ export default function DiskPage() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSearch()}
-              className="flex-1 min-w-[220px] bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] placeholder:text-gray-600"
+              className="flex-1 min-w-[220px] bg-[#0A0E1A] border border-[#C9A84C]/20 rounded-lg px-3 py-2 text-sm text-[#E0E6ED] placeholder:text-gray-400"
             />
             <select
               value={filterSource}
@@ -206,7 +206,7 @@ export default function DiskPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead>
-                    <tr className="text-gray-500 uppercase tracking-wider border-b border-[#C9A84C]/10">
+                    <tr className="text-gray-400 uppercase tracking-wider border-b border-[#C9A84C]/10">
                       <th className="pb-2 pr-3 cursor-pointer hover:text-gray-300 select-none" onClick={() => handleSort("law_id")}>
                         ID <SortIcon col="law_id" />
                       </th>
@@ -224,11 +224,11 @@ export default function DiskPage() {
                   <tbody className="divide-y divide-[#C9A84C]/5">
                     {files.map(f => (
                       <tr key={`${f.source}-${f.law_id}`} className="text-[#E0E6ED] hover:bg-[#C9A84C]/5 transition-colors">
-                        <td className="py-1.5 pr-3 font-mono text-[10px] text-gray-400 max-w-[90px] truncate">{f.law_id}</td>
-                        <td className="py-1.5 pr-3 text-gray-500 hidden sm:table-cell">{f.source}</td>
+                        <td className="py-1.5 pr-3 font-mono text-[12px] text-gray-400 max-w-[90px] truncate">{f.law_id}</td>
+                        <td className="py-1.5 pr-3 text-gray-400 hidden sm:table-cell">{f.source}</td>
                         <td className="py-1.5 pr-3 max-w-[140px] sm:max-w-[280px] truncate text-gray-300">{f.title || "—"}</td>
-                        <td className="py-1.5 pr-3 text-right text-gray-500 hidden sm:table-cell">{f.size_kb}</td>
-                        <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap hidden sm:table-cell">
+                        <td className="py-1.5 pr-3 text-right text-gray-400 hidden sm:table-cell">{f.size_kb}</td>
+                        <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap hidden sm:table-cell">
                           {new Date(f.mtime).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                         </td>
                         <td className="py-1.5">
@@ -246,7 +246,7 @@ export default function DiskPage() {
                 </table>
               </div>
 
-              <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+              <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
                 <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, total)} з {total.toLocaleString()}</span>
                 <div className="flex gap-2">
                   <button
@@ -254,7 +254,7 @@ export default function DiskPage() {
                     disabled={offset === 0 || filesLoading}
                     className="px-3 py-1 rounded bg-[#1a2235] border border-[#C9A84C]/20 text-[#E0E6ED] disabled:opacity-40 hover:bg-[#1e293b] transition-colors"
                   >← Назад</button>
-                  <span className="px-2 py-1 text-gray-600">стор. {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(total / PAGE_SIZE)}</span>
+                  <span className="px-2 py-1 text-gray-400">стор. {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(total / PAGE_SIZE)}</span>
                   <button
                     onClick={() => { const o = offset + PAGE_SIZE; setOffset(o); fetchFiles(o) }}
                     disabled={offset + PAGE_SIZE >= total || filesLoading}
@@ -264,7 +264,7 @@ export default function DiskPage() {
               </div>
             </>
           ) : (
-            <div className="text-sm text-gray-600 py-6 text-center">
+            <div className="text-sm text-gray-400 py-6 text-center">
               {filesLoading ? "Завантаження..." : total === 0 && search ? "Нічого не знайдено" : "Натисніть «Знайти» для пошуку"}
             </div>
           )}
@@ -275,7 +275,7 @@ export default function DiskPage() {
           <div id="law-preview" className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#C9A84C] uppercase tracking-wider">Перегляд тексту</h3>
-              <button onClick={() => { setPreview(null); setPreviewError("") }} className="text-gray-500 hover:text-gray-300 text-sm">✕ Закрити</button>
+              <button onClick={() => { setPreview(null); setPreviewError("") }} className="text-gray-400 hover:text-gray-300 text-sm">✕ Закрити</button>
             </div>
 
             {previewError && (
@@ -285,16 +285,16 @@ export default function DiskPage() {
             {preview && (
               <div className="space-y-3">
                 <div className="bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4 space-y-3">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
                     <span className="font-mono font-bold text-[#C9A84C]">{preview.law_id}</span>
                     <span>·</span><span>{preview.source}</span>
                     <span>·</span><span>{preview.size_kb} KB</span>
                     <span>·</span><span>{preview.chars.toLocaleString()} символів</span>
                     {!!preview.meta.law_url && (
                       <><span>·</span>
-                      <a href={String(preview.meta.law_url)} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
-                        Відкрити на сайті →
-                      </a></>
+                        <a href={String(preview.meta.law_url)} target="_blank" rel="noopener noreferrer" className="text-[#C9A84C] hover:underline">
+                          Відкрити на сайті →
+                        </a></>
                     )}
                   </div>
                   {!!preview.meta.title && (
@@ -302,17 +302,17 @@ export default function DiskPage() {
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs">
                     {(([
-                      ["Статус",        preview.meta.status],
+                      ["Статус", preview.meta.status],
                       ["Тип документа", preview.meta.doc_type],
-                      ["Номер",         preview.meta.doc_number],
-                      ["Автор",         preview.meta.author],
-                      ["Дата прийняття",preview.meta.date_adopted],
-                      ["Набр. чинності",preview.meta.effective_date],
-                      ["Категорія",     preview.meta.category],
-                      ["Scraped at",    preview.meta.scraped_at],
+                      ["Номер", preview.meta.doc_number],
+                      ["Автор", preview.meta.author],
+                      ["Дата прийняття", preview.meta.date_adopted],
+                      ["Набр. чинності", preview.meta.effective_date],
+                      ["Категорія", preview.meta.category],
+                      ["Scraped at", preview.meta.scraped_at],
                     ] as [string, unknown][]).map(([label, val]) => !!val ? (
                       <div key={label} className="flex gap-1">
-                        <span className="text-gray-600 shrink-0">{label}:</span>
+                        <span className="text-gray-400 shrink-0">{label}:</span>
                         <span className={`truncate ${label === "Статус" && String(val).includes("Чинний") ? "text-emerald-400" : label === "Статус" ? "text-amber-400" : "text-gray-300"}`}>
                           {String(val)}
                         </span>
@@ -320,10 +320,10 @@ export default function DiskPage() {
                     ) : null))}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {!!preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
-                    {!!preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[10px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
-                    {!!preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
-                    {!!preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
+                    {!!preview.meta.is_retroactive && <span className="px-2 py-0.5 rounded text-[12px] bg-purple-500/20 text-purple-300 border border-purple-500/30">Зворотна дія</span>}
+                    {!!preview.meta.wartime_only && <span className="px-2 py-0.5 rounded text-[12px] bg-orange-500/20 text-orange-300 border border-orange-500/30">Воєнний стан</span>}
+                    {!!preview.meta.is_suspended && <span className="px-2 py-0.5 rounded text-[12px] bg-red-500/20 text-red-300 border border-red-500/30">Зупинено</span>}
+                    {!!preview.meta.has_transitional && <span className="px-2 py-0.5 rounded text-[12px] bg-blue-500/20 text-blue-300 border border-blue-500/30">Перехідні положення</span>}
                   </div>
                 </div>
                 <pre className="font-mono text-[11px] text-gray-300 whitespace-pre-wrap break-words max-h-[600px] overflow-y-auto leading-relaxed bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-4">

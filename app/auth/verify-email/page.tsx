@@ -151,20 +151,20 @@ function VerifyEmailContent() {
         )}
       </Button>
 
-      <p className="text-[10px] text-[#C9A84C]/70 font-black uppercase tracking-widest text-center mt-4">
+      <p className="text-[12px] text-[#C9A84C]/70 font-black uppercase tracking-widest text-center mt-4">
         Перевірте папку «Спам», якщо лист не надійшов
       </p>
 
       <div className="flex items-center justify-between mt-8 pt-6 border-t border-[#C9A84C]/10">
         <Link
           href="/auth/login"
-          className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all flex items-center gap-2"
+          className="text-[12px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all flex items-center gap-2"
         >
           <ArrowLeft className="w-3 h-3" /> Увійти
         </Link>
         <Link
           href="/auth/register"
-          className="text-[10px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all"
+          className="text-[12px] font-black text-[#C9A84C]/60 hover:text-[#C9A84C] uppercase tracking-[0.2em] transition-all"
         >
           Інший email
         </Link>
