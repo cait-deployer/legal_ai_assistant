@@ -5270,7 +5270,8 @@ def _do_pipeline(session_id: str) -> None:
                     run_scrape_mod(log_callback=_pipeline_log, stop_event=stop_ev, force=False)
                 elif scrape_src == "zir":
                     from scrape_zir_v2 import run_scrape_zir
-                    run_scrape_zir(log_callback=_pipeline_log, stop_event=stop_ev, force=False)
+                    run_scrape_zir(log_callback=_pipeline_log, stop_event=stop_ev, force=False,
+                                   max_batches=PIPELINE_RECENT_PAGES)
                 else:
                     from scrape_all_v2 import run_scrape_all
                     run_scrape_all(source=scrape_src, rada_collection=None,

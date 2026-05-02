@@ -66,12 +66,13 @@ def _parse_quesids(html: str, items: list, seen_ids: set) -> int:
     return new_count
 
 
-def _fetch_ids_via_requests(log=print) -> list[dict]:
+def _fetch_ids_via_requests(log=print, max_batches: int | None = None) -> list[dict]:
     """
     Requests з сесією:
       1. GET сторінки (сесійні куки)
       2. POST getResultList → перші 20
       3. POST addToResultList → наступні 20, 40, ...
+    max_batches — якщо задано, обмежує загальну кількість батчів (getResultList + addToResultList).
     """
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -105,6 +106,11 @@ def _fetch_ids_via_requests(log=print) -> list[dict]:
     if n == 0:
         return []
 
+    batch_count = 1  # getResultList = перший батч
+    if max_batches and batch_count >= max_batches:
+        log(f"  🔍 recent_only: зупинено після {batch_count} батчів ({len(items)} питань)")
+        return items
+
     # Крок 2: addToResultList — showMore() AJAX
     empty = 0
     while True:
@@ -117,7 +123,12 @@ def _fetch_ids_via_requests(log=print) -> list[dict]:
             break
 
         new = _parse_quesids(r.text, items, seen_ids)
-        log(f"  📄 addToResultList: +{new} (всього {len(items)})")
+        batch_count += 1
+        log(f"  📄 addToResultList batch {batch_count}: +{new} (всього {len(items)})")
+
+        if max_batches and batch_count >= max_batches:
+            log(f"  🔍 recent_only: зупинено після {batch_count} батчів ({len(items)} питань)")
+            break
 
         if new == 0:
             empty += 1
@@ -130,9 +141,10 @@ def _fetch_ids_via_requests(log=print) -> list[dict]:
     return items
 
 
-def _fetch_ids_via_playwright(log=print) -> list[dict]:
+def _fetch_ids_via_playwright(log=print, max_batches: int | None = None) -> list[dict]:
     """
     Playwright fallback: відкриваємо сторінку, тригеримо пошук кількома способами.
+    max_batches — якщо задано, обмежує кількість батчів (включаючи початковий).
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -213,6 +225,10 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
 
             log(f"  📄 batch {batch}: +{found} нових (всього {len(items)})")
 
+            if max_batches and batch + 1 >= max_batches:
+                log(f"  🔍 recent_only: зупинено після {batch + 1} батчів ({len(items)} питань)")
+                break
+
             # Шукаємо кнопку "Показати ще..."
             show_more = None
             for sel in ["div.show_more", "[onclick*='showMore']", ".show_more"]:
@@ -241,18 +257,19 @@ def _fetch_ids_via_playwright(log=print) -> list[dict]:
     return items
 
 
-def fetch_all_ids(log=print) -> list[dict]:
+def fetch_all_ids(log=print, max_batches: int | None = None) -> list[dict]:
     """
     Спочатку пробуємо requests-based пагінацію (надійніше на сервері).
     Якщо повертає 0 — Playwright fallback.
+    max_batches — обмежує кількість батчів (20 питань/батч).
     """
-    items = _fetch_ids_via_requests(log)
+    items = _fetch_ids_via_requests(log, max_batches=max_batches)
     if items:
         log(f"  ✅ Requests: зібрано {len(items)} питань")
         return items
 
     log("  ⚠️ Requests дав 0 — пробуємо Playwright...")
-    items = _fetch_ids_via_playwright(log)
+    items = _fetch_ids_via_playwright(log, max_batches=max_batches)
     log(f"  ✅ Playwright: зібрано {len(items)} питань")
     return items
 
@@ -334,15 +351,17 @@ def save_item(item_id: str, question: str, answer: str, meta: dict) -> None:
 
 
 # ── Entry point for server.py ──────────────────────────────────────────────────
-def run_scrape_zir(log_callback=None, stop_event=None, force: bool = False) -> None:
+def run_scrape_zir(log_callback=None, stop_event=None, force: bool = False,
+                   max_batches: int | None = None) -> None:
     _log  = log_callback or (lambda msg, lvl="info": print(msg))
     _stop = stop_event or threading.Event()
 
     _log("🔍 ЗІР: отримуємо список питань-відповідей...", "info")
-    _log(f"   Директорія: {ZIR_DIR}" + (" [FORCE]" if force else ""), "info")
+    _log(f"   Директорія: {ZIR_DIR}" + (" [FORCE]" if force else "")
+         + (f" [recent: {max_batches} батчів]" if max_batches else ""), "info")
 
     try:
-        items = fetch_all_ids(log=lambda msg: _log(msg, "info"))
+        items = fetch_all_ids(log=lambda msg: _log(msg, "info"), max_batches=max_batches)
     except Exception as ex:
         _log(f"❌ Не вдалося отримати список: {ex}", "error")
         return

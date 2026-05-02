@@ -200,7 +200,7 @@ def _get_ids(source: str, recent_pages: int | None = None) -> list[dict]:
         items = get_all_kmu_docs(log=_log, max_pages=recent_pages, stop_check=_should_stop)
     elif source == "ccu":
         from ccu_scanner import get_all_ccu_docs
-        items = get_all_ccu_docs(log=_log)
+        items = get_all_ccu_docs(log=_log, max_pages=recent_pages, stop_check=_should_stop)
     elif source == "supreme":
         from supreme_scanner import get_supreme_reviews
         items = get_supreme_reviews()

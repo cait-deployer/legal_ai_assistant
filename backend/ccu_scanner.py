@@ -162,22 +162,26 @@ def get_total_pages() -> int:
         return 350  # безпечний fallback
 
 
-def get_all_ccu_docs(log=None) -> list[dict]:
+def get_all_ccu_docs(log=None, max_pages: int | None = None, stop_check=None) -> list[dict]:
     """
     Проходить усі сторінки та повертає список документів,
     що пройшли фільтр (лише рішення та висновки).
+    max_pages — якщо задано, перевіряємо тільки перші N сторінок (інкрементальний режим).
     """
     total_pages = get_total_pages()
+    effective_pages = min(total_pages, max_pages) if max_pages else total_pages
     if log:
-        log(f"📄 CCU: всього сторінок — {total_pages}")
+        log(f"📄 CCU: всього сторінок — {total_pages}" + (f" (перевіряємо {effective_pages})" if max_pages and max_pages < total_pages else ""))
 
     result = []
-    for page in range(total_pages):
+    for page in range(effective_pages):
+        if stop_check and stop_check():
+            break
         docs = get_ccu_docs_on_page(page)
         kept = [d for d in docs if _should_keep(d["doc_num"], d["title"])]
         result.extend(kept)
-        if log and (page % 20 == 0 or page == total_pages - 1):
-            log(f"  Сторінка {page + 1}/{total_pages}: знайдено {len(kept)}/{len(docs)} (всього {len(result)})")
+        if log and (page % 20 == 0 or page == effective_pages - 1):
+            log(f"  Сторінка {page + 1}/{effective_pages}: знайдено {len(kept)}/{len(docs)} (всього {len(result)})")
         time.sleep(0.5)
 
     return result
