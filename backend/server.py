@@ -151,7 +151,8 @@ _apply_text_cancel_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
 _pipeline_stop    = threading.Event()
 
-_PIPELINE_LAST_RUN_FILE = BASE_DIR / "pipeline_last_run.json"
+_PIPELINE_LAST_RUN_FILE    = BASE_DIR / "pipeline_last_run.json"
+_PIPELINE_RESUME_FILE      = BASE_DIR / "pipeline_resume_state.json"
 _PIPELINE_SOURCES = list(V2_SCRAPE_SOURCES)  # all 8 sources
 
 
@@ -5194,6 +5195,30 @@ def _pipeline_log(msg: str, level: str = "info") -> None:
             _sync["pipeline"]["live_logs"] = _sync["pipeline"]["live_logs"][-MAX_LIVE_LOGS:]
 
 
+def _load_pipeline_resume() -> dict:
+    try:
+        if _PIPELINE_RESUME_FILE.exists():
+            return json.loads(_PIPELINE_RESUME_FILE.read_text("utf-8"))
+    except Exception:
+        pass
+    return {"step1_done": [], "step2_done": []}
+
+
+def _save_pipeline_resume(state: dict) -> None:
+    try:
+        _PIPELINE_RESUME_FILE.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
+    except Exception:
+        pass
+
+
+def _clear_pipeline_resume() -> None:
+    try:
+        if _PIPELINE_RESUME_FILE.exists():
+            _PIPELINE_RESUME_FILE.unlink()
+    except Exception:
+        pass
+
+
 def _do_pipeline(session_id: str) -> None:
     """6-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
     src = "pipeline"
@@ -5211,6 +5236,16 @@ def _do_pipeline(session_id: str) -> None:
         # Clear all per-source stop events from a previous stop press
         for _evt in _v2_scrape_stop.values():
             _evt.clear()
+
+        # Load resume state — allows continuing from where we stopped
+        resume = _load_pipeline_resume()
+        step1_done = set(resume.get("step1_done", []))
+        step2_done = set(resume.get("step2_done", []))
+        if step1_done or step2_done:
+            _pipeline_log(
+                f"⏩ Відновлення: скрапінг виконано {sorted(step1_done)}, "
+                f"реіндекс виконано {sorted(step2_done)}", "info"
+            )
         _pipeline_log(f"🚀 Пайплайн розпочато: {session_id[:8]}", "info")
 
         # ── Step 1: Scrape (force=False, recent_pages=10 → only newest N pages) ──
@@ -5222,8 +5257,11 @@ def _do_pipeline(session_id: str) -> None:
         PIPELINE_RECENT_PAGES = 10
         for scrape_src in sources:
             if _stopped():
-                _step_log("⏸ Зупинено", "warning")
+                _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
                 return
+            if scrape_src in step1_done:
+                _pipeline_log(f"  ⏭ {scrape_src}: вже виконано (resume)", "info")
+                continue
             try:
                 stop_ev = _v2_scrape_stop[scrape_src]
                 stop_ev.clear()
@@ -5240,18 +5278,24 @@ def _do_pipeline(session_id: str) -> None:
                                    force=False, recent_pages=PIPELINE_RECENT_PAGES)
             except Exception as e:
                 _step_log(f"⚠️ Scrape {scrape_src}: {e}", "warning")
+            if not _stopped():
+                step1_done.add(scrape_src)
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done)})
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[0]} завершено")
 
         # ── Step 2: Reindex new only ────────────────────────────────────────────
         step = 2
         _step_log(f"▶ {_PIPELINE_STEP_NAMES[1]}")
         if _stopped():
-            _step_log("⏸ Зупинено", "warning")
+            _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
             return
         for reindex_src in sources:
             if _stopped():
-                _step_log("⏸ Зупинено", "warning")
+                _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
                 return
+            if reindex_src in step2_done:
+                _pipeline_log(f"  ⏭ {reindex_src}: вже виконано (resume)", "info")
+                continue
             stop_key = reindex_src
             try:
                 _v2_stop[stop_key].clear()
@@ -5260,6 +5304,9 @@ def _do_pipeline(session_id: str) -> None:
                                stop_event=_v2_stop[stop_key], new_only=True)
             except Exception as e:
                 _step_log(f"⚠️ Reindex {reindex_src}: {e}", "warning")
+            if not _stopped():
+                step2_done.add(reindex_src)
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done)})
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[1]} завершено")
 
         # ── Step 3: Enrich OpenData metadata ───────────────────────────────────
@@ -5331,6 +5378,7 @@ def _do_pipeline(session_id: str) -> None:
             )
         except Exception:
             pass
+        _clear_pipeline_resume()
         _pipeline_log(f"🎉 Пайплайн завершено: {run_ts}", "info")
 
     except Exception as e:
