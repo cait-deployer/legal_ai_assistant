@@ -16,7 +16,7 @@ HEADERS = {"User-Agent": "LawyerAssistantBot/1.0 (Mariia Project)"}
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
 
 
-def get_all_wiki_articles():
+def get_all_wiki_articles(stop_check=None):
     """Отримує ВСІ статті з legalaid.wiki через API allpages (з пагінацією)."""
     articles = []
     params = {
@@ -28,6 +28,8 @@ def get_all_wiki_articles():
     }
     try:
         while True:
+            if stop_check and stop_check():
+                break
             r = httpx.get(WIKI_API_URL, params=params, headers=HEADERS, timeout=30)
             data = r.json()
             for page in data.get("query", {}).get("allpages", []):

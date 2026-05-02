@@ -203,10 +203,17 @@ def _get_ids(source: str, recent_pages: int | None = None) -> list[dict]:
         items = get_all_ccu_docs(log=_log, max_pages=recent_pages, stop_check=_should_stop)
     elif source == "supreme":
         from supreme_scanner import get_supreme_reviews
+        # Supreme is a single static page with ~30 PDFs — no pagination, always fast
         items = get_supreme_reviews()
     elif source == "wiki":
-        from wiki_scanner import get_all_wiki_articles
-        items = get_all_wiki_articles()
+        from wiki_scanner import get_all_wiki_articles, get_wiki_latest_articles
+        if recent_pages:
+            # recentchanges API: newest-edited pages first, one request, max 500
+            limit = min(recent_pages * 50, 500)
+            _log(f"  🔍 wiki: recent_only — recentchanges API ({limit} статей)")
+            items = get_wiki_latest_articles(limit=limit)
+        else:
+            items = get_all_wiki_articles(stop_check=_should_stop)
     elif source == "positions":
         from lpd_scanner import fetch_all_positions
         items = fetch_all_positions(log=_log, max_pages=recent_pages, stop_check=_should_stop)
