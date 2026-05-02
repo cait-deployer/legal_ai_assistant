@@ -497,16 +497,21 @@ def _process_one(source: str, doc: dict, status: dict, force: bool = False) -> s
         with _status_lock:
             # Primary: status.json says "ok" and meta is complete
             if status.get(law_id, {}).get("status") == "ok" and not _meta_incomplete(source, law_id):
+                status[law_id]["checked_at"] = _now()
                 return "skipped"
             # Fallback: .txt file exists on disk — trust disk over missing status entry
             txt_path = Path(os.path.join(RAW_DIR, source, f"{law_id}.txt"))
             if txt_path.exists() and txt_path.stat().st_size > 50 and not _meta_incomplete(source, law_id):
-                # Heal status.json so next run is fast
+                now = _now()
                 if status.get(law_id, {}).get("status") != "ok":
+                    # Heal status.json so next run is fast
                     status[law_id] = {
                         "source": source, "status": "ok",
-                        "scraped_at": _now(), "title": "", "effective_date": "",
+                        "scraped_at": now, "title": "", "effective_date": "",
+                        "checked_at": now,
                     }
+                else:
+                    status[law_id]["checked_at"] = now
                 return "skipped"
 
     try:
