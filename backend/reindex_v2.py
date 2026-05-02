@@ -303,14 +303,15 @@ def _run_main(source: str | None = None, init_only: bool = False, reset: bool = 
 
     if new_only:
         last_ts = _load_last_completed_ts(source)
+        do_fallback = False
         if last_ts > 0:
             age_days = (datetime.now(timezone.utc).timestamp() - last_ts) / 86400
             if age_days > 7:
                 _log(
                     f"⚠️ Кеш new_only застарілий ({age_days:.1f} дн > 7 дн) — "
-                    f"виконуємо повний реіндекс замість фільтрації по новизні", "warning"
+                    f"використовуємо fallback: перевірка наявності в Qdrant", "warning"
                 )
-                # last_ts = 0 → не фільтруємо, індексуємо все
+                do_fallback = True
             else:
                 before = len(all_files)
                 all_files = [
@@ -324,7 +325,20 @@ def _run_main(source: str | None = None, init_only: bool = False, reset: bool = 
                     f"кеш {age_days:.1f} дн)"
                 )
         else:
-            _log("🔍 new_only: попередній запуск не знайдено — індексуємо все")
+            _log("🔍 new_only: попередній запуск не знайдено — перевіряємо наявність в Qdrant (fallback)")
+            do_fallback = True
+
+        if do_fallback:
+            try:
+                from qdrant_storage import get_existing_law_ids
+                _log("⏳ Отримуємо список існуючих документів з Qdrant...")
+                existing_ids = get_existing_law_ids()
+                before = len(all_files)
+                all_files = [(src, lid, mp) for (src, lid, mp) in all_files if lid not in existing_ids]
+                _log(f"🔍 new_only fallback: знайдено {len(all_files)}/{before} відсутніх у Qdrant файлів")
+            except Exception as e:
+                _log(f"❌ Помилка перевірки Qdrant: {e} — індексуємо все", "error")
+
         # new_only runs always start from index 0 (fresh filtered list, no resume)
         state["file_idx"] = 0
 
