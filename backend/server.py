@@ -2385,10 +2385,10 @@ async def get_users(
         sort_dir = "desc"
 
     select_cols = (
-        "id,email,full_name,avatar_url,subscription_tier,is_beta_tester,"
+        "id,email,full_name,avatar_url,subscription_tier,"
         "is_onboarded,email_confirmed,trial_used,"
         "last_active_at,last_city,last_country,last_country_code,"
-        "auth_provider,requests_this_month,monthly_limit,"
+        "auth_provider,requests_this_month,monthly_limit,bonus_requests,"
         "total_requests,session_count,avg_session_duration,"
         "created_at,last_ip,user_agent,marketing_consent,limit_reset_at,"
         "role,sub_role,segment,ai_personal_prompt"
