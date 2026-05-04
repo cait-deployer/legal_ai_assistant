@@ -18,6 +18,7 @@ type User = {
   full_name: string | null
   avatar_url: string | null
   subscription_tier: string
+  is_beta_tester: boolean
   is_onboarded: boolean
   email_confirmed: boolean
   trial_used: boolean
@@ -72,6 +73,7 @@ const TIER_CFG: Record<string, { label: string; bg: string; text: string; border
 
 const SORTABLE: Record<string, string> = {
   subscription_tier: "Тариф",
+  is_beta_tester: "Бета",
   requests_this_month: "Запити",
   last_active_at: "Активність",
   created_at: "Зареєстрований",
@@ -129,6 +131,14 @@ function TierBadge({ tier }: { tier: string }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[12px] font-black uppercase tracking-wider border ${c.bg} ${c.text} ${c.border}`}>
       {c.label}
+    </span>
+  )
+}
+
+function BetaBadge() {
+  return (
+    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-lg text-[11px] font-black uppercase tracking-wider border bg-violet-500/10 text-violet-400 border-violet-500/25">
+      <Sparkles className="w-2.5 h-2.5" />β
     </span>
   )
 }
@@ -1125,11 +1135,14 @@ export default function UsersPage() {
                       <p className="text-sm font-medium text-[#E0E6ED]/90 truncate">{user.full_name || user.email}</p>
                       {user.full_name && <p className="text-[12px] text-[#E0E6ED]/40 truncate">{user.email}</p>}
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[12px] font-black uppercase tracking-wider border ${tier.bg} ${tier.text} ${tier.border}`}>
-                        {tier.label}
-                      </span>
-                      <p className={`text-[12px] mt-0.5 ${rel.cls}`}>{rel.text}</p>
+                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                      <div className="flex items-center gap-1">
+                        {user.is_beta_tester && <BetaBadge />}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[12px] font-black uppercase tracking-wider border ${tier.bg} ${tier.text} ${tier.border}`}>
+                          {tier.label}
+                        </span>
+                      </div>
+                      <p className={`text-[12px] ${rel.cls}`}>{rel.text}</p>
                     </div>
                   </div>
                 )
@@ -1144,6 +1157,7 @@ export default function UsersPage() {
                 <tr className="border-b border-[#C9A84C]/10 bg-[#0d1120]">
                   <Th label="Юзер" />
                   <SortTh col="subscription_tier" label="Тариф" sort={sort} onSort={handleSort} />
+                  <SortTh col="is_beta_tester" label="β" sort={sort} onSort={handleSort} className="hidden md:table-cell" />
                   <SortTh col="requests_this_month" label="Запити" sort={sort} onSort={handleSort} className="hidden md:table-cell" />
                   <SortTh col="last_active_at" label="Активність" sort={sort} onSort={handleSort} />
                   <SortTh col="created_at" label="Реєстрація" sort={sort} onSort={handleSort} className="hidden sm:table-cell" />
@@ -1155,8 +1169,8 @@ export default function UsersPage() {
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-b border-[#C9A84C]/5">
-                      {[120, 80, 80, 100, 90, 100, 70].map((w, j) => (
-                        <td key={j} className={`px-4 py-3.5 ${j === 2 ? "hidden md:table-cell" : j >= 4 ? "hidden sm:table-cell" : ""}`}>
+                      {[120, 80, 40, 80, 100, 90, 100, 70].map((w, j) => (
+                        <td key={j} className={`px-4 py-3.5 ${j >= 2 && j <= 3 ? "hidden md:table-cell" : j >= 5 ? "hidden sm:table-cell" : ""}`}>
                           <div className={`h-4 rounded bg-[#C9A84C]/5 animate-pulse`} style={{ width: w }} />
                         </td>
                       ))}
@@ -1164,7 +1178,7 @@ export default function UsersPage() {
                   ))
                 ) : users.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-sm text-[#E0E6ED]/30">
+                    <td colSpan={8} className="px-4 py-12 text-center text-sm text-[#E0E6ED]/30">
                       Юзерів не знайдено
                     </td>
                   </tr>
@@ -1198,6 +1212,11 @@ export default function UsersPage() {
                         {/* Tier */}
                         <td className="px-4 py-3">
                           <TierBadge tier={u.subscription_tier} />
+                        </td>
+
+                        {/* Beta tester */}
+                        <td className="px-4 py-3 hidden md:table-cell">
+                          {u.is_beta_tester && <BetaBadge />}
                         </td>
 
                         {/* Requests */}

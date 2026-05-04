@@ -2377,7 +2377,7 @@ async def get_users(
 
     _ALLOWED_SORT = {
         "created_at", "last_active_at", "requests_this_month",
-        "total_requests", "session_count", "subscription_tier",
+        "total_requests", "session_count", "subscription_tier", "is_beta_tester",
     }
     if sort_by not in _ALLOWED_SORT:
         sort_by = "created_at"
@@ -2385,7 +2385,7 @@ async def get_users(
         sort_dir = "desc"
 
     select_cols = (
-        "id,email,full_name,avatar_url,subscription_tier,"
+        "id,email,full_name,avatar_url,subscription_tier,is_beta_tester,"
         "is_onboarded,email_confirmed,trial_used,"
         "last_active_at,last_city,last_country,last_country_code,"
         "auth_provider,requests_this_month,monthly_limit,bonus_requests,"
