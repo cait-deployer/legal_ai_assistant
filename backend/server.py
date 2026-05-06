@@ -3463,7 +3463,9 @@ def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs:
 
 
 def _citations_used_in_answer(answer: str, citations: list[dict]) -> list[dict]:
-    used = {int(n) for n in re.findall(r"\[(\d+)\]", answer or "")}
+    used: set[int] = set()
+    for group in re.findall(r"\[([\d,\s]+)\]", answer or ""):
+        used.update(int(n) for n in re.findall(r"\d+", group))
     if not used:
         return citations
     filtered = [c for c in citations if int(c.get("num", 0) or 0) in used]
@@ -4828,11 +4830,9 @@ async def ask(body: AskRequest):
     category = max(set(cats), key=cats.count) if cats else "Загальне"
     elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
-    answer_citations = _citations_used_in_answer(answer, pipe["citations"])
-
     return {
         "answer": answer,
-        "references": answer_citations,
+        "references": pipe["citations"],
         "templates": [],
         "_meta": {
             "processing_time_ms": elapsed_ms,
@@ -4987,11 +4987,9 @@ async def ask_stream(body: AskRequest):
         category = max(set(cats), key=cats.count) if cats else "Загальне"
         elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
-        answer_citations = _citations_used_in_answer(full_answer, pipe["citations"])
-
         citations_payload = {
             "answer": full_answer,
-            "references": answer_citations,
+            "references": pipe["citations"],
             "templates": [],
             "_meta": {
                 "processing_time_ms": elapsed_ms,

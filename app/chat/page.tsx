@@ -109,8 +109,14 @@ function MarkdownText({ text, refs, onCitationOpen }: {
                     return (
                         <button
                             key={`${i}-${j}`}
+                            type="button"
+                            disabled={!citation}
                             onClick={() => citation && onCitationOpen(citation)}
-                            className="inline-flex items-center justify-center align-middle mx-0.5 min-w-[22px] h-[22px] px-1.5 text-[12px] font-bold text-[#0A0E1A] bg-[#C9A84C] rounded hover:bg-[#E2C47A] shadow-[0_0_10px_rgba(201,168,76,0.3)] transition-all active:scale-90 touch-manipulation"
+                            title={citation ? `Джерело ${num}` : `Джерело ${num} недоступне в збереженій відповіді`}
+                            className={`inline-flex items-center justify-center align-middle mx-0.5 min-w-[22px] h-[22px] px-1.5 text-[12px] font-bold rounded transition-all touch-manipulation ${citation
+                                ? 'text-[#0A0E1A] bg-[#C9A84C] hover:bg-[#E2C47A] shadow-[0_0_10px_rgba(201,168,76,0.3)] active:scale-90'
+                                : 'text-[#0A0E1A]/50 bg-[#C9A84C]/45 cursor-not-allowed'
+                                }`}
                         >
                             {num}
                         </button>
