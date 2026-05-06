@@ -1110,26 +1110,27 @@ async def patch_sync_settings(body: dict = Body(default={})):
 
     updated = []
 
-    def _sb_patch(url_suffix: str, payload: dict) -> None:
+    def _sb_upsert(row: dict) -> None:
         with httpx.Client(timeout=10) as c:
-            c.patch(
-                f"{_SB_URL}/rest/v1/app_settings{url_suffix}",
-                headers=_sb_hdrs(prefer_minimal=True),
-                json=payload,
+            r = c.post(
+                f"{_SB_URL}/rest/v1/app_settings?on_conflict=key",
+                headers={**_sb_hdrs(prefer_minimal=True), "Prefer": "resolution=merge-duplicates,return=minimal"},
+                json=row,
             )
+            r.raise_for_status()
 
     # Оновити schedule_hour
     new_hour = body.get("schedule_hour")
     if new_hour is not None:
         new_hour = max(0, min(23, int(new_hour)))
-        await asyncio.to_thread(_sb_patch, "?key=eq.schedule_hour", {"value_text": str(new_hour)})
+        await asyncio.to_thread(_sb_upsert, {"key": "schedule_hour", "value_text": str(new_hour), "value_bool": None, "value_int": None})
         _reschedule(new_hour)
         updated.append(f"schedule_hour={new_hour}")
 
     # Оновити pipeline_enabled
     pipeline_enabled = body.get("pipeline_enabled")
     if pipeline_enabled is not None:
-        await asyncio.to_thread(_sb_patch, "?key=eq.schedule_pipeline_enabled", {"value_bool": bool(pipeline_enabled)})
+        await asyncio.to_thread(_sb_upsert, {"key": "schedule_pipeline_enabled", "value_bool": bool(pipeline_enabled), "value_text": None, "value_int": None})
         updated.append(f"schedule_pipeline_enabled={pipeline_enabled}")
 
     # Оновити per-source enabled flags
@@ -1138,7 +1139,7 @@ async def patch_sync_settings(body: dict = Body(default={})):
         if src not in _ALL_SCHEDULE_SOURCES:
             continue
         key = f"schedule_{src}_enabled" if src != "rada" else "schedule_enabled"
-        await asyncio.to_thread(_sb_patch, f"?key=eq.{key}", {"value_bool": bool(enabled)})
+        await asyncio.to_thread(_sb_upsert, {"key": key, "value_bool": bool(enabled), "value_text": None, "value_int": None})
         updated.append(f"{key}={enabled}")
 
     await asyncio.to_thread(settings_cache.load)
@@ -4470,7 +4471,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
         is_short_response = response_length_pref == "short"
         configured_max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
-        _pref_token_caps = {"short": 450, "standard": 1600, "detailed": 3600, "full": 8000}
+        _pref_token_caps = {"short": 1200, "standard": 1600, "detailed": 3600, "full": 8000}
         max_output_tokens = min(configured_max_output_tokens, _pref_token_caps[response_length_pref])
 
         # Build response instructions based on plan features
@@ -4478,9 +4479,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_instructions = ["Надай точну структуровану відповідь."]
         if is_short_response:
             response_instructions.append(
-                "РЕЖИМ КОРОТКОЇ ВІДПОВІДІ: відповідай максимально стисло. "
-                "Не додавай розгорнутий аналіз, сценарії, довгі вступи або повтори. "
-                "Формат: 1-2 короткі абзаци або до 4 коротких пунктів, з посиланнями [N] там, де є юридичні твердження."
+                "РЕЖИМ КОРОТКОЇ ВІДПОВІДІ: дай компактну, але повну відповідь без довгих вступів і повторів. "
+                "Формат: 2-4 короткі абзаци або 4-6 коротких пунктів. "
+                "Поясни головну норму, ключові підстави/винятки і практичний висновок. "
+                "Посилання [N] став там, де є юридичні твердження."
             )
         if "response_detailed" in rf and not is_short_response:
             response_instructions.append(
@@ -4566,17 +4568,22 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "Якщо відповідь повна і питання буде штучним — не питай."
             )
 
-        # Word limit: user preference takes priority, plan features can only expand it
-        _pref_limits = {"short": 120, "standard": 400, "detailed": 900, "full": 2000}
-        _word_limit = _pref_limits[response_length_pref]
-        # Plan response features may expand only the default-length mode.
-        # A user's explicit short preference must stay short.
-        if response_length_pref == "standard" and ("response_detailed" in rf or "response_scenarios" in rf):
-            _word_limit = 800
-        response_instructions.append(
-            f"Пиши завершену відповідь до {_word_limit} слів. "
-            "Ніколи не обривай речення — якщо не вистачає місця, скорочуй менш важливі деталі, але завжди завершуй думку."
-        )
+        # Length style: user preference takes priority. Avoid exact word counting for short mode;
+        # format constraints produce a more natural compact answer.
+        if is_short_response:
+            response_instructions.append(
+                "Не рахуй слова буквально. Орієнтуйся на компактність: відповідь має бути помітно коротшою за стандартну, "
+                "але достатньою, щоб користувач зрозумів суть і наступний крок. Обов'язково завершуй речення."
+            )
+        else:
+            _pref_limits = {"standard": 400, "detailed": 900, "full": 2000}
+            _word_limit = _pref_limits[response_length_pref]
+            if response_length_pref == "standard" and ("response_detailed" in rf or "response_scenarios" in rf):
+                _word_limit = 800
+            response_instructions.append(
+                f"Пиши завершену відповідь до {_word_limit} слів. "
+                "Ніколи не обривай речення — якщо не вистачає місця, скорочуй менш важливі деталі, але завжди завершуй думку."
+            )
 
         # Language style instruction
         if body.response_lang_style == "plain":
