@@ -78,7 +78,7 @@ export function MessageFeedback({ messageId, chatId, initialIsPositive = null, b
   return (
     <>
       {/* Inline thumb buttons */}
-      <div className="flex items-center gap-1 mt-2">
+      <div className="flex items-center gap-1">
         <button
           onClick={() => submitted ? null : openModal("positive")}
           title="Корисно"

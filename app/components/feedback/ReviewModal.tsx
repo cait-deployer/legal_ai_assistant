@@ -76,7 +76,7 @@ export function ReviewModal({ rewardEligible, rewardAmount = 5, onClose, onLater
     : rating > 3
       ? "Що найбільше сподобалось? Можна написати або надиктувати..."
       : "Поділіться враженням про URAI..."
-  const closeWithoutSubmit = done ? onClose : (onLater ?? onClose)
+  const closeWithoutSubmit = onClose
 
   return (
     <div

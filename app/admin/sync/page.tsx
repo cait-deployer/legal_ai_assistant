@@ -341,7 +341,7 @@ function ScheduleWidget() {
           className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${pipelineMode ? "bg-emerald-500" : "bg-gray-700"}`}
           aria-label={pipelineMode ? "Вимкнути пайплайн" : "Ввімкнути пайплайн"}
         >
-          <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${pipelineMode ? "translate-x-5" : "translate-x-0.5"}`} />
+          <span className={`absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${pipelineMode ? "translate-x-5" : "translate-x-0"}`} />
         </button>
       </div>
 
@@ -396,7 +396,7 @@ function ScheduleWidget() {
                       className={`relative w-11 h-6 rounded-full transition-colors ${sources[src] ? "bg-[#C9A84C]" : "bg-gray-700"}`}
                       aria-label={sources[src] ? "Вимкнути" : "Ввімкнути"}
                     >
-                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${sources[src] ? "translate-x-5" : "translate-x-0.5"}`} />
+                      <span className={`absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${sources[src] ? "translate-x-5" : "translate-x-0"}`} />
                     </button>
                   </div>
                 </div>

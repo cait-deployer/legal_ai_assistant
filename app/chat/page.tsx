@@ -23,6 +23,7 @@ import {
     Lock,
     Sparkles,
     Menu,
+    Copy,
 } from 'lucide-react';
 import { ChatSidebar } from '@/components/chat-sidebar';
 import { ChatTour } from '@/components/chat-tour';
@@ -73,6 +74,73 @@ type Message = {
     templates?: Template[];
     feedback?: { is_positive: boolean } | null;
 };
+
+function getCitationNums(text: string) {
+    const nums = new Set<number>();
+    for (const match of text.matchAll(/\[([\d,\s]+)\]/g)) {
+        for (const n of match[1].matchAll(/\d+/g)) nums.add(Number(n[0]));
+    }
+    return nums;
+}
+
+function formatAnswerForCopy(text: string, refs: Citation[]) {
+    const usedNums = getCitationNums(text);
+    const sources = (usedNums.size > 0 ? refs.filter(r => usedNums.has(r.num)) : refs)
+        .sort((a, b) => a.num - b.num);
+
+    if (sources.length === 0) return text.trim();
+
+    const sourceText = sources.map(ref => {
+        const parts = [
+            `${ref.num}. ${ref.source_title || 'Джерело без назви'}`,
+            ref.law_url ? `Посилання: ${ref.law_url}` : '',
+            ref.status ? `Статус: ${ref.status}` : '',
+            ref.passage ? `Уривок: ${ref.passage.replace(/\s+/g, ' ').trim()}` : '',
+        ].filter(Boolean);
+        return parts.join('\n');
+    }).join('\n\n');
+
+    return `${text.trim()}\n\nДжерела:\n${sourceText}`;
+}
+
+async function copyTextToClipboard(text: string) {
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+}
+
+function CopyAnswerButton({ text, refs }: { text: string; refs: Citation[] }) {
+    const handleCopy = async () => {
+        try {
+            await copyTextToClipboard(formatAnswerForCopy(text, refs));
+            toast.success('Відповідь та джерела скопійовано');
+        } catch {
+            toast.error('Не вдалося скопіювати відповідь');
+        }
+    };
+
+    return (
+        <button
+            type="button"
+            onClick={handleCopy}
+            title="Скопіювати відповідь з джерелами"
+            className="p-1.5 rounded-lg text-[#E0E6ED]/30 hover:text-[#C9A84C] hover:bg-[#C9A84C]/10 transition-colors"
+        >
+            <Copy className="w-3.5 h-3.5" />
+        </button>
+    );
+}
 
 function AuthBg() {
     return (
@@ -672,17 +740,22 @@ function ChatPage() {
                                                     ) : msg.text}
                                                 </Card>
                                                 <span className="text-[12px] font-bold text-[#C9A84C]/50 uppercase tracking-widest px-2">{msg.role === 'ai' ? 'URAI Legal Intelligence' : 'Ви'}</span>
-                                                {msg.role === 'ai' && typeof msg.id === 'string' && currentChatId && (
-                                                    <MessageFeedback
-                                                        messageId={msg.id}
-                                                        chatId={currentChatId}
-                                                        initialIsPositive={msg.feedback?.is_positive ?? null}
-                                                        betaMode={isBetaTester}
-                                                        autoOpen={pendingBetaFeedbackId === msg.id}
-                                                        onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
-                                                        showReviewButton={isLastAi && reviewTrigger.buttonVisible}
-                                                        onReviewOpen={reviewTrigger.reopen}
-                                                    />
+                                                {msg.role === 'ai' && (
+                                                    <div className="flex items-center gap-1 mt-2">
+                                                        <CopyAnswerButton text={msg.text} refs={msg.references ?? []} />
+                                                        {typeof msg.id === 'string' && currentChatId && (
+                                                            <MessageFeedback
+                                                                messageId={msg.id}
+                                                                chatId={currentChatId}
+                                                                initialIsPositive={msg.feedback?.is_positive ?? null}
+                                                                betaMode={isBetaTester}
+                                                                autoOpen={pendingBetaFeedbackId === msg.id}
+                                                                onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
+                                                                showReviewButton={isLastAi && reviewTrigger.buttonVisible}
+                                                                onReviewOpen={reviewTrigger.reopen}
+                                                            />
+                                                        )}
+                                                    </div>
                                                 )}
                                             </div>
                                         </motion.div>
