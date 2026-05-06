@@ -4467,21 +4467,35 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
+        response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
+        is_short_response = response_length_pref == "short"
+        configured_max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
+        _pref_token_caps = {"short": 450, "standard": 1600, "detailed": 3600, "full": 8000}
+        max_output_tokens = min(configured_max_output_tokens, _pref_token_caps[response_length_pref])
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
         response_instructions = ["Надай точну структуровану відповідь."]
-        if "response_detailed" in rf:
+        if is_short_response:
+            response_instructions.append(
+                "РЕЖИМ КОРОТКОЇ ВІДПОВІДІ: відповідай максимально стисло. "
+                "Не додавай розгорнутий аналіз, сценарії, довгі вступи або повтори. "
+                "Формат: 1-2 короткі абзаци або до 4 коротких пунктів, з посиланнями [N] там, де є юридичні твердження."
+            )
+        if "response_detailed" in rf and not is_short_response:
             response_instructions.append(
                 "Дай розгорнуту відповідь з аналізом: поясни суть, розкрий деталі, "
                 "вкажи винятки та важливі нюанси."
             )
-        if "response_steps" in rf:
+        if "response_steps" in rf and is_short_response:
+            response_instructions.append(
+                "Якщо потрібні дії, додай максимум 2 короткі наступні кроки без окремого великого розділу."
+            )
+        elif "response_steps" in rf:
             response_instructions.append(
                 "Обов'язково додай розділ «Що робити далі» з конкретними покроковими діями."
             )
-        if "response_scenarios" in rf:
+        if "response_scenarios" in rf and not is_short_response:
             response_instructions.append(
                 "Розглянь альтернативні сценарії розвитку ситуації та їхні наслідки."
             )
@@ -4498,7 +4512,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         # Retrieval quality guardrail — якщо пошук слабкий, чіткий вердикт замість домислів
         _retrieval_top = results[0]["similarity"] if results else 0.0
-        if low_confidence:
+        if low_confidence and is_short_response:
+            response_instructions.append(
+                "УВАГА: знайдено лише слабко пов'язані документи. Для короткого режиму: "
+                "1) в 1 реченні скажи, що прямої відповіді не знайдено; "
+                "2) згадай максимум 2-3 найближчі документи з [N]; "
+                "3) постав одне коротке уточнювальне питання. НЕ перераховуй усі документи."
+            )
+        elif low_confidence:
             response_instructions.append(
                 "УВАГА: знайдено лише слабко пов'язані документи (низька впевненість). "
                 "Структура відповіді: "
@@ -4507,6 +4528,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "3) Окремим абзацом: «⚠️ Точної прямої відповіді щодо [аспект запиту] не знайдено. "
                 "Рекомендую уточнити запит або звернутись до юриста.» "
                 "НЕ вигадуй норм, яких немає в документах."
+            )
+        elif _retrieval_top < 0.68 and is_short_response:
+            response_instructions.append(
+                "УВАГА: знайдені документи лише частково відповідають запиту. Для короткого режиму: "
+                "назви максимум 2-3 найближчі документи з [N], коротко скажи що саме в них є, "
+                "і не додавай окремий довгий список."
             )
         elif _retrieval_top < 0.68:
             response_instructions.append(
@@ -4540,10 +4567,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             )
 
         # Word limit: user preference takes priority, plan features can only expand it
-        _pref_limits = {"short": 200, "standard": 400, "detailed": 900, "full": 2000}
-        _word_limit = _pref_limits.get(body.response_length_pref, 400)
-        # plan response_detailed/scenarios can still bump a standard user to 800
-        if _word_limit < 800 and ("response_detailed" in rf or "response_scenarios" in rf):
+        _pref_limits = {"short": 120, "standard": 400, "detailed": 900, "full": 2000}
+        _word_limit = _pref_limits[response_length_pref]
+        # Plan response features may expand only the default-length mode.
+        # A user's explicit short preference must stay short.
+        if response_length_pref == "standard" and ("response_detailed" in rf or "response_scenarios" in rf):
             _word_limit = 800
         response_instructions.append(
             f"Пиши завершену відповідь до {_word_limit} слів. "

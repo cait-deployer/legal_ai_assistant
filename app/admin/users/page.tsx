@@ -138,7 +138,7 @@ function TierBadge({ tier }: { tier: string }) {
 function BetaBadge() {
   return (
     <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-lg text-[11px] font-black uppercase tracking-wider border bg-violet-500/10 text-violet-400 border-violet-500/25">
-      <Sparkles className="w-2.5 h-2.5" />β
+      <Sparkles className="w-2.5 h-2.5" />Beta
     </span>
   )
 }
