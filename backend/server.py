@@ -3472,6 +3472,67 @@ def _citations_used_in_answer(answer: str, citations: list[dict]) -> list[dict]:
     return filtered or citations
 
 
+def _finish_reason_is_max_tokens(finish_reason) -> bool:
+    return str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2")
+
+
+def _answer_looks_incomplete(answer: str) -> bool:
+    text = (answer or "").strip()
+    if len(text) < 20:
+        return False
+    if text[-1] in ".!?…]»)\"'":
+        return False
+    tail = text[-80:].lower()
+    dangling_words = (
+        " та", " і", " або", " але", " якщо", " що", " який", " яка", " які",
+        " на", " у", " в", " до", " від", " за", " про", " при", " для", " щодо",
+    )
+    return True if any(tail.endswith(w) for w in dangling_words) else True
+
+
+async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None) -> str:
+    if not (_finish_reason_is_max_tokens(finish_reason) or _answer_looks_incomplete(answer)):
+        return answer
+
+    import asyncio as _asyncio
+    from vertexai.generative_models import GenerationConfig
+
+    completed = answer
+    try:
+        for attempt in range(2):
+            continuation_prompt = (
+                "Попередня відповідь обірвалася. Допиши ТІЛЬКИ продовження з місця обриву. "
+                "Не повторюй уже написаний текст, не починай заново, не додавай нові великі розділи. "
+                "Дай 1-3 короткі речення або заверши поточний пункт. Обов'язково закінчи завершеним реченням. "
+                "Якщо останнє слово обрізане, почни з решти цього слова. "
+                "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
+                "Обрізана відповідь:\n"
+                f"{completed[-2500:]}"
+            )
+            cfg = GenerationConfig(temperature=0.0, max_output_tokens=700)
+            resp = await _asyncio.wait_for(
+                _asyncio.to_thread(pipe["main_model"].generate_content, continuation_prompt, generation_config=cfg),
+                timeout=20,
+            )
+            continuation = (resp.text or "").strip()
+            if not continuation:
+                break
+            joiner = "" if completed.rstrip() and completed.rstrip()[-1].isalnum() and continuation[0].isalnum() else " "
+            completed = completed.rstrip() + joiner + continuation
+            logger.info("ANSWER CONTINUATION: attempt=%d appended %d chars", attempt + 1, len(continuation))
+            cont_finish_reason = None
+            try:
+                cont_finish_reason = resp.candidates[0].finish_reason
+            except Exception:
+                pass
+            if not (_finish_reason_is_max_tokens(cont_finish_reason) or _answer_looks_incomplete(completed)):
+                break
+        return completed
+    except Exception as e:
+        logger.warning("ANSWER CONTINUATION failed: %s", e)
+    return completed
+
+
 async def _ask_pipeline(body: AskRequest) -> dict:
     """Retrieval → rerank → context → prompt building. Повертає dict для /ask і /ask_stream."""
     import asyncio as _asyncio
@@ -4813,13 +4874,16 @@ async def ask(body: AskRequest):
         tokens_used = response.usage_metadata.total_token_count or 0
     except Exception:
         pass
+    finish_reason = None
     try:
         finish_reason = response.candidates[0].finish_reason
         logger.info("FINISH_REASON: %s | tokens_used: %s | max_tokens: %s", finish_reason, tokens_used, pipe["max_output_tokens"])
-        if str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2"):
+        if _finish_reason_is_max_tokens(finish_reason):
             logger.warning("RESPONSE TRUNCATED by max_output_tokens=%s", pipe["max_output_tokens"])
     except Exception:
         pass
+
+    answer = await _complete_answer_if_needed(pipe, answer, finish_reason)
 
     try:
         classification = _json.loads(clf_response.text)
@@ -4913,6 +4977,7 @@ async def ask_stream(body: AskRequest):
         loop = _asyncio.get_event_loop()
         token_queue: _asyncio.Queue = _asyncio.Queue()
         answer_parts: list[str] = []
+        stream_finish_reason = {"value": None}
 
         clf_task = _asyncio.create_task(
             _asyncio.to_thread(
@@ -4930,6 +4995,12 @@ async def ask_stream(body: AskRequest):
                     stream=True,
                 ):
                     try:
+                        try:
+                            fr = chunk.candidates[0].finish_reason
+                            if fr:
+                                stream_finish_reason["value"] = fr
+                        except Exception:
+                            pass
                         text = chunk.text
                         if text:
                             _asyncio.run_coroutine_threadsafe(
@@ -4975,6 +5046,12 @@ async def ask_stream(body: AskRequest):
                 yield _sse("message", {"token": data})
 
         full_answer = "".join(answer_parts)
+        completed_answer = await _complete_answer_if_needed(pipe, full_answer, stream_finish_reason["value"])
+        if completed_answer != full_answer:
+            continuation = completed_answer[len(full_answer):]
+            if continuation:
+                yield _sse("message", {"token": continuation})
+                full_answer = completed_answer
 
         try:
             clf_response = await clf_task

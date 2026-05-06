@@ -196,13 +196,13 @@ function MarkdownText({ text, refs, onCitationOpen }: {
 
     const lines = text.split('\n');
     return (
-        <div className="space-y-2">
+        <div className="space-y-2 min-w-0 break-words">
             {lines.map((line, i) => {
                 const t = line.trim();
                 if (!t) return <div key={i} className="h-1" />;
-                if (line.startsWith('### ')) return <h3 key={i} className="font-serif font-bold text-[#E0E6ED] mt-4 mb-2 text-base">{parseInline(line.slice(4))}</h3>;
-                if (/^[\*\-]\s/.test(t)) return <div key={i} className="flex gap-2 my-1.5 pl-1"><div className="h-1.5 w-1.5 rounded-full bg-[#C9A84C] mt-2 shrink-0" /><span className="text-[#E0E6ED]/80 text-sm leading-relaxed">{parseInline(t.slice(2))}</span></div>;
-                return <p key={i} className="my-1.5 text-sm leading-relaxed text-[#E0E6ED]/90">{parseInline(t)}</p>;
+                if (line.startsWith('### ')) return <h3 key={i} className="font-serif font-bold text-[#E0E6ED] mt-4 mb-2 text-base break-words">{parseInline(line.slice(4))}</h3>;
+                if (/^[\*\-]\s/.test(t)) return <div key={i} className="flex gap-2 my-1.5 pl-1 min-w-0"><div className="h-1.5 w-1.5 rounded-full bg-[#C9A84C] mt-2 shrink-0" /><span className="min-w-0 text-[#E0E6ED]/80 text-sm leading-relaxed break-words">{parseInline(t.slice(2))}</span></div>;
+                return <p key={i} className="my-1.5 text-sm leading-relaxed text-[#E0E6ED]/90 break-words">{parseInline(t)}</p>;
             })}
         </div>
     );
