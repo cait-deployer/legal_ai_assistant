@@ -4473,8 +4473,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
         is_short_response = response_length_pref == "short"
         configured_max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
-        _pref_token_caps = {"short": 1200, "standard": 1600, "detailed": 3600, "full": 8000}
-        max_output_tokens = min(configured_max_output_tokens, _pref_token_caps[response_length_pref])
+        _pref_token_bounds = {
+            "short": (1200, 1800),
+            "standard": (1600, 2400),
+            "detailed": (3000, 4200),
+            "full": (5000, 8000),
+        }
+        _min_tokens, _max_tokens = _pref_token_bounds[response_length_pref]
+        max_output_tokens = min(max(configured_max_output_tokens, _min_tokens), _max_tokens)
 
         # Build response instructions based on plan features
         rf = set(body.response_features)
