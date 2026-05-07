@@ -248,7 +248,7 @@ Classification:
 
 Completion guard:
 
-- every main Gemini answer is instructed to end with hidden marker `<!--URAI_DONE-->`;
+- every main Gemini answer is instructed to end with hidden marker `URAI_DONE`;
 - streaming buffers a small tail so the marker is removed before the user sees it;
 - if the marker is missing, or finish reason indicates truncation, backend tries `_complete_answer_if_needed()`;
 - continuation is appended to stream if generated;

@@ -154,7 +154,7 @@ Overall context cap is controlled by `context_char_cap`, default 30,000 characte
 
 The backend no longer guesses completion from answer shape, such as numbered sections.
 Instead every main Gemini answer is instructed to finish with the hidden marker
-`<!--URAI_DONE-->` on its own final line.
+`URAI_DONE` on its own final line.
 
 Server behavior:
 

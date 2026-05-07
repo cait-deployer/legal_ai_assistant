@@ -3613,7 +3613,7 @@ def _finish_reason_is_max_tokens(finish_reason) -> bool:
     return str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2")
 
 
-ANSWER_DONE_MARKER = "<!--URAI_DONE-->"
+ANSWER_DONE_MARKER = "URAI_DONE"
 _ANSWER_DONE_MARKER_TAIL = len(ANSWER_DONE_MARKER) + 8
 
 
@@ -3657,10 +3657,11 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
 
     completed = answer
     try:
-        for attempt in range(3):
+        for attempt in range(2):
             continuation_prompt = (
                 "Попередня відповідь не має технічного маркера завершення або була обрізана. "
                 "Допиши ТІЛЬКИ продовження з місця обриву. Не повторюй уже написаний текст, не починай заново. "
+                "Не пиши службові фрази на кшталт «доповнюю відповідь», «продовження» або «ось завершення». "
                 "Якщо відповідь фактично вже завершена, додай тільки технічний маркер. "
                 "Якщо зміст ще не завершений, заверши думку максимально коротко і природно. "
                 f"Повністю завершена відповідь ОБОВ'ЯЗКОВО має закінчуватися окремим фінальним рядком рівно: {ANSWER_DONE_MARKER}. "

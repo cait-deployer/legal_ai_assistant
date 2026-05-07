@@ -21,6 +21,7 @@ interface Props {
 }
 
 type Vote = "positive" | "negative"
+const BETA_AUTO_OPEN_DELAY_MS = 30000
 
 export function MessageFeedback({ messageId, chatId, initialIsPositive = null, betaMode = false, autoOpen = false, onSubmitted, showReviewButton = false, onReviewOpen }: Props) {
   const initialVote = initialIsPositive === null ? null : initialIsPositive ? "positive" : "negative"
@@ -31,20 +32,41 @@ export function MessageFeedback({ messageId, chatId, initialIsPositive = null, b
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(initialIsPositive !== null)
   const autoOpenedRef = useRef(false)
+  const autoOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    autoOpenedRef.current = false
+    if (autoOpenTimerRef.current) {
+      clearTimeout(autoOpenTimerRef.current)
+      autoOpenTimerRef.current = null
+    }
+  }, [messageId])
 
   useEffect(() => {
     if (!autoOpen || submitted || autoOpenedRef.current) return
+    if (autoOpenTimerRef.current) clearTimeout(autoOpenTimerRef.current)
     autoOpenedRef.current = true
-    const timer = setTimeout(() => {
+    autoOpenTimerRef.current = setTimeout(() => {
       setVote("positive")
       setTags([])
       setText("")
       setShowModal(true)
-    }, 30000)
-    return () => clearTimeout(timer)
+      autoOpenTimerRef.current = null
+    }, BETA_AUTO_OPEN_DELAY_MS)
+    return () => {
+      if (autoOpenTimerRef.current) {
+        clearTimeout(autoOpenTimerRef.current)
+        autoOpenTimerRef.current = null
+      }
+    }
   }, [autoOpen, submitted])
 
   const openModal = (v: Vote) => {
+    if (autoOpenTimerRef.current) {
+      clearTimeout(autoOpenTimerRef.current)
+      autoOpenTimerRef.current = null
+    }
+    autoOpenedRef.current = true
     setVote(v)
     setTags([])
     setText("")

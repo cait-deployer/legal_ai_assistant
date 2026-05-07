@@ -543,6 +543,7 @@ function ChatPage() {
                                 twQueueRef.current += token;
                                 if (!twTimerRef.current) twTimerRef.current = setTimeout(drainQueue, 18);
                             } else if (currentEvent === 'citations') {
+                                setIsContinuing(false);
                                 finalPayload = parsed as unknown as FinalPayload;
                                 const answer = finalPayload.answer || accText;
                                 if (firstToken) {
