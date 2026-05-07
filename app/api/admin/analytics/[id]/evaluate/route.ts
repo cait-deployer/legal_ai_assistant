@@ -152,6 +152,12 @@ Return ONLY valid JSON. Do not add markdown.
 
 Your task is not to decide final truth. Create an AI draft for a human admin.
 
+Language rule:
+- All human-readable text values MUST be in Ukrainian.
+- This includes every "reason" and "eval_notes" value.
+- Do not write explanations in English, Russian, or mixed language.
+- Keep technical enum values unchanged exactly as requested.
+
 Allowed expected_answer_type values:
 - direct_norm
 - no_direct_norm
@@ -171,7 +177,7 @@ JSON schema:
       "title": "...",
       "law_id": "...",
       "collection": "...",
-      "reason": "why this source is necessary"
+      "reason": "українською: чому це джерело потрібне для відповіді"
     }
   ],
   "bad_sources": [
@@ -180,11 +186,11 @@ JSON schema:
       "title": "...",
       "law_id": "...",
       "collection": "...",
-      "reason": "why this source is weak, background-only, or wrong factual situation"
+      "reason": "українською: чому це джерело слабке, фонове або не про цю фактичну ситуацію"
     }
   ],
   "eval_confidence": 0.0,
-  "eval_notes": "short notes for a human reviewer"
+  "eval_notes": "коротка примітка українською для людини-рецензента"
 }
 
 Rules:
@@ -194,6 +200,7 @@ Rules:
 - If the answer says no direct norm was found, check whether the cited sources only support a cautious indirect answer.
 - Lower confidence if the answer/source fit is ambiguous.
 - Keep notes concise and practical.
+- Write all reasons and notes in Ukrainian legal/business language.
 
 Question:
 ${input.question}
