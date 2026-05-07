@@ -33,6 +33,10 @@ type MessageDetail = {
 
 const PAGE_SIZE = 50
 
+function userLabel(row: { user_id: string; profiles: { email: string; full_name: string | null } | null }) {
+  return row.profiles?.full_name || row.profiles?.email || row.user_id.slice(0, 8)
+}
+
 function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () => void }) {
   const [detail, setDetail] = useState<MessageDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -60,7 +64,7 @@ function DetailModal({ row, onClose }: { row: MessageFeedbackRow; onClose: () =>
               : <ThumbsDown className="w-5 h-5 text-red-400" />}
             <div>
               <p className="text-sm font-semibold text-[#E0E6ED]">
-                {row.profiles?.email ?? row.user_id.slice(0, 8)}
+                {userLabel(row)}
               </p>
               <p className="text-xs text-[#E0E6ED]/40">
                 {new Date(row.created_at).toLocaleString("uk")}
@@ -261,7 +265,7 @@ export default function FeedbackAdminPage() {
                         : <ThumbsDown className="w-4 h-4 text-red-400" />}
                     </td>
                     <td className="px-4 py-3 text-[#E0E6ED]/70">
-                      {row.profiles?.email ?? row.user_id.slice(0, 8)}
+                      {userLabel(row)}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
@@ -307,7 +311,7 @@ export default function FeedbackAdminPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-[#E0E6ED]/70">
-                      {row.profiles?.email ?? row.user_id.slice(0, 8)}
+                      {userLabel(row)}
                     </td>
                     <td className="px-4 py-3 text-[#E0E6ED]/80 max-w-sm">
                       <p className="line-clamp-2">{row.review_text}</p>

@@ -2334,6 +2334,7 @@ async def get_users_stats():
             hdrs = {**_sb_hdrs(), "Prefer": "count=exact"}
 
             def _count(**kw) -> int:
+                kw.setdefault("auth_provider", "neq.deleted")
                 r = c.get(
                     f"{_SB_URL}/rest/v1/profiles",
                     headers=hdrs,
@@ -2400,6 +2401,7 @@ async def get_users(
         "order": f"{sort_by}.{sort_dir}.nullslast",
         "limit": str(per_page),
         "offset": str((page - 1) * per_page),
+        "auth_provider": "neq.deleted",
     }
 
     if search:

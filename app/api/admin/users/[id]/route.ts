@@ -22,6 +22,37 @@ async function getCallerUser() {
   return user
 }
 
+async function anonymizePublicUserData(sb: ReturnType<typeof admin>, id: string) {
+  await sb.from("onboarding_responses").delete().eq("user_id", id)
+
+  const { error } = await sb
+    .from("profiles")
+    .update({
+      email: `deleted-user-${id}@deleted.local`,
+      full_name: "Deleted user",
+      avatar_url: null,
+      auth_provider: "deleted",
+      last_ip: null,
+      last_city: null,
+      last_country: null,
+      last_country_code: null,
+      user_agent: null,
+      browser_fingerprint: null,
+      role: null,
+      sub_role: [],
+      segment: [],
+      ai_personal_prompt: null,
+      marketing_consent: false,
+      email_confirmed: false,
+      is_onboarded: false,
+      is_beta_tester: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+
+  return error
+}
+
 // GET /api/admin/users/[id] - ban and beta status
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await checkAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -76,7 +107,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   return NextResponse.json({ ok: true })
 }
 
-// DELETE /api/admin/users/[id] - delete auth user, profile cascades from auth.users
+// DELETE /api/admin/users/[id] - delete auth user and anonymize public profile data
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await checkAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
@@ -86,7 +117,14 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     return NextResponse.json({ error: "Cannot delete the currently signed-in user" }, { status: 400 })
   }
 
-  const { error } = await admin().auth.admin.deleteUser(id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const sb = admin()
+  const { error: authDeleteError } = await sb.auth.admin.deleteUser(id)
+  if (authDeleteError && !/user not found/i.test(authDeleteError.message)) {
+    return NextResponse.json({ error: authDeleteError.message }, { status: 500 })
+  }
+
+  const publicAnonymizeError = await anonymizePublicUserData(sb, id)
+  if (publicAnonymizeError) return NextResponse.json({ error: publicAnonymizeError.message }, { status: 500 })
+
   return NextResponse.json({ ok: true })
 }
