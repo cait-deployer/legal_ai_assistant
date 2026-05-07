@@ -1,614 +1,344 @@
-# URAI — Технічна архітектура чатбота
+# URAI - С‚РµС…РЅС–С‡РЅР° Р°СЂС…С–С‚РµРєС‚СѓСЂР° С‡Р°С‚Р±РѕС‚Р°
 
-> Документ для онбордингу AI-агентів та розробників.  
-> Описує **реальний стан системи** станом на квітень 2026.  
-> Без вигадок — тільки те, що є в коді `backend/server.py`.
+> РђРєС‚СѓР°Р»СЊРЅРёР№ Р·СЂС–Р· СЃРёСЃС‚РµРјРё СЃС‚Р°РЅРѕРј РЅР° С‚СЂР°РІРµРЅСЊ 2026.
+> Р”Р¶РµСЂРµР»Рѕ РїСЂР°РІРґРё: `app/chat/page.tsx`, `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`, `backend/qdrant_storage.py`.
 
----
+## 1. РљРѕРјРїРѕРЅРµРЅС‚Рё
 
-## 1. Загальна схема роботи чатбота
+URAI СЃРєР»Р°РґР°С”С‚СЊСЃСЏ Р· С‚СЂСЊРѕС… РѕСЃРЅРѕРІРЅРёС… С€Р°СЂС–РІ:
 
-```
-Питання користувача (UA або RU)
-        │
-        ▼
-[0] RU→UA переклад (якщо "ы/ъ/э" і немає "і/ї/є/ґ")
-        │
-        ▼
-[1] Query Rewrite — Gemini few-shot переформульовує в юридичний стиль
-     └─ ThinkingConfig(budget=0), temperature=0, few-shot приклади з Supabase `rewrite_examples`
-        │
-        ├──────────────────────────────────────┐
-        ▼                                      ▼
-[2a] embed(оригінал)               [2b] embed(rewrite) — якщо rewrite успішний
-        │                                      │
-        └──────────────────┬───────────────────┘
-                           ▼
-[3] Routing: план підписки → filter_sources → plan_collections
-     └─ Intent classifier (Gemini, top-2 галузі) → _INTENT_MAP → target_collections
-        │
-        ▼
-[4] Multi-query vector search по Qdrant target_collections
-     - fetch_k = max_docs × 5 кандидатів з кожної колекції
-     - Паралельно: search(embed_original) + search(embed_rewrite)
-     - Merge: дедуп по (law_id, chunk_index), max score
-     - match_threshold = max(0.33, settings.match_threshold_docs)
-        │
-        ▼
-[5] LOW CONFIDENCE check: top raw score < 0.42 → low_confidence=True
-     └─ НЕ зупиняємось, НЕ обрізаємо — BM25 і title boost компенсують слабкий вектор
-        │
-        ▼
-[6] Source score adjustment:
-     - rada_* та laws_positions → ×1.15 (буст, налаштовується в адмінці)
-     - laws_supreme             → ×0.88 (penalty: широкі PDF матчаться на все)
-     - laws_kmu, laws_ccu       → без змін
-        │
-        ▼
-[7] Dedup: max 2 чанки від одного law_id
-        │
-        ▼
-[8] Diversity cap:
-     - laws_positions → max(1, max_docs//4) слотів
-     - laws_supreme   → max(2, max_docs//4) слотів
-     - Інші колекції  → гарантовано max(2, (max_docs×¾) // N) слотів кожна
-     - Overflow: конкуренція по similarity
-        │
-        ▼
-[9] Keyword search (BM25 MatchText на поле content):
-     - Топ-4 слова з питання, morphological (pymorphy3 UA)
-     - Stem слова шукаються в source+doc_type+content[:1500] — відхиляємо нерелевантні
-     - Score динамічний: 0.25 + 0.30×(matched/total) → діапазон 0.25–0.55
-     - Нові документи додаються до пулу
-        │
-        ▼
-[10] Title boost (MatchText на поле source):
-     - Keywords = слова >4 симв з питання (до 3) + rewrite (до 7) + pymorphy3 леми
-     - Стоп-слова фільтруються (цікавить, хочу, треба, розмір...)
-     - chunks_per_doc=1, cap=20 документів
-     - Пріоритет: laws_kmu(0) > laws_supreme(1) > laws_ccu(2) > laws_wiki(3) > rada_*
-     - Якщо документ знайдено і title boost і semantic → +0.10 до similarity
-     - Score динамічний: 0.50 + 0.35×(matched_kws/total_kws) → діапазон 0.50–0.85
-     - Нові документи додаються до пулу
-        │
-        ▼
-[11] LLM Reranker (Gemini, якщо кандидатів > max_docs):
-     - Бере до 60 кандидатів (по 350 символів кожен)
-     - Вибирає рівно min(max_docs, max(8, max_docs//2)) найкорисніших
-       (при max_docs=12 → 8; при max_docs=20 → 10)
-     - ThinkingConfig(budget=0), temperature=0
-     - Fallback: семантичний top-N якщо reranker повернув < 2 індексів
-        │
-        ▼
-[12] Hard-stop: top score < min_score (0.55) → "не знайдено"
-     └─ Пропускається якщо low_confidence=True (Gemini вже отримав guardrail)
-        │
-        ▼
-[13] Фільтр "Втратив чинність" — виключаємо скасовані документи
-        │
-        ▼
-[14] Контекст для Gemini (3 bucket-и, кожен обмежений):
-     ├─ Закони Ради + wiki: max 4 чанки
-     ├─ Постанови КМУ: max 3 чанки
-     └─ Судова практика (positions + supreme + ccu): max 2 чанки
-     Context cap: 14 000 символів
-        │
-        ▼
-[15] Gemini — генерує відповідь
-     - System prompt з Supabase app_settings
-     - Response instructions: деталізація / кроки / сценарії (з плану)
-     - Citation rule: обов'язково [N] на кожне твердження
-     - Guardrail якщо top_score < 0.68 → "перелічи всі знайдені документи, поясни що є в чанку і чого бракує (таблиці, суми), дай посилання"
-     - Guardrail якщо low_confidence → "слабко впевнено + ⚠️ рекомендую уточнити"
-     - Clarifying question: обов'язково якщо `low_confidence` або `top_score < 0.75`; інакше — необов'язково (тільки якщо є природне продовження)
-     - Ліміт слів: 350 (base) або 800 (response_detailed/scenarios)
-        │
-        ▼
-[16] JSON відповідь: { answer, references, templates, _meta }
-     _meta: { processing_time_ms, tokens_used, category,
-              low_confidence, top_score, n_docs,
-              sentiment, complexity_score, user_intent }
-     + паралельно: класифікатор (sentiment, complexity, user_intent) для аналітики
-```
+| РЁР°СЂ | РўРµС…РЅРѕР»РѕРіС–С— | Р’С–РґРїРѕРІС–РґР°Р»СЊРЅС–СЃС‚СЊ |
+| --- | --- | --- |
+| Frontend | Next.js App Router, React | Chat UI, settings, admin panel, auth UX, streaming display |
+| API routes | Next.js Route Handlers | Supabase auth, plan gating, profile/preferences, proxy РґРѕ backend |
+| Backend | FastAPI Python | Retrieval, Qdrant, Gemini/Vertex AI, sync/reindex/admin endpoints |
+| Storage | Supabase + Qdrant | Users/chats/messages/analytics/settings + vector knowledge base |
 
----
+## 2. Chat request flow
 
-## 2. Qdrant — структура бази
+1. User РЅР°РґСЃРёР»Р°С” РїРёС‚Р°РЅРЅСЏ Сѓ `app/chat/page.tsx`.
+2. РЇРєС‰Рѕ С‡Р°С‚ РЅРѕРІРёР№, frontend СЃС‚РІРѕСЂСЋС” row Сѓ `chats`.
+3. User message Р°СЃРёРЅС…СЂРѕРЅРЅРѕ Р·Р±РµСЂС–РіР°С”С‚СЊСЃСЏ Сѓ `messages`.
+4. Frontend С„РѕСЂРјСѓС” `history` Р· РѕСЃС‚Р°РЅРЅС–С… 6 РїРѕРІС–РґРѕРјР»РµРЅСЊ.
+5. Frontend РІРёРєР»РёРєР°С” `POST /api/ask/stream` Р· `question`, `history`, `context_summary: null`.
+6. API route С‡РёС‚Р°С” profile, plan, enabled features С– response preferences.
+7. API route РІС–РґРїСЂР°РІР»СЏС” payload Сѓ FastAPI `/ask_stream`.
+8. Backend РІРёРєРѕРЅСѓС” retrieval pipeline С– stream-РёС‚СЊ С‚РѕРєРµРЅРё РЅР°Р·Р°Рґ.
+9. Frontend РїРѕРєР°Р·СѓС” tokens live.
+10. РџС–СЃР»СЏ С„С–РЅР°Р»СЊРЅРѕРіРѕ citations event frontend Р·Р±РµСЂС–РіР°С” assistant message, analytics С– РѕРЅРѕРІР»СЋС” usage.
+11. РџС–СЃР»СЏ РєРѕР¶РЅРѕРіРѕ 2-РіРѕ user turn Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ `POST /api/chats/[id]/summarize`, Р°Р»Рµ summary Р·Р°СЂР°Р· РЅРµ РїС–РґСЃС‚Р°РІР»СЏС”С‚СЊСЃСЏ Сѓ РЅР°СЃС‚СѓРїРЅРёР№ ask payload.
 
-### 2.1 Всі колекції
+## 3. API route contract
 
-**V1 (15 штук, 768 вимірів, `text-embedding-004`) — продакшн:**
-
-| Колекція | Джерело | Що зберігається | Chunk |
-|----------|---------|-----------------|-------|
-| `rada_finance` | zakon.rada.gov.ua | Фінанси, банки, ПДВ, митниця | 3000 |
-| `rada_state` | zakon.rada.gov.ua | Держустрій, громадянство | 3000 |
-| `rada_personnel` | zakon.rada.gov.ua | Кадрові питання, нагородження | 3000 |
-| `rada_court` | zakon.rada.gov.ua | Суд, прокуратура, господарський процес | 3000 |
-| `rada_intl` | zakon.rada.gov.ua | Міжнародні відносини, договори | 3000 |
-| `rada_labor` | zakon.rada.gov.ua | Трудові відносини, соціальне страхування | 3000 |
-| `rada_civil` | zakon.rada.gov.ua | Цивільне, сімейне, охорона здоров'я | 3000 |
-| `rada_criminal` | zakon.rada.gov.ua | Кримінальне та процесуальне | 3000 |
-| `rada_admin` | zakon.rada.gov.ua | Адм. відповідальність, ліцензування | 3000 |
-| `rada_housing` | zakon.rada.gov.ua | Житлове, ЖКГ, будівництво | 3000 |
-| `rada_land` | zakon.rada.gov.ua | Земельне, сільське господарство | 3000 |
-| `rada_industry` | zakon.rada.gov.ua | Транспорт, промисловість, підприємства | 3000 |
-| `rada_other` | zakon.rada.gov.ua | Освіта, наука, культура, ЗСУ | 3000 |
-| `laws_kmu` | zakon.rada.gov.ua/laws/main/o2 | НПА Кабінету Міністрів | 4000 |
-| `laws_supreme` | supreme.court.gov.ua | Квартальні PDF-огляди практики ВС | ~1500 |
-| `laws_wiki` | legalaid.wiki | Вікі-статті правової допомоги | ~1500 |
-| `laws_ccu` | ccu.gov.ua | Рішення та Висновки Конституційного Суду | ~1500 |
-| `laws_positions` | lpd.court.gov.ua | Правові позиції Верховного Суду (~12 800) | ~2000 |
-
-**V2 (20 штук, 3072 вимірів, `gemini-embedding-001`) — shadow, не в продакшні:**
-
-Ті самі назви + суфікс `_v2`: всі 13 `rada_*_v2` + `laws_kmu_v2`, `laws_supreme_v2`, `laws_wiki_v2`, `laws_ccu_v2`, `laws_positions_v2`, `laws_mod_v2`, `laws_zir_v2`.
-
-**Вектор V1:** 768 вимірів, cosine distance, `text-embedding-004` (Vertex AI)  
-**Вектор V2:** 3072 вимірів, cosine distance, `gemini-embedding-001` (Google GenAI)
-
-**Title-prefix:** у кожному чанку починається з назви закону — `"{law_title}\n\n{chunk}"`.  
-Це вже є в нових індексованих чанках (після reindex) та `laws_positions`.
-
-**Повнотекстові індекси (BM25):** поля `content` і `source` проіндексовані для keyword search.
-
----
-
-### 2.2 Payload (поля) кожного документа в Qdrant
+`AskRequest` Сѓ backend:
 
 ```json
 {
-  "content":        "Текст чанку (title-prefix + уривок) — відправляється в Gemini",
-  "source":         "Заголовок документа (для title boost і відображення)",
-  "law_id":         "Унікальний ID (наприклад: kmu_663-99-%D0%BF, або zakoni-vidbory)",
-  "doc_type":       "Постанова КМУ / Правова позиція / Рішення КСУ / ...",
-  "category":       "Галузь права / тип документа",
-  "law_url":        "Пряме посилання на документ",
-  "source_domain":  "zakon.rada.gov.ua / lpd.court.gov.ua / ...",
-  "status":         "Чинний / Втратив чинність / ...",
-  "doc_number":     "Номер документа",
-  "date_adopted":   "Дата прийняття",
-  "scraped_at":     "ISO datetime індексування",
-  "chunk_index":    0,
-  "reindexed":      true,
-
-  // Текстові маркери (з detect_text_flags для rada_*):
-  "wartime_only":   false,   // діє тільки в умовах воєнного стану
-  "is_suspended":   false,   // дію призупинено
-  "is_retroactive": false,   // має зворотню дію
-
-  // Тільки для laws_kmu:
-  "effective_date": "Дата набуття чинності",
-
-  // Тільки для laws_positions:
-  "lpd_id":         123456,
-  "title":          "Назва правової позиції",
-  "court_tag":      "Велика Палата / КАС / КЦС / ККС / КГС",
-  "court_abbr":     "ВП ВС",
-  "categories":     "категорія1, категорія2",
-  "case_numbers":   "справа1, справа2",
-
-  // Тільки для laws_ccu:
-  "doc_subtype":    "Рішення / Висновок",
-
-  // Тільки для laws_supreme:
-  "pdf_url":        "посилання на PDF",
-
-  // Тільки для laws_wiki:
-  "wiki_title":     "Назва статті legalaid.wiki"
-}
-```
-
----
-
-### 2.3 Як документи потрапляють в базу
-
-| Колекція | Скрапер | Логіка |
-|----------|---------|--------|
-| `rada_*` | `rada_scanner.py` | Ітерує сторінки по тематичних розділах (h2..h32), конвертує HTML→Markdown, title-prefix, chunk 3000 |
-| `laws_kmu` | `kmu_scanner.py` | zakon.rada.gov.ua/laws/main/o2 (видавник КМУ), `law_id = "kmu_" + rada_id`, title-prefix, chunk 4000 |
-| `laws_supreme` | `supreme_scanner.py` | PDF з supreme.court.gov.ua, PyPDFLoader, chunk ~1500 |
-| `laws_wiki` | `wiki_scanner.py` | MediaWiki API legalaid.wiki, chunk ~1500 |
-| `laws_ccu` | `ccu_scanner.py` | HTTP + PDF, ccu.gov.ua, chunk ~1500 |
-| `laws_positions` | `lpd_scanner.py` | JSON API lpd.court.gov.ua, title вставляється на початку, chunk ~2000 |
-
-**Incremental sync:** перевіряє `get_existing_law_ids()` і пропускає вже проіндексовані (по `law_id`).  
-**Full reindex:** `reindex_kmu_full.py` / `reindex_rada_full.py` — видаляють старі чанки і завантажують нові з оновленими налаштуваннями. Запускаються з адмінки або вручну.  
-**IDs cache:** після збору списку законів (15–30 хв) зберігається JSON-файл (`reindex_*_ids_cache.json`, TTL 48 год). При краші сервера під час обробки — наступний запуск завантажує з кешу і пропускає фазу збору. Видаляється після успішного завершення.
-
----
-
-## 3. Pipeline `/ask` — детально
-
-### 3.1 Вхідний запит
-
-```python
-POST /ask
-{
-  "question": "Як розрахувати добові за кордон?",
-  "max_docs": 12,                               # з плану підписки (8–20)
-  "filter_sources": ["rada", "kmu", "supreme"], # null = всі дозволені планом
+  "question": "string",
+  "max_docs": 12,
+  "filter_sources": ["rada", "kmu", "wiki"],
   "response_features": ["response_detailed", "response_steps"],
-  "user_profile": {"role": "юрист", "sub_role": ["трудове"]},
-  "history": [{"role": "user", "content": "..."}],
-  "ai_personal_prompt": "Відповідай коротко."
-}
-```
-
-### 3.2 Крок 0 — Переклад RU→UA
-
-Детект: є `ы/ъ/э` І немає `і/ї/є/ґ` → переклад через Gemini (temperature=0, max_tokens=300).  
-Перекладений текст використовується замість оригіналу для embedding і пошуку.
-
-### 3.3 Крок 1 — Query Rewrite
-
-Gemini переформульовує запит у формальний юридичний стиль:
-- Few-shot приклади завантажуються з `app_settings.rewrite_examples` (Supabase) — редагуються з адмінки без деплою
-- `ThinkingConfig(thinking_budget=0)` — вимкнено thinking (швидше, без усічення виводу)
-- `temperature=0.0`, `max_output_tokens=2500`
-- Перевірка: rewrite відхиляється якщо < 4 слів або > 300 символів або збігається з оригіналом
-
-### 3.4 Крок 2 — Embed
-
-Паралельно:
-- `embed(search_question)` — оригінал (або перекладений)
-- `embed(rewrite)` — якщо rewrite успішний (не None)
-
-Модель: `text-embedding-004` (Vertex AI), 768 dims.
-
-### 3.5 Крок 3 — Routing
-
-**Шар 1 — план підписки:**  
-`filter_sources` → `plan_collections` (наприклад, `["rada", "kmu"]` → відповідні колекції)
-
-**Шар 2 — intent classifier (top-2):**  
-Gemini (temperature=0, max_tokens=50) класифікує до **2 галузей** → об'єднує колекції з `_INTENT_MAP`.  
-Якщо питання міждисциплінарне ("звільнення військового за злочин" → `трудове, кримінальне`) — колекції обох галузей мерджаться.
-
-| Intent | Колекції |
-|--------|----------|
-| трудове | rada_labor, laws_kmu, laws_positions, laws_supreme |
-| податкове / фінансове | rada_finance, laws_kmu, laws_positions, laws_supreme |
-| цивільне | rada_civil, laws_kmu, laws_positions, laws_supreme |
-| кримінальне | rada_criminal, laws_kmu, laws_positions, laws_supreme, laws_ccu |
-| адміністративне | rada_admin, rada_state, laws_kmu, laws_positions, laws_supreme |
-| земельне | rada_land, laws_kmu, laws_positions |
-| житлове | rada_housing, laws_kmu, laws_positions |
-| корпоративне | rada_civil, rada_finance, laws_positions, laws_supreme |
-| міжнародне | rada_intl, laws_positions, laws_supreme |
-| кадрове | rada_personnel, rada_labor, laws_kmu, laws_positions |
-| судове | laws_positions, laws_supreme, laws_ccu, rada_court |
-| інше | **всі** план-дозволені колекції |
-
-Fallback при помилці classifier: `["rada_labor", "rada_civil", "laws_kmu", "rada_finance", "laws_positions"]`  
-(не all collections — щоб не засмічувати результати нерелевантними колекціями)
-
-**Парсинг:** Gemini повертає до 2 слів через кому → `re.split(r"[,\s]+")[:2]` → кожен лейбл резолвиться в `_INTENT_MAP` → колекції мерджаться (порядок: першої галузі → унікальні другої).
-
-### 3.6 Крок 4 — Multi-query vector search
-
-- `fetch_k = max_docs × 5` кандидатів з кожної колекції
-- Паралельно: `search(embed_original, fetch_k)` + `search(embed_rewrite, fetch_k)`
-- **Merge:** дедуп по `(law_id, chunk_index)`, зберігаємо max score
-- `match_threshold = max(0.33, settings.match_threshold_docs)`
-
-### 3.7 Крок 5 — LOW CONFIDENCE (soft fallback)
-
-```python
-_RAW_GATE = 0.42
-low_confidence = bool(results and results[0]["similarity"] < _RAW_GATE)
-# НЕ обрізаємо results — BM25 і title boost ще не запускались і можуть компенсувати
-```
-
-**Раніше** — жорстка зупинка ("не знайдено"). **Тепер** — тільки флаг + ширший routing:
-- `target_collections` розширюється extra-набором: `[rada_labor, rada_civil, laws_kmu, rada_finance, laws_positions, rada_admin, rada_state]` (тільки дозволені планом)
-- Pipeline продовжується повністю (boost → BM25 → title boost → reranker) — вже по ширшому набору
-- Hard-stop (min_score 0.55) **пропускається** для low_confidence
-- Gemini отримує окремий guardrail: *"слабка впевненість — покажи що є + ⚠️ рекомендую уточнити"*
-- `_meta.low_confidence: true` у відповіді
-
-**Чому так:** юридичні embeddings нестабільні — один і той самий закон може давати raw score 0.38–0.45 залежно від формулювання. BM25 і title boost додають документи незалежно від вектора і часто рятують ситуацію. Ширший routing при low_confidence дає їм більше шансів знайти потрібне.
-
-### 3.8 Крок 6–8 — Score adjustment та Diversity
-
-**Source score adjustment (виконується одночасно):**
-
-| Колекція | Коефіцієнт | Причина |
-|----------|-----------|---------|
-| `laws_kmu` | ×1.18 | Підзаконні акти прямої дії — найвища практична цінність |
-| `rada_*` (всі 13) | ×1.12 | Первинне законодавство |
-| `laws_positions`, `laws_supreme`, `laws_ccu` | ×1.03 | Судова практика — важлива, але вторинна |
-| `laws_zir` | ×0.96 | Роз'яснення ДПС — авторитетні, але вужче застосування |
-| `laws_mod` | ×1.0 | Без змін |
-| `laws_wiki` | ×0.90 | Довідкові статті — мінімальний юридичний пріоритет |
-
-Додатково `_DOC_TYPE_SCORE` бусти: +0.08 Кодекс, +0.07 Закон, +0.06 Постанова, −0.08 Лист/Інформаційний лист.
-
-**Dedup:** максимум 2 чанки від одного `law_id` глобально.
-
-**Diversity cap:**
-- `laws_positions` → max(1, max_docs // 4) слотів
-- `laws_supreme` → max(2, max_docs // 4) слотів
-- Інші колекції → гарантовано max(2, (max_docs×¾) // N) слотів кожна + overflow конкуренція
-
-### 3.9 Крок 9 — Keyword search (BM25)
-
-`search_qdrant_text()` — MatchText по полю `content`:
-- Слова > 4 символів з оригінального питання
-- Morphological via **pymorphy3** (UA): `відрядженні → відрядження`
-- Результат додається тільки якщо stem є в `source + doc_type + content[:1500]`
-- Score фіксований = 0.45; **нові** документи додаються до пулу (не замінюють вектор)
-
-### 3.10 Крок 10 — Title Boost
-
-`search_qdrant_by_title()` — MatchText по полю `source`:
-- Keywords: слова >4 симв з питання (до 3) + з rewrite (до 7) + pymorphy3 леми
-- Стоп-слова виключаються: `цікавить, хочу, треба, потрібно, питання, розмір, ...`
-- До 14 ключових слів всього
-- `chunks_per_doc=1` (по одному чанку з кожного знайденого закону)
-- Cap: 20 документів
-- Пріоритет сортування: `laws_kmu(0) > laws_supreme(1) > laws_ccu(2) > laws_wiki(3) > rada_*(9)`
-- Якщо документ знайдено **і** title boost **і** vector search → score += 0.10 (підтверджений обома)
-- Score фіксований = 0.75; **нові** документи додаються до пулу
-
-### 3.11 Крок 11 — LLM Reranker з protected layer
-
-**Protected slots (виконується ДО reranker):**
-- `laws_kmu` і `laws_positions` документи з `_title_match=True` → max 2 protected slots
-- Вони не потрапляють до reranker — гарантовано виживають
-- Причина: реранкер оптимізує "лінгвістичну очевидність", а КМУ постанови/позиції ВС — сухий табличний текст, який програє огля-дам ВС без цього захисту
-
-**Reranker (відкриті кандидати):**
-- Бере до 60 відкритих кандидатів (по 350 символів кожен)
-- Gemini (ThinkingConfig budget=0, temperature=0): вибрати рівно `_rr_slots` найкорисніших
-  ```python
-  _rr_select = min(max_docs, max(8, max_docs // 2))
-  _rr_slots = max(1, _rr_select - len(_rr_protected))
-  ```
-- Prompt включає: "Постанови КМУ та правові позиції ВС — первинні юридичні джерела, надавай їм перевагу"
-- Якщо reranker повернув < 2 індексів → fallback до семантичного top-N
-- **Фінал:** `_rr_protected + reranked_open`, cap = `max_docs`
-
-### 3.12 Крок 12 — Hard-stop
-
-```python
-# Пропускається якщо low_confidence=True
-if not low_confidence and (not results or results[0]["similarity"] < min_score):
-    return {"answer": "Не знайдено достатньо інформації..."}
-# min_score = 0.55 default (app_settings.min_relevance_score)
-```
-
-В low_confidence режимі hard-stop не спрацьовує — Gemini вже отримав інструкцію як поводитись зі слабкими результатами.
-
-### 3.13 Крок 13–14 — Контекст для Gemini
-
-Виключаються документи зі статусом `"Втратив чинність / Втратила чинність"`.
-
-Розподіл по bucket-ах:
-```
-law_chunks   (rada_* + laws_wiki)                                  → max 15 чанків
-kmu_chunks   (laws_kmu)                                            → max 8 чанків
-court_chunks (laws_positions, laws_supreme, laws_ccu, laws_mod)    → max 6 чанків
-```
-Context cap: **80 000 символів** (обрізається якщо більше).
-
-Заголовок кожного чанку в контексті:
-```
-[N] Назва документа | Тип | № ID | Статус: ... | Дата: ...
-⚠️ ДІЄ ЛИШЕ В УМОВАХ ВОЄННОГО СТАНУ  ← якщо wartime_only
----
-текст чанку...
-```
-
-### 3.14 Крок 15 — Gemini Response
-
-**Модель:** з `app_settings.ai_model` (за замовчуванням `gemini-2.0-flash-001`)  
-**System prompt:** з `app_settings.system_prompt`
-
-**Prompt структура:**
-```
-[Профіль: роль, спеціалізація, сфери]
-[Персональний AI-контекст]
-[Попередній діалог: останні 12 повідомлень / 6 turns]
-Контекст з українського законодавства, структурований за правовою ієрархією:
-
-[закони Ради та wiki]
-
---- Постанови та розпорядження КМУ ---
-[постанови КМУ]
-
---- Судова практика та правові позиції ---
-[positions + supreme + ccu]
-
----
-Питання: ...
-
-[Інструкції відповіді: деталізація / кроки / сценарії]
-[Citation rule: кожне твердження обов'язково [N]]
-[Guardrail якщо top_score < 0.68: "покажи що є + скажи що не знайдено"]
-[Guardrail якщо low_confidence: "слабка впевненість + ⚠️ рекомендую уточнити"]
-[Clarifying question якщо неоднозначно]
-[Ліміт слів: 350 або 800]
-```
-
-**Паралельно** запускається класифікатор (sentiment/complexity/user_intent) — тільки для аналітики.
-
-### 3.15 Структура JSON відповіді
-
-```json
-{
-  "answer": "Текст відповіді з посиланнями [1], [2]...",
-  "references": [
-    {
-      "num": 1,
-      "source_title": "Назва закону",
-      "passage": "Уривок тексту до 600 символів",
-      "status": "Чинний",
-      "law_url": "https://zakon.rada.gov.ua/...",
-      "chunk_index": 0
-    }
+  "user_profile": {
+    "role": "Р®СЂРёСЃС‚ / РђРґРІРѕРєР°С‚",
+    "sub_role": ["..."],
+    "segment": ["..."]
+  },
+  "history": [
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
   ],
-  "templates": [],
-  "_meta": {
-    "processing_time_ms": 3200,
-    "tokens_used": 1850,
-    "category": "Трудове право",
-    "low_confidence": false,
-    "top_score": 0.847,
-    "n_docs": 8,
-    "sentiment": "neutral",
-    "complexity_score": 2,
-    "user_intent": "консультація"
-  }
+  "context_summary": null,
+  "ai_personal_prompt": null,
+  "response_length_pref": "standard",
+  "response_lang_style": "legal"
 }
 ```
 
-`low_confidence`, `top_score`, `n_docs` — для дебагу і можливого UX-бейджика на фронтенді.
+`/api/ask/stream` and `/api/ask` СЂРѕР±Р»СЏС‚СЊ РѕРґРЅР°РєРѕРІСѓ plan/profile РїС–РґРіРѕС‚РѕРІРєСѓ. Streaming endpoint РґРѕРґР°С‚РєРѕРІРѕ РјР°С” free fingerprint guard.
 
----
+## 4. Plans, beta С– features
 
-## 4. Налаштування системи (Supabase `app_settings`)
+Effective plan:
 
-| Ключ | Default | Опис |
-|------|---------|------|
-| `ai_model` | `gemini-2.0-flash-001` | Модель Gemini для відповіді |
-| `rewrite_model` | `gemini-2.5-flash` | Модель для Query Rewrite |
-| `intent_model` | `gemini-2.5-flash` | Модель для Intent classifier |
-| `embedding_model` | `text-embedding-004` | Vertex AI embedding |
-| `temperature` | `0.1` | Температура генерації відповіді |
-| `top_p` | `0.8` | Top-p sampling |
-| `max_output_tokens` | `8000` | Ліміт токенів відповіді |
-| `match_threshold_docs` | `0.35` | Мін. threshold vector search (реальний: max(0.33, value)) |
-| `min_relevance_score` | `0.55` | Hard-stop після reranker (не діє при low_confidence) |
-| `rada_source_boost` | `1.12` | Буст для rada_* колекцій (laws_kmu=1.18 фіксовано в коді) |
-| `system_prompt` | fallback | Системний промпт Gemini |
-| `llm_timeout_seconds` | `90.0` | Timeout для Gemini |
-| `rewrite_examples` | `""` | Few-shot приклади для Query Rewrite: `"розмовна фраза → юридичний термін"` (по одному на рядок) |
-| `schedule_enabled` | `false` | Авто-синхронізація РАДА о 01:00 UTC |
+- СЏРєС‰Рѕ `profiles.is_beta_tester = true`, plan РїРѕРІРѕРґРёС‚СЊСЃСЏ СЏРє `pro`;
+- С–РЅР°РєС€Рµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ `profiles.subscription_tier`.
 
----
+Plan data:
 
-## 5. Плани підписки → параметри пошуку
+- `subscription_plans.max_docs_retrieved` -> `max_docs`;
+- `plan_features` -> `filter_sources` С– `response_features`.
 
-`max_docs_retrieved` з `subscription_plans` (8–20 чанків).  
-`filter_sources` та `response_features` з `plan_features`:
+Source feature mapping:
 
-| Feature key | Що вмикає |
-|-------------|-----------|
-| `source_rada` | Пошук по `rada_*` колекціях |
-| `source_kmu` | Пошук по `laws_kmu` |
-| `source_supreme` | Пошук по `laws_supreme` |
-| `source_ccu` | Пошук по `laws_ccu` |
-| `source_legalaid` | Пошук по `laws_wiki` |
-| `source_lpd` | Пошук по `laws_positions` |
-| `response_detailed` | Розгорнута відповідь, ліміт 800 слів |
-| `response_steps` | Блок "Що робити далі" |
-| `response_scenarios` | Альтернативні сценарії |
-| `response_vs_position` | Акцент на позиції Верховного Суду |
+| Feature | Backend source | Qdrant collections |
+| --- | --- | --- |
+| `source_rada` | `rada` | all `rada_*_v2` |
+| `source_legalaid` | `wiki` | `laws_wiki_v2` |
+| `source_supreme` | `supreme` | `laws_supreme_v2` |
+| `source_ccu` | `ccu` | `laws_ccu_v2` |
+| `source_lpd` | `lpd` | `laws_positions_v2` |
+| `source_kmu` | `kmu` | `laws_kmu_v2` |
+| `source_mod` | `mod` | `laws_mod_v2` |
+| `source_zir` | `zir` | `laws_zir_v2` |
 
----
+Current behavior: СЏРєС‰Рѕ РїР»Р°РЅ РјР°С” С…РѕС‡Р° Р± РѕРґРЅРµ source feature, API route РґРѕРґР°С” `mod` С– `zir` Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ РґРѕ `filter_sources`.
 
-## 6. Відомі обмеження
+Response features:
 
-### 6.1 Морфологічна прірва (частково вирішена)
-Embedding не завжди перекидає місток між розмовною та юридичною формою.  
-**Mitigation:** Query Rewrite (Gemini few-shot) + pymorphy3 для BM25/title boost.  
-**Залишається:** MatchText не має stemming для всіх форм — pymorphy3 lemmatize покриває більшість.
+| Feature | Effect |
+| --- | --- |
+| `response_detailed` | Р’РјРёРєР°С” detailed/full instructions, СЏРєС‰Рѕ user preference С†Рµ РґРѕР·РІРѕР»СЏС” |
+| `response_steps` | Р”РѕРґР°С” "Р©Рѕ СЂРѕР±РёС‚Рё РґР°Р»С–" Р°Р±Рѕ РєРѕСЂРѕС‚РєС– next steps |
+| `response_scenarios` | Р”РѕРґР°С” Р°Р»СЊС‚РµСЂРЅР°С‚РёРІРЅС– СЃС†РµРЅР°СЂС–С— РґР»СЏ detailed/full |
+| `response_vs_position` | РџСЂРѕСЃРёС‚СЊ РІРёРєРѕСЂРёСЃС‚Р°С‚Рё РїРѕР·РёС†С–С— Р’РµСЂС…РѕРІРЅРѕРіРѕ РЎСѓРґСѓ, СЏРєС‰Рѕ РІРѕРЅРё С” РІ context |
 
-### 6.2 Квартальні огляди ВС (laws_supreme) — широкий матч (частково вирішено)
-PDF-огляди покривають багато тем і отримують score 0.70+ на майже будь-який правовий запит.  
-**Mitigation:** score ×0.88 (soft penalty) + slot cap max(2, max_docs//4) — разом дають подвійне обмеження.  
-**Залишається:** вони все одно потрапляють в результати, просто з нижчою вагою.
+Response preference gating:
 
-### 6.3 Реіндекс в процесі (квітень 2026)
-Стара база: chunk_size=1500, без title-prefix embedding.  
-Нова база (після reindex): chunk_size=3000/4000, title-prefix.  
-**KMU і РАДА переіндексовуються** через адмінку (Синхронізація → Переіндекс). До завершення — частина чанків зі старим embedding, частина з новим.
+- `full` РґРѕСЃС‚СѓРїРЅРёР№ С‚С–Р»СЊРєРё Pro/Beta;
+- `detailed` РґРѕСЃС‚СѓРїРЅРёР№ paid/Beta;
+- locked preferences silently downgrade to `standard`.
 
-### 6.4 Intent classifier — до двох галузей
-Gemini повертає 1–2 галузі. Міждисциплінарні питання (трудове + кримінальне) тепер покриваються обома колекціями. Ризик залишається для питань, що зачіпають 3+ галузей — classifier обирає найрелевантніші дві. Fallback при помилці: безпечний набір 5 основних колекцій.
+## 5. Qdrant collections
 
-### 6.5 laws_supreme — PDF без структури
-Чанки з quarterly PDF-оглядів не мають прив'язки до конкретних справ або норм. Корисні для загального розуміння тренду практики ВС, але не для цитування конкретної норми.
+Production chat search currently uses V2 collections from `ALL_V2_COLLECTIONS`.
 
-### 6.6 Динамічні BM25/title scores (вирішено)
-BM25 score тепер динамічний: `0.25 + 0.30 × (matched_stems / total_stems)` → діапазон 0.25–0.55.  
-Title boost score: `0.50 + 0.35 × (matched_kws / total_kws)` → діапазон 0.50–0.85.  
-Слабкий keyword збіг (1 з 5 слів) → ~0.31; сильний (5 з 5) → 0.55. Reranker тепер бачить реальний сигнал якості.
+Rada V2:
 
-**Що залишається:** Qdrant MatchText не дає справжній BM25 TF-IDF score — він binary (збіглось/ні). Справжній BM25 потребує sparse vectors і повного реіндексу.
+- `rada_finance_v2`
+- `rada_state_v2`
+- `rada_personnel_v2`
+- `rada_court_v2`
+- `rada_intl_v2`
+- `rada_labor_v2`
+- `rada_civil_v2`
+- `rada_criminal_v2`
+- `rada_admin_v2`
+- `rada_housing_v2`
+- `rada_land_v2`
+- `rada_industry_v2`
+- `rada_other_v2`
 
----
+Other V2:
 
-## 7. Деплой
+- `laws_supreme_v2`
+- `laws_wiki_v2`
+- `laws_ccu_v2`
+- `laws_positions_v2`
+- `laws_kmu_v2`
+- `laws_mod_v2`
+- `laws_zir_v2`
 
-**Сервер:** `n-ai01.nexchance.de` (root)  
-**Backend:** FastAPI + uvicorn, сервіс `backend.service`  
-**Frontend:** Next.js, сервіс `frontend.service`
+V2 properties:
+
+- embedding: `gemini-embedding-001`;
+- vector size: 3072;
+- distance: cosine;
+- search helpers: `search_qdrant`, `search_qdrant_in_law`, `search_qdrant_text`, `search_qdrant_by_title`;
+- text indexes expected on `content` and `source`.
+
+Legacy V1 collections and scripts still exist, but main chat retrieval no longer treats V1 as production source.
+
+## 6. Rada category mapping
+
+Rada documents are split by thematic categories:
+
+| Rada codes | Collection |
+| --- | --- |
+| `h2`, `h3`, `h26`, `h23` | `rada_finance_v2` |
+| `h4` | `rada_state_v2` |
+| `h27` | `rada_personnel_v2` |
+| `h22`, `h30`, `h1` | `rada_court_v2` |
+| `h11` | `rada_intl_v2` |
+| `h19`, `h20` | `rada_labor_v2` |
+| `h5`, `h16`, `h13` | `rada_civil_v2` |
+| `h25` | `rada_criminal_v2` |
+| `h8`, `h10`, `h31` | `rada_admin_v2` |
+| `h6`, `h21` | `rada_housing_v2` |
+| `h9`, `h18` | `rada_land_v2` |
+| `h7`, `h17`, `h15` | `rada_industry_v2` |
+| `h12`, `h14`, `h24`, `h28`, `h29`, `h32` | `rada_other_v2` |
+
+## 7. Ingestion and reindex
+
+Primary V2 ingestion path:
+
+- `scrape_all_v2.py` saves raw text/meta to `/root/laws_raw/{source}/{law_id}.txt` and `.meta.json`;
+- `reindex_v2.py` chunks, embeds and uploads to V2 Qdrant collections;
+- per-source scanners also upload directly for some sources:
+  - `wiki_scanner.py` -> `laws_wiki_v2`;
+  - `kmu_scanner.py` -> `laws_kmu_v2`;
+  - `supreme_scanner.py` -> `laws_supreme_v2`;
+  - `ccu_scanner.py` -> `laws_ccu_v2`;
+  - `lpd_scanner.py` -> `laws_positions_v2`.
+
+Admin pages:
+
+- `/admin/v2` for V2 scrape/reindex;
+- `/admin/sync` for source overview and centroid/router status;
+- `/admin/meta` for enriched metadata and Qdrant payload patching;
+- legacy `/admin/reindex` and `/admin/scraper` still reference older flows.
+
+## 8. Retrieval pipeline
+
+Backend `_ask_pipeline()`:
+
+1. Validate `question`.
+2. Initialize Vertex AI if needed.
+3. RU -> UA translation if language heuristic detects Russian.
+4. Follow-up resolver rewrites short/ambiguous questions using last 6 messages.
+5. Query rewrite converts conversational text into legal search terms.
+6. Query embedding uses V2 embedder.
+7. Plan source filter builds allowed V2 collections.
+8. Routing probe searches top-1 per allowed collection and selects relevant collections.
+9. Multi-query vector search runs original embedding and rewrite embedding.
+10. Results are merged by `(law_id, chunk_index)`.
+11. Low-confidence mode widens target collections and changes answer guardrails.
+12. Source and doc type scoring adjusts similarity.
+13. Global dedup keeps max 2 chunks per law_id.
+14. Diversity caps court/positions and distributes slots across collections.
+15. Document-set expansion fetches sibling chunks inside relevant laws.
+16. Keyword search uses Qdrant MatchText on `content`.
+17. Title boost uses Qdrant MatchText on `source` and can fetch chunks from matched documents.
+18. Protected slots preserve some KMU/positions/full-law chunks.
+19. Gemini reranker selects final open candidates if candidate count exceeds `max_docs`.
+20. `_prefer_term_matched_results` does final term-sensitive ordering.
+21. Hard stop can return "not enough information" without main Gemini answer.
+22. Expired/cancelled documents are removed.
+23. Context is bucketed and capped.
+24. Main Gemini answer and classification are prepared.
+
+## 9. Context building
+
+Context buckets:
+
+| Bucket | Collections | Max chunks |
+| --- | --- | ---: |
+| `law_chunks` | Rada, wiki, MOD, ZIR, other non-KMU/non-court | 15 |
+| `kmu_chunks` | `laws_kmu_v2` | 8 |
+| `court_chunks` | `laws_positions_v2`, `laws_supreme_v2`, `laws_ccu_v2` | 6 |
+
+Overall context cap: 80 000 characters.
+
+Each chunk context header can include:
+
+- source/title;
+- doc type;
+- law id;
+- status;
+- effective/scraped date;
+- wartime/suspended/retroactive warnings.
+
+Cancelled/expired documents are filtered out before context and citations.
+
+## 10. Answer generation
+
+Main answer:
+
+- model name from `app_settings.ai_model`;
+- system prompt from `app_settings.system_prompt`;
+- generation config uses `temperature`, `top_p`, `max_output_tokens`;
+- thinking budget is disabled when supported;
+- streamed through `/ask_stream`.
+
+Classification:
+
+- runs in parallel with main generation;
+- returns `sentiment`, `complexity_score`, `user_intent`;
+- used for analytics metadata.
+
+Completion guard:
+
+- if streaming finish reason indicates truncation, backend tries `_complete_answer_if_needed()`;
+- completion is appended to stream if generated.
+
+## 11. Response length and style
+
+`response_length_pref`:
+
+| Mode | Token bounds | Word target |
+| --- | ---: | ---: |
+| `short` | 1200-1800 | compact, no strict word count |
+| `standard` | 1800-2600 | up to 400 words |
+| `detailed` | 4200-5600 | up to 850 words |
+| `full` | 6500-9000 | up to 1600 words |
+
+`response_lang_style`:
+
+- `legal`: precise legal terminology;
+- `plain`: simple explanation without legal jargon.
+
+Every legal claim is instructed to have `[N]` citation. If context is weak, backend adds guardrails to show what was found and ask one clarifying question.
+
+## 12. Usage, limits and persistence
+
+Tables involved:
+
+- `profiles`: subscription, limits, beta, preferences, onboarding profile;
+- `chats`: chat metadata and `context_summary`;
+- `messages`: user/assistant messages and citations;
+- `query_analytics`: query text, answer, category, timing, tokens, IP;
+- `subscription_plans`: plan limits;
+- `plan_features`: enabled sources/response features.
+
+Limit behavior:
+
+- chat UI blocks if user is over limit;
+- beta bypasses chat UI limit and effective plan is `pro`;
+- `/api/ask/stream` has a free fingerprint abuse guard;
+- usage increments after assistant message is saved;
+- if generation fails before assistant save, usage does not increment.
+
+Deletion behavior:
+
+- admin user delete removes/deletes Auth user if possible;
+- profile row is anonymized as `Deleted user` with `auth_provider = deleted`;
+- chats/messages/analytics are preserved for historical records;
+- user admin list hides profiles with `auth_provider = deleted`.
+
+## 13. Performance hotspots
+
+The current full pipeline is quality-first and can be heavy under concurrency.
+
+High-cost operations per request:
+
+- RU -> UA Gemini translation;
+- follow-up resolver Gemini call;
+- query rewrite Gemini call;
+- Qdrant routing probe across collections;
+- original + rewrite vector search;
+- document expansion;
+- keyword MatchText scroll;
+- title MatchText scroll;
+- Gemini reranker;
+- main Gemini streamed answer;
+- classification Gemini call;
+- optional completion call;
+- background summarize/title generation after answer.
+
+Likely symptoms under load:
+
+- backend timeout;
+- frontend "server unavailable";
+- weak/empty retrieval because routing/search timed out or narrowed too much;
+- delayed first token because all retrieval/rerank happens before main generation.
+
+## 14. Known mismatches to watch
+
+- `context_summary` is generated and stored but currently not sent into generation from chat UI.
+- `tokens_used` in SSE meta is currently not a real token count and often remains `0`.
+- `source_legalaid` maps to `laws_wiki_v2`, but old permission helper still names `legalaid.gov.ua` in places.
+- Legacy V1 docs/scripts still exist; do not infer current chat behavior from old V1 admin labels.
+- `mod` and `zir` are automatically added when any source feature exists.
+
+## 15. Stable rollback idea
+
+Before large optimization work, create a git commit that captures the current stable state. Then each optimization can be tested in small commits and reverted independently.
+
+Recommended rollback commands:
 
 ```bash
-# Python зміни тільки:
-cd /home/devops/app && git pull && systemctl restart backend.service
-
-# JS/TS зміни:
-npm run build && systemctl restart frontend.service
-
-# Обидва:
-npm run build && systemctl restart frontend.service && systemctl restart backend.service
-
-# Логи backend:
-journalctl -u backend.service -f
-
-# Логи reindex (якщо запущено вручну):
-tail -f /tmp/reindex_kmu.log
-tail -f /tmp/reindex_rada.log
+git log --oneline -5
+git revert <commit_sha>
 ```
 
-**Ключові env змінні** (`/home/devops/app/.env`):
-- `QDRANT_URL` — адреса Qdrant (localhost:6333)
-- `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` — Supabase
-- Google Vertex AI credentials — через Supabase `app_settings` (не env файл)
-
----
-
-## 8. Адмін-панель (`/admin`)
-
-| Розділ (URL) | Що робить |
-|-------------|-----------|
-| `/admin` | Огляд: статистика синхронізацій, останні запуски |
-| `/admin/reindex` | Full reindex V1: КМУ + Рада, start/stop/resume, live-логи |
-| `/admin/scraper` | Scraper V1: всі джерела |
-| `/admin/coverage` | Покриття Qdrant: які секції Ради є в базі |
-| `/admin/ai-settings` | AI модель, поріги, системний промпт, rewrite examples |
-| `/admin/stats` | Статистика використання / аналітика чатів |
-| `/admin/v2` | V2 панель: скрапер / реіндекс / аналітика / диск / джерела |
-| `/admin/sync` | Зведення джерел, Centroid Router, авто-синхронізація per source |
-| `/admin/meta` | Браузер збагачених метаданих (Rada + KMU): збагачення OpenData, патч Qdrant, text mining |
-| `/admin/feedback` | Перегляд inline відгуків (👍👎) та рейтингів застосунку (⭐) |
-| `/admin/users` | Список користувачів: тарифи, запити, активність, бонуси, регіон |
-
-## 9. Фронтенд чат — ліміти та збереження
-
-### Ліміти запитів (`profiles` table)
-
-| Поле | Тип | Призначення |
-|------|-----|-------------|
-| `monthly_limit` | int | Базовий ліміт плану |
-| `bonus_requests` | int | Додаткові запити (нарахування за відгуки тощо) |
-| `requests_this_month` | int | Лічильник поточного вікна |
-| `limit_reset_at` | timestamptz | Дата кінця 30-денного вікна (NULL для FREE) |
-| `subscription_tier` | text | `free` / `basic` / `pro` / `ultra` |
-
-**Ефективний ліміт = `monthly_limit + bonus_requests`**  
-**FREE план:** one-time 10 запитів, `limit_reset_at` ніколи не ставиться.  
-**Платні плани:** 30-денне rolling вікно — `limit_reset_at = now + 30d` при першому запиті; скидається на 0 при закінченні вікна.
-
-### Де перевіряється ліміт
-
-Ліміт enforce-иться **тільки на фронтенді** (UX-блокування). Backend `/ask_stream` не перевіряє ліміт перед обробкою. Лічильник (`requests_this_month`) інкрементується після збереження assistant-повідомлення в `POST /api/chats/[id]/messages`.
-
-### Збереження і post-response дії
-
-1. Кожне assistant-повідомлення → `messages` table + `query_analytics` row.
-2. Кожен 2-й turn → `POST /api/chats/[id]/summarize` → backend `/summarize_history` → `chats.context_summary` (передається на наступний запит).
-3. Після першого повідомлення → `PATCH /api/chats/[id]/name` (Gemini генерує `{title, category}`).
+Avoid `git reset --hard` on shared/local dirty work unless explicitly intended.
