@@ -3617,6 +3617,30 @@ def _answer_looks_incomplete(answer: str) -> bool:
     text = (answer or "").strip()
     if len(text) < 20:
         return False
+    words = re.findall(r"\w+", text, flags=re.UNICODE)
+    lower = text.lower()
+    # A frequent Gemini failure mode: it starts a structured answer ("1. ...")
+    # and stops after the first section with a valid period/citation, so a
+    # punctuation-only check misses the truncation.
+    numbered_section_started = bool(re.search(r"(?m)^\s*\*{0,2}1[\.\)]\s+", text))
+    second_section_present = bool(re.search(r"(?m)^\s*\*{0,2}2[\.\)]\s+", text))
+    has_closing_signal = any(
+        marker in lower
+        for marker in (
+            "висновок", "отже", "підсум", "коротко:", "тобто",
+            "прямої норми", "рекомендую", "потрібно уточнити",
+        )
+    )
+    if numbered_section_started and not second_section_present and len(words) < 260 and not has_closing_signal:
+        return True
+    unfinished_structure = (
+        "**1." in text
+        and "**2." not in text
+        and len(words) < 220
+        and not has_closing_signal
+    )
+    if unfinished_structure:
+        return True
     if text[-1] in ".!?…]»)\"'":
         return False
     tail = text[-80:].lower()
@@ -3639,8 +3663,10 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
         for attempt in range(2):
             continuation_prompt = (
                 "Попередня відповідь обірвалася. Допиши ТІЛЬКИ продовження з місця обриву. "
-                "Не повторюй уже написаний текст, не починай заново, не додавай нові великі розділи. "
-                "Дай 1-3 короткі речення або заверши поточний пункт. Обов'язково закінчи завершеним реченням. "
+                "Не повторюй уже написаний текст, не починай заново. "
+                "Якщо відповідь почала нумеровану структуру, заверши її коротко: додай максимум 1-2 потрібні пункти "
+                "і фінальний висновок. Якщо структура не потрібна, дай 1-3 короткі речення або заверши поточний пункт. "
+                "Обов'язково закінчи завершеним реченням. "
                 "Якщо останнє слово обрізане, почни з решти цього слова. "
                 "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
                 "Обрізана відповідь:\n"
