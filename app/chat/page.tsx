@@ -879,7 +879,7 @@ function ChatPage() {
 
             {/* Citation Dialog */}
             <Dialog open={!!activeCitation} onOpenChange={o => !o && setActiveCitation(null)}>
-                <DialogContent className="w-[calc(100vw-2rem)] max-w-xl sm:max-w-2xl bg-[#0d1120] rounded-xl border border-[#C9A84C]/40 shadow-2xl p-0 overflow-hidden text-[#E0E6ED]">
+                <DialogContent className="w-[calc(100vw-2rem)] max-w-xl sm:max-w-2xl bg-[#0d1120] !max-h-[95vh] rounded-xl border border-[#C9A84C]/40 shadow-2xl p-0 overflow-hidden text-[#E0E6ED]">
                     <div className="bg-[#C9A84C] p-5 sm:p-7 text-[#0A0E1A]">
                         <div className="flex items-start gap-4">
                             <div className="bg-[#0A0E1A] p-2.5 rounded-lg shadow-lg shrink-0 mt-0.5">
