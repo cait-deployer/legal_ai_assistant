@@ -3615,6 +3615,9 @@ def _finish_reason_is_max_tokens(finish_reason) -> bool:
 
 ANSWER_DONE_MARKER = "URAI_DONE"
 _ANSWER_DONE_MARKER_TAIL = len(ANSWER_DONE_MARKER) + 8
+ANSWER_CONTINUATION_MAX_ATTEMPTS = 6
+ANSWER_CONTINUATION_TOKENS = 900
+ANSWER_CONTINUATION_TIMEOUT = 25
 
 
 def _answer_has_done_marker(answer: str) -> bool:
@@ -3651,6 +3654,29 @@ def _answer_looks_incomplete(answer: str) -> bool:
     return True
 
 
+def _build_answer_continuation_prompt(completed: str) -> str:
+    return (
+        "Попередня відповідь була обрізана. "
+        "Допиши ТІЛЬКИ продовження з місця обриву. Не повторюй уже написаний текст, не починай заново. "
+        "Не пиши службові фрази на кшталт «доповнюю відповідь», «продовження» або «ось завершення». "
+        "Заверши поточний пункт або речення максимально коротко і природно. "
+        "Не додавай нові великі розділи. "
+        f"Якщо можеш, закінчи фінальним рядком {ANSWER_DONE_MARKER}, але головне — завершити речення. "
+        "Якщо останнє слово обрізане, почни з решти цього слова. "
+        "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
+        "Поточний кінець відповіді:\n"
+        f"{completed[-2500:]}"
+    )
+
+
+def _append_answer_continuation(completed: str, continuation: str) -> str:
+    continuation = (continuation or "").strip()
+    if not continuation:
+        return completed
+    joiner = "" if completed.rstrip() and completed.rstrip()[-1].isalnum() and continuation[0].isalnum() else " "
+    return completed.rstrip() + joiner + continuation
+
+
 async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None) -> str:
     if not (_finish_reason_is_max_tokens(finish_reason) or _answer_looks_incomplete(answer)):
         return answer
@@ -3660,29 +3686,17 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
 
     completed = answer
     try:
-        for attempt in range(2):
-            continuation_prompt = (
-                "Попередня відповідь була обрізана. "
-                "Допиши ТІЛЬКИ продовження з місця обриву. Не повторюй уже написаний текст, не починай заново. "
-                "Не пиши службові фрази на кшталт «доповнюю відповідь», «продовження» або «ось завершення». "
-                "Заверши поточний пункт або речення максимально коротко і природно. "
-                "Не додавай нові великі розділи. "
-                f"Якщо можеш, закінчи фінальним рядком {ANSWER_DONE_MARKER}, але головне — завершити речення. "
-                "Якщо останнє слово обрізане, почни з решти цього слова. "
-                "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
-                "Поточний кінець відповіді:\n"
-                f"{completed[-2500:]}"
-            )
-            cfg = GenerationConfig(temperature=0.0, max_output_tokens=700)
+        for attempt in range(ANSWER_CONTINUATION_MAX_ATTEMPTS):
+            continuation_prompt = _build_answer_continuation_prompt(completed)
+            cfg = GenerationConfig(temperature=0.0, max_output_tokens=ANSWER_CONTINUATION_TOKENS)
             resp = await _asyncio.wait_for(
                 _asyncio.to_thread(pipe["main_model"].generate_content, continuation_prompt, generation_config=cfg),
-                timeout=20,
+                timeout=ANSWER_CONTINUATION_TIMEOUT,
             )
             continuation = (resp.text or "").strip()
             if not continuation:
                 break
-            joiner = "" if completed.rstrip() and completed.rstrip()[-1].isalnum() and continuation[0].isalnum() else " "
-            completed = completed.rstrip() + joiner + continuation
+            completed = _append_answer_continuation(completed, continuation)
             logger.info("ANSWER CONTINUATION: attempt=%d appended %d chars", attempt + 1, len(continuation))
             cont_finish_reason = None
             try:
@@ -5291,23 +5305,58 @@ async def ask_stream(body: AskRequest):
 
         raw_full_answer = "".join(raw_answer_parts)
         full_answer = _strip_answer_done_marker(raw_full_answer or "".join(answer_parts))
-        if _finish_reason_is_max_tokens(stream_finish_reason["value"]) or _answer_looks_incomplete(raw_full_answer):
+        completed_answer = raw_full_answer
+        cont_finish_reason = stream_finish_reason["value"]
+        for attempt in range(ANSWER_CONTINUATION_MAX_ATTEMPTS):
+            if not (_finish_reason_is_max_tokens(cont_finish_reason) or _answer_looks_incomplete(completed_answer)):
+                break
             yield _sse("status", {
                 "request_id": request_id,
                 "step": "continuation",
                 "message": "Доповнюю відповідь...",
+                "attempt": attempt + 1,
             })
-        completed_answer = await _complete_answer_if_needed(pipe, raw_full_answer, stream_finish_reason["value"])
-        clean_completed_answer = _strip_answer_done_marker(completed_answer)
-        if clean_completed_answer != full_answer:
+            try:
+                cfg = _GC(temperature=0.0, max_output_tokens=ANSWER_CONTINUATION_TOKENS)
+                resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        pipe["main_model"].generate_content,
+                        _build_answer_continuation_prompt(completed_answer),
+                        generation_config=cfg,
+                    ),
+                    timeout=ANSWER_CONTINUATION_TIMEOUT,
+                )
+                continuation_raw = (resp.text or "").strip()
+            except Exception as exc:
+                logger.warning("ANSWER CONTINUATION failed: %s", exc)
+                break
+            if not continuation_raw:
+                logger.warning("ANSWER CONTINUATION: attempt=%d empty", attempt + 1)
+                break
+
+            previous_clean_answer = _strip_answer_done_marker(completed_answer)
+            completed_answer = _append_answer_continuation(completed_answer, continuation_raw)
+            clean_completed_answer = _strip_answer_done_marker(completed_answer)
             continuation = (
-                clean_completed_answer[len(full_answer):]
-                if clean_completed_answer.startswith(full_answer)
+                clean_completed_answer[len(previous_clean_answer):]
+                if clean_completed_answer.startswith(previous_clean_answer)
                 else clean_completed_answer
+            )
+            logger.info(
+                "ANSWER CONTINUATION: attempt=%d appended %d chars incomplete=%s",
+                attempt + 1,
+                len(continuation_raw),
+                _answer_looks_incomplete(completed_answer),
             )
             if continuation:
                 yield _sse("message", {"token": continuation})
-            full_answer = clean_completed_answer
+                full_answer = clean_completed_answer
+            try:
+                cont_finish_reason = resp.candidates[0].finish_reason
+            except Exception:
+                cont_finish_reason = None
+
+        full_answer = _strip_answer_done_marker(completed_answer)
 
         try:
             clf_response = await clf_task
