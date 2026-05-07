@@ -595,7 +595,7 @@ export default function AnalyticsPage() {
                 <BarChart2 className="w-4 h-4 text-[#C9A84C]" />
                 <h2 className="text-sm font-semibold text-[#E0E6ED]">Категорії</h2>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
                 {(data?.categories ?? []).map(([cat, count], i) => (
                   <div key={cat}>
                     <div className="flex justify-between text-xs mb-1">
