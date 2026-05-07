@@ -104,6 +104,8 @@ function clampConfidence(value: unknown) {
 }
 
 function normalizeEval(value: Record<string, unknown> | null): RagEval {
+  if (!value) throw new Error("AI eval returned empty or invalid JSON")
+
   const type = typeof value?.expected_answer_type === "string"
     ? value.expected_answer_type
     : typeof value?.answer_type === "string"
@@ -120,6 +122,13 @@ function normalizeEval(value: Record<string, unknown> | null): RagEval {
     eval_confidence: clampConfidence(value?.eval_confidence),
     eval_notes: typeof value?.eval_notes === "string" ? value.eval_notes.slice(0, 4000) : "",
     eval_status: "ai_draft",
+  }
+}
+
+function validateEval(evalDraft: RagEval) {
+  const hasSources = evalDraft.expected_sources.length > 0 || evalDraft.bad_sources.length > 0
+  if (!evalDraft.eval_notes.trim() && !hasSources) {
+    throw new Error("AI eval returned no notes and no source assessment")
   }
 }
 
@@ -270,7 +279,46 @@ async function evaluateWithVertex(prompt: string, settings: Record<string, strin
   const data = await res.json()
   const parts: { text?: string }[] = data?.candidates?.[0]?.content?.parts ?? []
   const raw = parts.map((part) => part.text ?? "").filter(Boolean).join("\n")
-  return normalizeEval(parseJsonObject(raw) as Record<string, unknown> | null)
+  if (!raw.trim()) {
+    throw new Error("AI eval returned an empty response")
+  }
+  const evalDraft = normalizeEval(parseJsonObject(raw) as Record<string, unknown> | null)
+  validateEval(evalDraft)
+  return evalDraft
+}
+
+async function findAssistantMessageForAnalytics(
+  sb: ReturnType<typeof admin>,
+  row: { chat_id: string | null; message_id: string | null; ai_response: string | null },
+) {
+  if (row.message_id) {
+    const { data: msg } = await sb
+      .from("messages")
+      .select("id, content, citations, created_at")
+      .eq("id", row.message_id)
+      .maybeSingle()
+    if (msg) return msg
+  }
+
+  if (!row.chat_id) return null
+
+  const { data: messages } = await sb
+    .from("messages")
+    .select("id, content, citations, created_at")
+    .eq("chat_id", row.chat_id)
+    .eq("role", "assistant")
+    .order("created_at", { ascending: false })
+    .limit(25)
+
+  const answer = (row.ai_response ?? "").trim()
+  if (!messages?.length) return null
+  if (!answer) return messages[0]
+
+  const answerHead = answer.slice(0, 500)
+  return messages.find((msg) => {
+    const content = (msg.content ?? "").trim()
+    return content === answer || content.startsWith(answerHead) || answer.startsWith(content.slice(0, 500))
+  }) ?? messages[0]
 }
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -289,25 +337,13 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   let messageId = row.message_id as string | null
   let actualSources: unknown[] = []
 
-  if (messageId) {
-    const { data: msg } = await sb
-      .from("messages")
-      .select("id, citations")
-      .eq("id", messageId)
-      .maybeSingle()
-    actualSources = compactSources(msg?.citations)
-  } else if (row.chat_id) {
-    const { data: msg } = await sb
-      .from("messages")
-      .select("id, citations")
-      .eq("chat_id", row.chat_id)
-      .eq("role", "assistant")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    messageId = msg?.id ?? null
-    actualSources = compactSources(msg?.citations)
-  }
+  const assistantMessage = await findAssistantMessageForAnalytics(sb, {
+    chat_id: row.chat_id,
+    message_id: row.message_id,
+    ai_response: row.ai_response,
+  })
+  messageId = assistantMessage?.id ?? messageId
+  actualSources = compactSources(assistantMessage?.citations)
 
   const { data: feedback } = messageId
     ? await sb.from("message_feedback").select("*").eq("message_id", messageId).order("created_at", { ascending: false }).limit(5)
