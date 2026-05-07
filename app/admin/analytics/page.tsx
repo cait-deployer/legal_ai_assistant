@@ -18,6 +18,11 @@ interface AnalyticsData {
   total: number
   period: number
   days: number
+  queriesPage: number
+  queriesPerPage: number
+  queriesTotal: number
+  queriesSortBy: QuerySortBy
+  queriesSortDir: SortDir
   avgComplexity: string | null
   avgProcessingTimeMs: number | null
   categories: [string, number][]
@@ -84,6 +89,16 @@ type RagEvalCase = {
   reviewed_at?: string | null
 }
 
+type SortDir = "asc" | "desc"
+type QuerySortBy =
+  | "created_at"
+  | "processing_time_ms"
+  | "complexity_score"
+  | "category"
+  | "sentiment"
+  | "user_intent"
+  | "eval_status"
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SENTIMENT_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
@@ -95,6 +110,26 @@ const SENTIMENT_CONFIG: Record<string, { label: string; color: string; icon: Rea
 
 const CATEGORY_COLORS = [
   "#C9A84C", "#8B6FBF", "#4E9FBF", "#BF4E4E", "#4EBF8F", "#BF8F4E", "#7E8FB5",
+]
+
+const QUERY_SORT_LABELS: Record<QuerySortBy, string> = {
+  created_at: "Дата",
+  processing_time_ms: "Час",
+  complexity_score: "Складність",
+  category: "Категорія",
+  sentiment: "Настрій",
+  user_intent: "Намір",
+  eval_status: "Eval",
+}
+
+const QUERY_SORT_OPTIONS: QuerySortBy[] = [
+  "created_at",
+  "processing_time_ms",
+  "complexity_score",
+  "category",
+  "sentiment",
+  "user_intent",
+  "eval_status",
 ]
 
 function formatDate(iso: string) {
@@ -460,16 +495,36 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30)
+  const [queryPage, setQueryPage] = useState(1)
+  const [queryPerPage, setQueryPerPage] = useState(25)
+  const [querySortBy, setQuerySortBy] = useState<QuerySortBy>("created_at")
+  const [querySortDir, setQuerySortDir] = useState<SortDir>("desc")
   const [activeQuery, setActiveQuery] = useState<QueryRow | null>(null)
   const [statsOpen, setStatsOpen] = useState(false)
   const { data, isLoading } = useSWR<AnalyticsData>(
-    `/api/admin/analytics?days=${days}`,
+    `/api/admin/analytics?days=${days}&page=${queryPage}&per_page=${queryPerPage}&sort_by=${querySortBy}&sort_dir=${querySortDir}`,
     fetcher,
     { refreshInterval: 60_000 },
   )
 
   const periodTotal = data?.period ?? 0
   const catMax = data?.categories?.[0]?.[1] ?? 1
+  const queriesTotal = data?.queriesTotal ?? 0
+  const queriesPage = data?.queriesPage ?? queryPage
+  const queriesPerPage = data?.queriesPerPage ?? queryPerPage
+  const queriesTotalPages = Math.max(1, Math.ceil(queriesTotal / Math.max(queriesPerPage, 1)))
+  const queriesFrom = queriesTotal === 0 ? 0 : (queriesPage - 1) * queriesPerPage + 1
+  const queriesTo = Math.min(queriesPage * queriesPerPage, queriesTotal)
+
+  function toggleQuerySort(sortBy: QuerySortBy) {
+    if (querySortBy === sortBy) {
+      setQuerySortDir((dir) => dir === "asc" ? "desc" : "asc")
+    } else {
+      setQuerySortBy(sortBy)
+      setQuerySortDir(sortBy === "created_at" ? "desc" : "asc")
+    }
+    setQueryPage(1)
+  }
 
   return (
     <div className="space-y-6 pb-8">
@@ -491,7 +546,10 @@ export default function AnalyticsPage() {
           {[7, 14, 30].map(d => (
             <button
               key={d}
-              onClick={() => setDays(d)}
+              onClick={() => {
+                setDays(d)
+                setQueryPage(1)
+              }}
               className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${days === d
                   ? "bg-[#C9A84C] text-[#0A0E1A]"
                   : "text-[#6B7CA3] hover:text-[#E0E6ED]"
@@ -678,9 +736,51 @@ export default function AnalyticsPage() {
             transition={{ delay: 0.35 }}
             className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl overflow-hidden"
           >
-            <div className="px-5 py-4 border-b border-[#C9A84C]/10 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-[#C9A84C]" />
-              <h2 className="text-sm font-semibold text-[#E0E6ED]">Останні запити</h2>
+            <div className="px-5 py-4 border-b border-[#C9A84C]/10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-[#C9A84C]" />
+                <div>
+                  <h2 className="text-sm font-semibold text-[#E0E6ED]">Останні запити</h2>
+                  <p className="text-[11px] text-[#6B7CA3] mt-0.5">
+                    {queriesFrom}-{queriesTo} з {queriesTotal}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={querySortBy}
+                  onChange={(event) => {
+                    setQuerySortBy(event.target.value as QuerySortBy)
+                    setQueryPage(1)
+                  }}
+                  className="bg-[#0A0E1A] border border-[#C9A84C]/15 rounded-lg px-2.5 py-1.5 text-xs text-[#E0E6ED]"
+                >
+                  {QUERY_SORT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{QUERY_SORT_LABELS[option]}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    setQuerySortDir((dir) => dir === "asc" ? "desc" : "asc")
+                    setQueryPage(1)
+                  }}
+                  className="px-2.5 py-1.5 bg-[#0A0E1A] border border-[#C9A84C]/15 rounded-lg text-xs text-[#C9A84C] font-semibold"
+                >
+                  {querySortDir === "asc" ? "ASC" : "DESC"}
+                </button>
+                <select
+                  value={queryPerPage}
+                  onChange={(event) => {
+                    setQueryPerPage(Number(event.target.value))
+                    setQueryPage(1)
+                  }}
+                  className="bg-[#0A0E1A] border border-[#C9A84C]/15 rounded-lg px-2.5 py-1.5 text-xs text-[#E0E6ED]"
+                >
+                  {[25, 50, 100].map((value) => (
+                    <option key={value} value={value}>{value}/page</option>
+                  ))}
+                </select>
+              </div>
             </div>
             {/* Mobile: card list */}
             <div className="sm:hidden divide-y divide-[#C9A84C]/5">
@@ -717,9 +817,27 @@ export default function AnalyticsPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-[#C9A84C]/10">
-                    {["Запит", "Категорія", "Настрій", "Складність", "Eval", "Час", "Дата"].map(h => (
-                      <th key={h} className="text-left px-4 py-3 text-[#6B7CA3] font-semibold uppercase tracking-wider whitespace-nowrap">
-                        {h}
+                    {[
+                      { label: "Запит", sort: null },
+                      { label: "Категорія", sort: "category" },
+                      { label: "Настрій", sort: "sentiment" },
+                      { label: "Складність", sort: "complexity_score" },
+                      { label: "Eval", sort: "eval_status" },
+                      { label: "Час", sort: "processing_time_ms" },
+                      { label: "Дата", sort: "created_at" },
+                    ].map(({ label, sort }) => (
+                      <th key={label} className="text-left px-4 py-3 text-[#6B7CA3] font-semibold uppercase tracking-wider whitespace-nowrap">
+                        {sort ? (
+                          <button
+                            onClick={() => toggleQuerySort(sort as QuerySortBy)}
+                            className="inline-flex items-center gap-1 hover:text-[#C9A84C] transition-colors"
+                          >
+                            {label}
+                            <span className="text-[10px]">
+                              {querySortBy === sort ? (querySortDir === "asc" ? "↑" : "↓") : "↕"}
+                            </span>
+                          </button>
+                        ) : label}
                       </th>
                     ))}
                   </tr>
@@ -785,6 +903,46 @@ export default function AnalyticsPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+            <div className="px-4 py-3 border-t border-[#C9A84C]/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-[#6B7CA3]">
+                Сторінка {queriesPage} з {queriesTotalPages}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setQueryPage((page) => Math.max(1, page - 1))}
+                  disabled={queriesPage <= 1}
+                  className="px-3 py-1.5 rounded-lg border border-[#C9A84C]/15 text-xs text-[#C9A84C] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Назад
+                </button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, queriesTotalPages) }, (_, i) => {
+                    const start = Math.min(Math.max(1, queriesPage - 2), Math.max(1, queriesTotalPages - 4))
+                    const page = start + i
+                    if (page > queriesTotalPages) return null
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setQueryPage(page)}
+                        className={`w-8 h-8 rounded-lg text-xs font-semibold transition-colors ${queriesPage === page
+                          ? "bg-[#C9A84C] text-[#0A0E1A]"
+                          : "border border-[#C9A84C]/15 text-[#6B7CA3] hover:text-[#E0E6ED]"
+                          }`}
+                      >
+                        {page}
+                      </button>
+                    )
+                  })}
+                </div>
+                <button
+                  onClick={() => setQueryPage((page) => Math.min(queriesTotalPages, page + 1))}
+                  disabled={queriesPage >= queriesTotalPages}
+                  className="px-3 py-1.5 rounded-lg border border-[#C9A84C]/15 text-xs text-[#C9A84C] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Далі
+                </button>
+              </div>
             </div>
           </motion.div>
         </>

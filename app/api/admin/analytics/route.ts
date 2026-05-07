@@ -20,6 +20,23 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const days = parseInt(searchParams.get("days") ?? "30", 10)
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1)
+  const perPage = Math.min(100, Math.max(10, parseInt(searchParams.get("per_page") ?? "25", 10) || 25))
+  const sortDir = searchParams.get("sort_dir") === "asc" ? "asc" : "desc"
+  const sortByParam = searchParams.get("sort_by") ?? "created_at"
+  const sortColumns: Record<string, string> = {
+    created_at: "created_at",
+    processing_time_ms: "processing_time_ms",
+    complexity_score: "complexity_score",
+    category: "category",
+    sentiment: "sentiment",
+    user_intent: "user_intent",
+    eval_status: "ai_eval->>eval_status",
+  }
+  const sortBy = sortColumns[sortByParam] ? sortByParam : "created_at"
+  const sortColumn = sortColumns[sortBy]
+  const from = (page - 1) * perPage
+  const to = from + perPage - 1
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
   const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -47,9 +64,10 @@ export async function GET(request: Request) {
     sb.from("query_analytics").select("user_intent").gte("created_at", since).not("user_intent", "is", null),
     sb.from("query_analytics").select("complexity_score").gte("created_at", since).not("complexity_score", "is", null),
     sb.from("query_analytics")
-      .select("id, query_text, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id, chat_id, message_id, ai_eval")
-      .order("created_at", { ascending: false })
-      .limit(20),
+      .select("id, query_text, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id, chat_id, message_id, ai_eval", { count: "exact" })
+      .gte("created_at", since)
+      .order(sortColumn, { ascending: sortDir === "asc", nullsFirst: false })
+      .range(from, to),
     sb.from("query_analytics").select("user_id").gte("created_at", since).not("user_id", "is", null),
     sb.from("query_analytics").select("created_at").gte("created_at", since7),
     sb.from("query_analytics").select("processing_time_ms").gte("created_at", since).not("processing_time_ms", "is", null),
@@ -196,6 +214,11 @@ export async function GET(request: Request) {
     total: totalRes.count ?? 0,
     period: periodRes.count ?? 0,
     days,
+    queriesPage: page,
+    queriesPerPage: perPage,
+    queriesTotal: recentRes.count ?? 0,
+    queriesSortBy: sortBy,
+    queriesSortDir: sortDir,
     avgComplexity,
     avgProcessingTimeMs: avgTime,
     categories: Object.entries(categoryMap).sort((a, b) => b[1] - a[1]),
