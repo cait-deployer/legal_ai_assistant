@@ -5482,30 +5482,33 @@ async def eval_find_sources(body: dict):
                     scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
                         key="law_id", match=_qmodels.MatchValue(value=law_id)
                     )]),
-                    limit=1, with_payload=["title", "law_id"], with_vectors=False,
+                    limit=1, with_payload=["source", "law_id"], with_vectors=False,
                 )
                 if pts:
                     p = pts[0].payload or {}
                     return {"found": True,
                             "db_law_id": p.get("law_id", law_id),
-                            "db_title": p.get("title") or p.get("source_title"),
+                            "db_title": p.get("source"),  # title stored as "source" in payload
                             "db_collection": col, "match_type": "law_id"}
             except Exception:
                 continue
         return None
 
     def _search_by_title(vec: list, threshold: float = 0.45) -> dict | None:
-        """Synchronous vector search across all collections. Runs in a thread."""
+        """Synchronous vector search across all collections. Runs in a thread.
+        search_qdrant returns {out_metadata: {...}, _collection: str, similarity: float}
+        """
         try:
             hits = search_qdrant(vec, 3, ALL_V2_COLLECTIONS, threshold)
             if hits:
                 h = hits[0]
+                meta = h.get("out_metadata") or {}
                 return {"found": True,
-                        "db_law_id": h.get("law_id"),
-                        "db_title": h.get("source_title") or h.get("title"),
-                        "db_collection": h.get("collection"),
+                        "db_law_id": meta.get("law_id"),
+                        "db_title": meta.get("source"),  # title stored as "source" in payload
+                        "db_collection": h.get("_collection"),
                         "match_type": "title",
-                        "score": round(float(h.get("score", 0)), 3)}
+                        "score": round(float(h.get("similarity", 0)), 3)}
         except Exception:
             pass
         return None
