@@ -200,8 +200,8 @@ Backend `_ask_pipeline()`:
 16. Keyword search uses Qdrant MatchText on `content`.
 17. Title boost uses Qdrant MatchText on `source` and can fetch chunks from matched documents.
 18. Protected slots preserve some KMU/positions/full-law chunks.
-19. Gemini reranker selects final open candidates if candidate count exceeds `max_docs`.
-20. `_prefer_term_matched_results` does final term-sensitive ordering.
+19. Deterministic answerability reranker selects final candidates by semantic score, query-term coverage, content coverage, source authority, normative markers and text quality.
+20. Gemini LLM reranker is optional behind `llm_reranker_enabled`; default is deterministic reranking for speed and stability.
 21. Hard stop can return "not enough information" without main Gemini answer.
 22. Expired/cancelled documents are removed.
 23. Context is bucketed and capped.
@@ -217,7 +217,7 @@ Context buckets:
 | `kmu_chunks` | `laws_kmu_v2` | 8 |
 | `court_chunks` | `laws_positions_v2`, `laws_supreme_v2`, `laws_ccu_v2` | 6 |
 
-Overall context cap: 80 000 characters.
+Overall context cap: `context_char_cap`, default 30 000 characters.
 
 Each chunk context header can include:
 
@@ -309,7 +309,8 @@ High-cost operations per request:
 - document expansion;
 - keyword MatchText scroll;
 - title MatchText scroll;
-- Gemini reranker;
+- deterministic answerability reranker;
+- optional Gemini reranker if `llm_reranker_enabled=true`;
 - main Gemini streamed answer;
 - classification Gemini call;
 - optional completion call;

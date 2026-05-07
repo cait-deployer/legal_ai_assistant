@@ -1,96 +1,89 @@
-# РЇРє РїСЂР°С†СЋС” URAI С‡Р°С‚-Р±РѕС‚
+# URAI Chatbot Flow
 
-> РђРєС‚СѓР°Р»С–Р·РѕРІР°РЅРѕ: С‚СЂР°РІРµРЅСЊ 2026.
-> Р”РѕРєСѓРјРµРЅС‚ РѕРїРёСЃСѓС” СЂРµР°Р»СЊРЅРёР№ РїРѕС‚С–Рє Р· `app/chat/page.tsx`, `app/api/ask/stream/route.ts`, `backend/server.py` С– `backend/qdrant_storage.py`.
+> Updated: May 2026. This file is intentionally ASCII-only to avoid Windows console encoding corruption.
 
-## РљРѕСЂРѕС‚РєР° СЃС…РµРјР°
+## Runtime Flow
 
 ```mermaid
 flowchart TD
-    A[РљРѕСЂРёСЃС‚СѓРІР°С‡ РЅР°РґСЃРёР»Р°С” РїРёС‚Р°РЅРЅСЏ] --> B[Chat UI СЃС‚РІРѕСЂСЋС” С‡Р°С‚, СЏРєС‰Рѕ Р№РѕРіРѕ С‰Рµ РЅРµРјР°С”]
-    B --> C[Р—Р±РµСЂС–РіР°С”С‚СЊСЃСЏ user message Сѓ Supabase]
-    C --> D[Frontend Р±РµСЂРµ РѕСЃС‚Р°РЅРЅС– 6 РїРѕРІС–РґРѕРјР»РµРЅСЊ СЏРє history]
-    D --> E[/api/ask/stream РїРµСЂРµРІС–СЂСЏС” auth, РїСЂРѕС„С–Р»СЊ, С‚Р°СЂРёС„, beta, features]
+    A[User sends question] --> B[Chat UI creates chat if needed]
+    B --> C[User message is saved]
+    C --> D[Frontend sends last 6 messages as history]
+    D --> E[/api/ask/stream reads auth, profile, plan, beta, features]
     E --> F[FastAPI /ask_stream]
-    F --> G[RU to UA РїРµСЂРµРєР»Р°Рґ, СЏРєС‰Рѕ РїРёС‚Р°РЅРЅСЏ СЃС…РѕР¶Рµ РЅР° СЂРѕСЃС–Р№СЃСЊРєРµ]
-    G --> H[Follow-up resolver РґР»СЏ СѓС‚РѕС‡РЅСЋРІР°Р»СЊРЅРёС… РїРёС‚Р°РЅСЊ]
-    H --> I[РџР°СЂР°Р»РµР»СЊРЅРѕ: embedding РїРёС‚Р°РЅРЅСЏ + query rewrite]
-    I --> J[Plan sources -> V2 Qdrant collections]
-    J --> K[Routing probe РїРѕ РґРѕСЃС‚СѓРїРЅРёС… РєРѕР»РµРєС†С–СЏС…]
-    K --> L[Vector search original/rewrite]
-    L --> M[Boost, dedup, diversity, doc expansion]
-    M --> N[Keyword search + title boost]
-    N --> O[LLM reranker, СЏРєС‰Рѕ РєР°РЅРґРёРґР°С‚С–РІ Р±С–Р»СЊС€Рµ max_docs]
-    O --> P[Р¤С–Р»СЊС‚СЂ СЃРєР°СЃРѕРІР°РЅРёС… РґРѕРєСѓРјРµРЅС‚С–РІ + context buckets]
-    P --> Q[Gemini stream answer + parallel classification]
-    Q --> R[Frontend РїРѕРєР°Р·СѓС” С‚РѕРєРµРЅРё]
-    R --> S[Р—Р±РµСЂС–РіР°С”С‚СЊСЃСЏ assistant message, analytics, usage counter]
-    S --> T[РљРѕР¶РµРЅ 2-Р№ user turn Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ summarize Сѓ С„РѕРЅС–]
+    F --> G[Optional RU to UA translation]
+    G --> H[Follow-up resolver for ambiguous short questions]
+    H --> I[Parallel: query embedding + query rewrite]
+    I --> J[Plan sources -> allowed V2 Qdrant collections]
+    J --> K[Routing probe across allowed collections]
+    K --> L[Vector search: original and rewrite]
+    L --> M[Boost, dedup, diversity, document expansion]
+    M --> N[Keyword MatchText + title boost]
+    N --> O[Deterministic answerability reranker]
+    O --> P[Expired-document filter + context buckets]
+    P --> Q[Gemini streamed answer + parallel classification]
+    Q --> R[Frontend displays tokens]
+    R --> S[Assistant message, citations, analytics and usage are saved]
+    S --> T[Every 2nd user turn starts background summary]
 ```
 
-## Р©Рѕ СЂРµР°Р»СЊРЅРѕ РІС–РґРїСЂР°РІР»СЏС” frontend
+## Frontend Payload
 
-`app/chat/page.tsx` РїРµСЂРµРґ РіРµРЅРµСЂР°С†С–С”СЋ:
+`app/chat/page.tsx` currently:
 
-- Р±РµСЂРµ С‚С–Р»СЊРєРё РѕСЃС‚Р°РЅРЅС– 6 РїРѕРІС–РґРѕРјР»РµРЅСЊ, С‚РѕР±С‚Рѕ РїСЂРёР±Р»РёР·РЅРѕ 3 РґС–Р°Р»РѕРіРѕРІС– С…РѕРґРё;
-- РІС–РґРїСЂР°РІР»СЏС” `context_summary: null`;
-- summary РІСЃРµ РѕРґРЅРѕ РіРµРЅРµСЂСѓС”С‚СЊСЃСЏ С– Р·Р±РµСЂС–РіР°С”С‚СЊСЃСЏ РїС–СЃР»СЏ РєРѕР¶РЅРѕРіРѕ 2-РіРѕ user turn, Р°Р»Рµ Р·Р°СЂР°Р· РЅРµ РїС–РґРјС–С€СѓС”С‚СЊСЃСЏ РІ РЅР°СЃС‚СѓРїРЅРёР№ Р·Р°РїРёС‚;
-- РїС–СЃР»СЏ РІС–РґРїРѕРІС–РґС– Р·Р±РµСЂС–РіР°С” assistant message, citations, analytics С– Р·Р°РїСѓСЃРєР°С” РѕРЅРѕРІР»РµРЅРЅСЏ Р»С–РјС–С‚С–РІ.
+- sends only the last 6 messages, roughly 3 conversation turns;
+- sends `context_summary: null`;
+- still generates and stores `chats.context_summary` in the background after every 2nd user turn;
+- saves the assistant answer and analytics after streaming completes.
 
-Р’Р°Р¶Р»РёРІРёР№ РЅСЋР°РЅСЃ: `context_summary` С” РІ backend-РєРѕРЅС‚СЂР°РєС‚С– С– РІ С‚Р°Р±Р»РёС†С– `chats`, Р°Р»Рµ Р·Р°СЂР°Р· РіРµРЅРµСЂР°С†С–СЏ РІС–РґРїРѕРІС–РґС– РЅРёРј РЅРµ РєРѕСЂРёСЃС‚СѓС”С‚СЊСЃСЏ С‡РµСЂРµР· frontend payload.
+`context_summary` exists in the backend contract, but the chat UI does not inject it into generation yet.
 
-## API route РїРµСЂРµРґ backend
+## API Route
 
 `app/api/ask/stream/route.ts`:
 
-- РїРµСЂРµРІС–СЂСЏС” Supabase auth;
-- С‡РёС‚Р°С” `profiles`: С‚Р°СЂРёС„, beta, onboarding role/sub_role/segment, personal prompt, response preferences, usage fields;
-- РґР»СЏ beta РІРёРєРѕСЂРёСЃС‚РѕРІСѓС” effective plan `pro`;
-- Р±РµСЂРµ `max_docs_retrieved` Р· `subscription_plans`;
-- Р±РµСЂРµ source/response features Р· `plan_features`;
-- СЏРєС‰Рѕ С” source features, Р·Р°РІР¶РґРё РґРѕРґР°С” `mod` С– `zir` РґРѕ `filter_sources`;
-- silently downgrades locked response prefs:
-  - `full` С‚С–Р»СЊРєРё РґР»СЏ Pro/Beta;
-  - `detailed` РґР»СЏ paid/Beta;
-- РїСЂРѕРєРёРґСѓС” Сѓ Python backend:
-  `question`, `max_docs`, `filter_sources`, `response_features`, `user_profile`, `history`, `context_summary`, `ai_personal_prompt`, `response_length_pref`, `response_lang_style`.
+- verifies Supabase auth;
+- reads `profiles` for tier, beta, onboarding profile, personal prompt, response preferences and usage fields;
+- treats beta users as effective `pro`;
+- reads `subscription_plans.max_docs_retrieved`;
+- reads enabled `plan_features`;
+- maps source features to backend source keys;
+- adds `mod` and `zir` when at least one source feature is present;
+- gates response preferences:
+  - `full` requires Pro/Beta;
+  - `detailed` requires paid/Beta;
+- forwards `question`, `max_docs`, `filter_sources`, `response_features`, `user_profile`, `history`, `context_summary`, `ai_personal_prompt`, `response_length_pref`, `response_lang_style`.
 
-## РЇРє backend С€СѓРєР°С” РґР¶РµСЂРµР»Р°
+## Backend Retrieval
 
-РћСЃРЅРѕРІРЅРёР№ pipeline Р¶РёРІРµ РІ `_ask_pipeline()` Сѓ `backend/server.py`.
+`backend/server.py::_ask_pipeline()`:
 
-1. РЇРєС‰Рѕ РїРёС‚Р°РЅРЅСЏ СЃС…РѕР¶Рµ РЅР° СЂРѕСЃС–Р№СЃСЊРєРµ, Gemini РїРµСЂРµРєР»Р°РґР°С” Р№РѕРіРѕ РЅР° СѓРєСЂР°С—РЅСЃСЊРєСѓ РґР»СЏ РїРѕС€СѓРєСѓ.
-2. РЇРєС‰Рѕ С” history, follow-up resolver РїРµСЂРµС‚РІРѕСЂСЋС” РєРѕСЂРѕС‚РєРµ СѓС‚РѕС‡РЅРµРЅРЅСЏ РЅР° СЃР°РјРѕСЃС‚С–Р№РЅРёР№ РїРѕС€СѓРєРѕРІРёР№ Р·Р°РїРёС‚.
-3. РџР°СЂР°Р»РµР»СЊРЅРѕ СЂРѕР±Р»СЏС‚СЊСЃСЏ embedding РїРёС‚Р°РЅРЅСЏ С– query rewrite С‡РµСЂРµР· `rewrite_model`.
-4. РўР°СЂРёС„РЅС– source features РїРµСЂРµС‚РІРѕСЂСЋСЋС‚СЊСЃСЏ РЅР° СЃРїРёСЃРѕРє РґРѕР·РІРѕР»РµРЅРёС… V2 РєРѕР»РµРєС†С–Р№.
-5. Routing probe СЂРѕР±РёС‚СЊ Р»РµРіРєРёР№ Qdrant РїРѕС€СѓРє РїРѕ РґРѕСЃС‚СѓРїРЅРёС… РєРѕР»РµРєС†С–СЏС… С– Р·РІСѓР¶СѓС” СЃРїРёСЃРѕРє.
-6. Vector search С€СѓРєР°С” РїРѕ original embedding С–, СЏРєС‰Рѕ rewrite СѓСЃРїС–С€РЅРёР№, РїРѕ rewrite embedding.
-7. Р РµР·СѓР»СЊС‚Р°С‚Рё merge/dedup РїРѕ `(law_id, chunk_index)`.
-8. РЇРєС‰Рѕ top raw score РЅРёР¶С‡Рµ `raw_gate_threshold`, РІРєР»СЋС‡Р°С”С‚СЊСЃСЏ low-confidence СЂРµР¶РёРј С– РґРѕРґР°СЋС‚СЊСЃСЏ extra collections Сѓ РјРµР¶Р°С… С‚Р°СЂРёС„Сѓ.
-9. Score РєРѕСЂРёРіСѓС”С‚СЊСЃСЏ:
-   - `laws_supreme_v2` РјР°С” soft penalty;
-   - tax queries Р±СѓСЃС‚СЏС‚СЊ `laws_zir_v2`;
-   - `rada_*` С– `laws_positions_v2` Р±СѓСЃС‚СЏС‚СЊСЃСЏ С‡РµСЂРµР· `rada_source_boost`;
-   - doc type score РїС–РґРЅС–РјР°С” РєРѕРґРµРєСЃРё/Р·Р°РєРѕРЅРё/РїРѕСЃС‚Р°РЅРѕРІРё С– Р·РЅРёР¶СѓС” Р»РёСЃС‚Рё.
-10. Dedup Р·Р°Р»РёС€Р°С” РјР°РєСЃРёРјСѓРј 2 chunks РЅР° РѕРґРёРЅ `law_id`.
-11. Diversity РѕР±РјРµР¶СѓС” court/positions, С‰РѕР± РІРѕРЅРё РЅРµ Р·Р°Р№РЅСЏР»Рё РІРµСЃСЊ context.
-12. Doc expansion РґРѕР±РёСЂР°С” СЃСѓСЃС–РґРЅС– chunks Сѓ СЃРёР»СЊРЅРёС… РґРѕРєСѓРјРµРЅС‚С–РІ; РґР»СЏ РґСѓР¶Рµ СЃРёР»СЊРЅРѕРіРѕ top-1 РјРѕР¶Рµ РІР·СЏС‚Рё РґРѕ 20 chunks РѕРґРЅРѕРіРѕ Р·Р°РєРѕРЅСѓ.
-13. Keyword search С‡РµСЂРµР· Qdrant MatchText С€СѓРєР°С” Р±СѓРєРІР°Р»СЊРЅС– Р·Р±С–РіРё РІ `content`.
-14. Title boost С€СѓРєР°С” Р·Р±С–РіРё Сѓ `source` С– РґРѕР±РёСЂР°С” chunks Р· РґРѕРєСѓРјРµРЅС‚С–РІ, РЅР°Р·РІР° СЏРєРёС… Р·Р±С–РіР»Р°СЃСЊ С–Р· РїРёС‚Р°РЅРЅСЏРј.
-15. LLM reranker РІРёР±РёСЂР°С” РЅР°Р№РєСЂР°С‰С– chunks, Р°Р»Рµ protected chunks Р· РІР°Р¶Р»РёРІРёС… РґРѕРєСѓРјРµРЅС‚С–РІ РјРѕР¶СѓС‚СЊ РѕР±С–Р№С‚Рё reranker.
-16. РЇРєС‰Рѕ СЂРµР·СѓР»СЊС‚Р°С‚ СЃР»Р°Р±РєРёР№ С– РЅРµ low-confidence, backend РјРѕР¶Рµ РїРѕРІРµСЂРЅСѓС‚Рё early answer "РЅРµ Р·РЅР°Р№РґРµРЅРѕ".
-17. РЎРєР°СЃРѕРІР°РЅС– РґРѕРєСѓРјРµРЅС‚Рё С„С–Р»СЊС‚СЂСѓСЋС‚СЊСЃСЏ РїРµСЂРµРґ РєРѕРЅС‚РµРєСЃС‚РѕРј.
-18. РљРѕРЅС‚РµРєСЃС‚ РіСЂСѓРїСѓС”С‚СЊСЃСЏ:
-   - Р·Р°РєРѕРЅРё Р Р°РґРё + wiki + MOD/ZIR/С–РЅС€С–: РґРѕ 15 chunks;
-   - РљРњРЈ: РґРѕ 8 chunks;
-   - СЃСѓРґРѕРІР° РїСЂР°РєС‚РёРєР°, РїСЂР°РІРѕРІС– РїРѕР·РёС†С–С—, РљРЎРЈ: РґРѕ 6 chunks;
-   - Р·Р°РіР°Р»СЊРЅРёР№ cap: 80 000 СЃРёРјРІРѕР»С–РІ.
-19. Gemini РіРµРЅРµСЂСѓС” streamed answer, РїР°СЂР°Р»РµР»СЊРЅРѕ Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ classification РґР»СЏ analytics.
-20. РЇРєС‰Рѕ РІС–РґРїРѕРІС–РґСЊ РѕР±СЂС–Р·Р°Р»Р°СЃСЊ РїРѕ С‚РѕРєРµРЅР°С…, backend РїСЂРѕР±СѓС” РґРѕР±СѓРґСѓРІР°С‚Рё Р·Р°РІРµСЂС€РµРЅРЅСЏ.
+1. Validate question.
+2. Initialize Vertex AI if needed.
+3. Translate Russian-looking questions to Ukrainian for search.
+4. Resolve follow-up questions using recent history.
+5. Run query rewrite and query embedding.
+6. Convert plan source features into allowed V2 collections.
+7. Probe allowed collections and route to likely collections.
+8. Run vector search for original and rewritten queries.
+9. Merge by `(law_id, chunk_index)`.
+10. Apply low-confidence widening when raw score is weak.
+11. Apply source and document-type scoring.
+12. Deduplicate to max 2 chunks per law id.
+13. Apply diversity caps.
+14. Expand promising documents with sibling chunks.
+15. Add keyword MatchText candidates.
+16. Add title MatchText candidates with a small cap.
+17. Run deterministic answerability rerank.
+18. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
+19. Filter cancelled/expired documents.
+20. Build context buckets.
+21. Generate streamed answer and parallel classification.
+22. Optionally complete truncated answers.
 
-## РљРѕР»РµРєС†С–С—
+## V2 Collections
 
-Р РµР°Р»СЊРЅРёР№ production search Р·Р°СЂР°Р· РїСЂР°С†СЋС” Р· V2:
+Production chat retrieval uses V2 Qdrant collections:
 
 - `rada_finance_v2`
 - `rada_state_v2`
@@ -113,58 +106,55 @@ flowchart TD
 - `laws_mod_v2`
 - `laws_zir_v2`
 
-V2 РІРёРєРѕСЂРёСЃС‚РѕРІСѓС” `gemini-embedding-001` С– 3072 dimensions. РЎС‚Р°СЂС– V1 РєРѕР»РµРєС†С–С— Р·Р°Р»РёС€Р°СЋС‚СЊСЃСЏ С–СЃС‚РѕСЂРёС‡РЅРѕ/РґР»СЏ legacy admin flows, Р°Р»Рµ РѕСЃРЅРѕРІРЅРёР№ chat search Р±РµСЂРµ `ALL_V2_COLLECTIONS`.
+V2 uses `gemini-embedding-001`, 3072 dimensions and cosine distance.
 
-## Response preferences
+## Answerability Reranker
 
-РџСЂРѕС„С–Р»СЊ РєРѕСЂРёСЃС‚СѓРІР°С‡Р° РјР°С”:
+The deterministic reranker is the main precision/speed fix. It scores each chunk by:
 
-- `response_length_pref`: `short`, `standard`, `detailed`, `full`;
-- `response_lang_style`: `legal`, `plain`.
+- semantic similarity;
+- query-term coverage in title and content;
+- content coverage, not just title match;
+- source authority;
+- normative markers such as law/order/procedure/obligation language;
+- text quality, penalizing noisy or mixed-language chunks;
+- source penalties for broad background sources such as wiki and broad Supreme Court PDFs.
 
-Backend РґРѕРґР°С” СЂС–Р·РЅС– С–РЅСЃС‚СЂСѓРєС†С–С— С– token bounds:
+It also limits repeated chunks from the same document and caps wiki chunks so background material cannot dominate final context.
 
-| Mode | Token bounds | РћСЂС–С”РЅС‚РёСЂ |
+## Context
+
+Context buckets:
+
+- law/general bucket: max 15 chunks;
+- KMU bucket: max 8 chunks;
+- court bucket: max 6 chunks.
+
+Overall context cap is controlled by `context_char_cap`, default 30,000 characters.
+
+## Response Preferences
+
+`response_length_pref`:
+
+| Mode | Token bounds | Target |
 | --- | ---: | --- |
-| `short` | 1200-1800 | РєРѕРјРїР°РєС‚РЅР° РІС–РґРїРѕРІС–РґСЊ, 2-4 Р°Р±Р·Р°С†Рё Р°Р±Рѕ 4-6 РїСѓРЅРєС‚С–РІ |
-| `standard` | 1800-2600 | Р·Р±Р°Р»Р°РЅСЃРѕРІР°РЅР° РІС–РґРїРѕРІС–РґСЊ РґРѕ 400 СЃР»С–РІ |
-| `detailed` | 4200-5600 | 5-7 РєРѕСЂРѕС‚РєРёС… СЃРµРєС†С–Р№, РґРѕ 850 СЃР»С–РІ |
-| `full` | 6500-9000 | 7-9 СЃРµРєС†С–Р№, legal memo, РґРѕ 1600 СЃР»С–РІ |
+| `short` | 1200-1800 | compact answer |
+| `standard` | 1800-2600 | up to 400 words |
+| `detailed` | 4200-5600 | up to 850 words |
+| `full` | 6500-9000 | up to 1600 words |
 
-`plain` РґРѕРґР°С” РІРёРјРѕРіСѓ РїРёСЃР°С‚Рё РїСЂРѕСЃС‚РѕСЋ РјРѕРІРѕСЋ Р±РµР· СЋСЂРёРґРёС‡РЅРѕРіРѕ Р¶Р°СЂРіРѕРЅСѓ. `legal` РІРёРєРѕСЂРёСЃС‚РѕРІСѓС” С‚РѕС‡РЅС– СЋСЂРёРґРёС‡РЅС– С‚РµСЂРјС–РЅРё.
+`response_lang_style`:
 
-## Р›С–РјС–С‚Рё, usage С– beta
+- `legal`: precise legal language;
+- `plain`: simple non-jargon explanation.
 
-- Frontend Р±Р»РѕРєСѓС” РІС–РґРїСЂР°РІРєСѓ, СЏРєС‰Рѕ `requests_this_month >= monthly_limit + bonus_requests`.
-- `/api/ask/stream` РґРѕРґР°С‚РєРѕРІРѕ РјР°С” guard РґР»СЏ free accounts Р· РѕРґРЅР°РєРѕРІРёРј `browser_fingerprint`.
-- Usage counter Р·Р±С–Р»СЊС€СѓС”С‚СЊСЃСЏ РїС–СЃР»СЏ Р·Р±РµСЂРµР¶РµРЅРЅСЏ assistant message Сѓ `POST /api/chats/[id]/messages`.
-- Free plan РјР°С” one-time limit Р±РµР· rolling reset.
-- Paid plans РјР°СЋС‚СЊ 30-day rolling window.
-- Beta РєРѕСЂРёСЃС‚СѓРІР°С‡ РЅРµ Р±Р»РѕРєСѓС”С‚СЊСЃСЏ Р»С–РјС–С‚РѕРј Сѓ chat UI С– API route РїСЂР°С†СЋС” Р· РЅРёРј СЏРє Р· `pro`.
+## Limits And Beta
 
-## Р”Рµ РЅР°Р№Р±С–Р»СЊС€Рµ РЅР°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ
+- Chat UI blocks users over `monthly_limit + bonus_requests`.
+- `/api/ask/stream` also has a free-account fingerprint guard.
+- Usage increments only after assistant message save.
+- Beta users bypass chat UI limit and use effective `pro` features.
 
-РћРґРёРЅ user request РјРѕР¶Рµ РІРєР»СЋС‡Р°С‚Рё РєС–Р»СЊРєР° РґРѕСЂРѕРіРёС… РѕРїРµСЂР°С†С–Р№:
+## Current Performance Design
 
-- Gemini RU to UA translation;
-- Gemini follow-up resolver;
-- Gemini query rewrite;
-- Qdrant routing probe РїРѕ Р±Р°РіР°С‚СЊРѕС… РєРѕР»РµРєС†С–СЏС…;
-- vector search original + rewrite;
-- doc expansion;
-- keyword MatchText scroll;
-- title MatchText scroll;
-- Gemini LLM reranker;
-- Gemini main answer stream;
-- Gemini classification;
-- optional answer completion;
-- С„РѕРЅРѕРІРёР№ summary С– title generation РїС–СЃР»СЏ РІС–РґРїРѕРІС–РґС–.
-
-РўРѕРјСѓ РїС–Рґ РєС–Р»СЊРєРѕРјР° РѕРґРЅРѕС‡Р°СЃРЅРёРјРё РєРѕСЂРёСЃС‚СѓРІР°С‡Р°РјРё РїРѕС‚РѕС‡РЅРёР№ pipeline РјРѕР¶Рµ РґР°РІР°С‚Рё РІРёСЃРѕРєРµ РЅР°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ С– timeout/server unavailable.
-
-## Р©Рѕ РІР°Р¶Р»РёРІРѕ РїР°Рј'СЏС‚Р°С‚Рё
-
-- Р”РѕРєСѓРјРµРЅС‚Рё "РЅРµ Р·РЅР°Р№РґРµРЅРѕ" РјРѕР¶СѓС‚СЊ Р·'СЏРІР»СЏС‚РёСЃСЏ РЅРµ С‚С–Р»СЊРєРё С‚РѕРјСѓ, С‰Рѕ РґР¶РµСЂРµР» РЅРµРјР°С”, Р° Р№ С‡РµСЂРµР· routing/search thresholds Р°Р±Рѕ timeout РґРѕ РіРµРЅРµСЂР°С†С–С—.
-- `context_summary` Р·Р°СЂР°Р· Р·Р±РµСЂС–РіР°С”С‚СЊСЃСЏ, Р°Р»Рµ РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ РІ prompt.
-- `mod` С– `zir` РґРѕРґР°СЋС‚СЊСЃСЏ РґРѕ Р±СѓРґСЊ-СЏРєРѕРіРѕ РїР»Р°РЅСѓ, РґРµ С” С…РѕС‡Р° Р± РѕРґРЅРµ source feature.
-- `tokens_used` Сѓ SSE meta Р·Р°СЂР°Р· РЅРµ СЂР°С…СѓС”С‚СЊСЃСЏ СЂРµР°Р»СЊРЅРѕ С– С‡Р°СЃС‚Рѕ РґРѕСЂС–РІРЅСЋС” 0.
+Default path now avoids an extra Gemini call for reranking. The retrieval stage uses deterministic answerability reranking first. Gemini LLM reranking is still available behind `llm_reranker_enabled`, but it is not the default because it adds latency and can pick topically similar chunks that do not answer the exact question.

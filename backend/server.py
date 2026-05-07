@@ -3427,6 +3427,141 @@ def _authority_score(result: dict) -> float:
     return score + type_boost
 
 
+def _text_quality_score(text: str) -> float:
+    """Cheap language/noise signal: penalize chunks where Cyrillic legal text is drowned by garbage."""
+    letters = re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ]", text or "")
+    if len(letters) < 80:
+        return 0.85
+    cyr = sum(1 for ch in letters if re.match(r"[А-Яа-яІіЇїЄєҐґ]", ch))
+    ratio = cyr / max(len(letters), 1)
+    if ratio >= 0.72:
+        return 1.0
+    if ratio >= 0.55:
+        return 0.82
+    return 0.55
+
+
+def _answerability_score(result: dict, query_text: str, terms: list[str] | None = None) -> dict:
+    """
+    Universal deterministic reranker.
+
+    Similarity only says "same topic"; answerability asks whether this chunk is likely to
+    contain a usable legal answer to the exact question.
+    """
+    terms = terms or _query_terms(query_text, limit=18)
+    meta = result.get("out_metadata", {})
+    title = f"{meta.get('source') or ''} {meta.get('title') or ''}".lower()
+    content = (result.get("out_content") or "").lower()
+    haystack = f"{title} {content}"
+
+    matched_terms = [t for t in terms if t in haystack]
+    content_terms = [t for t in terms if t in content]
+    title_terms = [t for t in terms if t in title]
+    coverage = len(set(matched_terms)) / max(len(terms), 1)
+    content_coverage = len(set(content_terms)) / max(len(terms), 1)
+
+    normative_markers = (
+        "зобов", "повинен", "повинн", "має право", "не має права",
+        "підляга", "не підляга", "встановлю", "визнача", "передбач",
+        "відповідно до", "згідно", "пункт", "статт", "частин",
+        "закон", "постанова", "наказ", "порядок", "положення",
+    )
+    has_normative = any(marker in content for marker in normative_markers)
+
+    col = result.get("_collection", "")
+    source_penalty = 0.0
+    if col == "laws_wiki_v2":
+        source_penalty += 0.12
+    elif col == "laws_supreme_v2":
+        source_penalty += 0.06
+
+    quality = _text_quality_score(result.get("out_content") or "")
+    quality_penalty = (1.0 - quality) * 0.35
+
+    sim = float(result.get("similarity", 0.0) or 0.0)
+    score = (
+        sim * 0.34
+        + coverage * 0.34
+        + content_coverage * 0.18
+        + min(len(set(title_terms)), 3) * 0.025
+        + (_authority_score(result) - 1.0) * 0.10
+        + (0.06 if has_normative else 0.0)
+        - source_penalty
+        - quality_penalty
+    )
+
+    result["_answerability"] = {
+        "score": round(score, 4),
+        "coverage": round(coverage, 3),
+        "content_coverage": round(content_coverage, 3),
+        "matched": matched_terms[:10],
+        "quality": round(quality, 3),
+        "normative": has_normative,
+    }
+    return result["_answerability"]
+
+
+def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int, *, keep_weak: bool = False) -> list[dict]:
+    terms = _query_terms(query_text, limit=18)
+    if len(terms) < 2 or not results:
+        return results[:max_docs]
+
+    scored: list[tuple[float, dict]] = []
+    for r in results:
+        ans = _answerability_score(r, query_text, terms)
+        coverage = ans["coverage"]
+        # Keep low-coverage chunks only when they are protected structural chunks
+        # from a selected document, or when we are in weak-search mode and need
+        # Gemini to explain what was found.
+        protected = bool(r.get("_full_law") or r.get("_doc_expansion"))
+        if not keep_weak and coverage < 0.12 and not protected:
+            continue
+        scored.append((ans["score"], r))
+
+    if not scored:
+        return results[:max_docs]
+
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            item[1]["_answerability"]["coverage"],
+            _authority_score(item[1]),
+            item[1].get("similarity", 0.0),
+        ),
+        reverse=True,
+    )
+
+    picked: list[dict] = []
+    per_doc: dict[tuple[str, str], int] = {}
+    wiki_count = 0
+    for _, r in scored:
+        col = r.get("_collection", "")
+        if col == "laws_wiki_v2":
+            if wiki_count >= max(1, max_docs // 5):
+                continue
+            wiki_count += 1
+        doc_key = (col, r["out_metadata"].get("law_id", ""))
+        doc_cap = 4 if r.get("_full_law") else 2
+        if per_doc.get(doc_key, 0) >= doc_cap:
+            continue
+        picked.append(r)
+        per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
+        if len(picked) >= max_docs:
+            break
+
+    logger.info(
+        "ANSWERABILITY RERANK: in=%d out=%d top=%s terms=%s",
+        len(results),
+        len(picked),
+        [
+            f"{r.get('_collection')}:{r['out_metadata'].get('law_id','?')}:a={r.get('_answerability',{}).get('score')}:cov={r.get('_answerability',{}).get('coverage')}"
+            for r in picked[:6]
+        ],
+        terms[:10],
+    )
+    return picked or results[:max_docs]
+
+
 def _prefer_term_matched_results(results: list[dict], query_text: str, max_docs: int) -> list[dict]:
     terms = _query_terms(query_text)
     if len(terms) < 2:
@@ -4149,11 +4284,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=3)
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
-            _title_results = _title_results[:40]  # більший cap щоб охопити більше law_ids і релевантних чанків
+            _title_cap = int(settings_cache.get_float("title_boost_max_chunks", 16))
+            _title_results = _title_results[:max(4, min(_title_cap, 24))]
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             _title_added = 0
             for r in _title_results:
@@ -4182,6 +4318,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if r.get("_title_match") and r["out_metadata"].get("law_id") in _seen_laws_in_semantic:
             r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
     results.sort(key=lambda x: x["similarity"], reverse=True)
+
+    _answerability_query = f"{search_question} {rewritten_query or ''}".strip()
+    if len(results) > body.max_docs * 2:
+        results = _rerank_by_answerability(
+            results,
+            _answerability_query,
+            max(body.max_docs * 2, body.max_docs),
+            keep_weak=low_confidence,
+        )
 
     # Protected slots: keep the strongest chunk from several expanded documents so
     # reranker cannot collapse a multi-document answer back to one law_id.
@@ -4254,8 +4399,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         for r in _rr_protected
     }
 
-    # LLM Reranker: якщо кандидатів більше ніж max_docs — просимо Gemini вибрати найрелевантніші
-    if len(results) > body.max_docs:
+    # Fast deterministic answerability reranker is the default. LLM reranker remains
+    # available behind a setting, but it is slower and can pick topically similar
+    # fragments that do not answer the exact question.
+    _llm_reranker_enabled = settings_cache.get_bool("llm_reranker_enabled", False)
+    if len(results) > body.max_docs and _llm_reranker_enabled:
         try:
             import asyncio as _aio
             _rerank_model = GenerativeModel(_model_name)
@@ -4375,12 +4523,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             logger.warning("Reranker error: %s", _rr_err)
             results = results[:body.max_docs]
     else:
-        results = results[:body.max_docs]
+        results = _rerank_by_answerability(
+            results,
+            _answerability_query,
+            body.max_docs,
+            keep_weak=low_confidence,
+        )
 
-    results = _prefer_term_matched_results(
+    results = _rerank_by_answerability(
         results,
-        f"{search_question} {rewritten_query or ''}",
+        _answerability_query,
         body.max_docs,
+        keep_weak=low_confidence,
     )
 
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
@@ -4516,9 +4670,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             + "\n\n".join(court_chunks[:_MAX_COURT])
         )
     context = "\n\n".join(parts) if parts else "Контекст відсутній."
-    # Hard cap на весь context — захист від MAX_TOKENS на відповіді
-    if len(context) > 80000:
-        context = context[:80000] + "\n\n[...контекст обрізано для економії токенів]"
+    # Hard cap на весь context — менший, чистіший контекст зазвичай точніший і швидший.
+    _context_char_cap = int(settings_cache.get_float("context_char_cap", 30000))
+    if len(context) > _context_char_cap:
+        context = context[:_context_char_cap] + "\n\n[...контекст обрізано для економії токенів]"
 
     # 4. Call Gemini — main answer + classification run concurrently (zero added latency)
     try:
@@ -4600,6 +4755,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         # Retrieval quality guardrail — якщо пошук слабкий, чіткий вердикт замість домислів
         _retrieval_top = results[0]["similarity"] if results else 0.0
+        _top_answerability = results[0].get("_answerability", {}) if results else {}
+        _top_answerability_score = float(_top_answerability.get("score", 0.0) or 0.0)
+        _top_answerability_cov = float(_top_answerability.get("coverage", 0.0) or 0.0)
+        if _top_answerability_score < 0.38 or _top_answerability_cov < 0.25:
+            response_instructions.append(
+                "ПЕРЕВІРКА ПРЯМОЇ ВІДПОВІДІ: перед відповіддю визнач, чи контекст прямо покриває всі істотні умови питання. "
+                "Якщо документи лише тематично схожі, але не відповідають на конкретну комбінацію умов із питання, "
+                "почни з чіткого висновку: «У наданих джерелах прямої норми щодо цієї конкретної ситуації не знайдено». "
+                "Після цього коротко поясни, що саме знайдено в найближчих джерелах, без домислів."
+            )
         if low_confidence and is_short_response:
             response_instructions.append(
                 "УВАГА: знайдено лише слабко пов'язані документи. Для короткого режиму: "
