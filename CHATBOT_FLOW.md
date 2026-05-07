@@ -21,8 +21,8 @@ flowchart TD
     M --> N[Keyword MatchText + title boost]
     N --> O[Deterministic answerability reranker]
     O --> P[Expired-document filter + context buckets]
-    P --> Q[Gemini streamed answer + parallel classification]
-    Q --> R[Frontend displays tokens]
+    P --> Q[Gemini streamed answer + hidden completion marker + parallel classification]
+    Q --> R[Backend strips marker and frontend displays clean tokens]
     R --> S[Assistant message, citations, analytics and usage are saved]
     S --> T[Every 2nd user turn starts background summary]
 ```
@@ -79,7 +79,9 @@ flowchart TD
 19. Filter cancelled/expired documents.
 20. Build context buckets.
 21. Generate streamed answer and parallel classification.
-22. Optionally complete truncated answers.
+22. Require a hidden answer-done marker from the model.
+23. If the marker is missing or the model hit max tokens, request a short continuation.
+24. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
 
 ## V2 Collections
 
@@ -147,6 +149,21 @@ Overall context cap is controlled by `context_char_cap`, default 30,000 characte
 
 - `legal`: precise legal language;
 - `plain`: simple non-jargon explanation.
+
+## Answer Completion Contract
+
+The backend no longer guesses completion from answer shape, such as numbered sections.
+Instead every main Gemini answer is instructed to finish with the hidden marker
+`<!--URAI_DONE-->` on its own final line.
+
+Server behavior:
+
+- if the streamed answer includes the marker, the stream buffer removes it before the user sees it;
+- if the marker is missing, or Gemini reports `MAX_TOKENS`, `_complete_answer_if_needed()` asks for a short continuation;
+- continuation can add only the marker when the answer was already complete;
+- the marker is stripped before `/ask`, `/ask_stream` citations payload and saved assistant text.
+
+This is format-independent: it works for paragraphs, bullet lists, legal memos, short answers and full analysis.
 
 ## Limits And Beta
 

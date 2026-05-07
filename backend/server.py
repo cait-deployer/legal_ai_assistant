@@ -3613,33 +3613,30 @@ def _finish_reason_is_max_tokens(finish_reason) -> bool:
     return str(finish_reason) in ("FinishReason.MAX_TOKENS", "MAX_TOKENS", "2")
 
 
+ANSWER_DONE_MARKER = "<!--URAI_DONE-->"
+_ANSWER_DONE_MARKER_TAIL = len(ANSWER_DONE_MARKER) + 8
+
+
+def _answer_has_done_marker(answer: str) -> bool:
+    return ANSWER_DONE_MARKER in (answer or "")
+
+
+def _strip_answer_done_marker(answer: str) -> str:
+    text = answer or ""
+    if ANSWER_DONE_MARKER not in text:
+        return text.strip()
+    before, _, _after = text.partition(ANSWER_DONE_MARKER)
+    return before.strip()
+
+
 def _answer_looks_incomplete(answer: str) -> bool:
     text = (answer or "").strip()
     if len(text) < 20:
         return False
-    words = re.findall(r"\w+", text, flags=re.UNICODE)
-    lower = text.lower()
-    # A frequent Gemini failure mode: it starts a structured answer ("1. ...")
-    # and stops after the first section with a valid period/citation, so a
-    # punctuation-only check misses the truncation.
-    numbered_section_started = bool(re.search(r"(?m)^\s*\*{0,2}1[\.\)]\s+", text))
-    second_section_present = bool(re.search(r"(?m)^\s*\*{0,2}2[\.\)]\s+", text))
-    has_closing_signal = any(
-        marker in lower
-        for marker in (
-            "висновок", "отже", "підсум", "коротко:", "тобто",
-            "прямої норми", "рекомендую", "потрібно уточнити",
-        )
-    )
-    if numbered_section_started and not second_section_present and len(words) < 260 and not has_closing_signal:
+    if not _answer_has_done_marker(text):
         return True
-    unfinished_structure = (
-        "**1." in text
-        and "**2." not in text
-        and len(words) < 220
-        and not has_closing_signal
-    )
-    if unfinished_structure:
+    text = _strip_answer_done_marker(text)
+    if len(text) < 20:
         return True
     if text[-1] in ".!?…]»)\"'":
         return False
@@ -3660,16 +3657,17 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
 
     completed = answer
     try:
-        for attempt in range(2):
+        for attempt in range(3):
             continuation_prompt = (
-                "Попередня відповідь обірвалася. Допиши ТІЛЬКИ продовження з місця обриву. "
-                "Не повторюй уже написаний текст, не починай заново. "
-                "Якщо відповідь почала нумеровану структуру, заверши її коротко: додай максимум 1-2 потрібні пункти "
-                "і фінальний висновок. Якщо структура не потрібна, дай 1-3 короткі речення або заверши поточний пункт. "
-                "Обов'язково закінчи завершеним реченням. "
+                "Попередня відповідь не має технічного маркера завершення або була обрізана. "
+                "Допиши ТІЛЬКИ продовження з місця обриву. Не повторюй уже написаний текст, не починай заново. "
+                "Якщо відповідь фактично вже завершена, додай тільки технічний маркер. "
+                "Якщо зміст ще не завершений, заверши думку максимально коротко і природно. "
+                f"Повністю завершена відповідь ОБОВ'ЯЗКОВО має закінчуватися окремим фінальним рядком рівно: {ANSWER_DONE_MARKER}. "
+                "Після маркера не додавай жодного тексту. "
                 "Якщо останнє слово обрізане, почни з решти цього слова. "
                 "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
-                "Обрізана відповідь:\n"
+                "Поточний кінець відповіді:\n"
                 f"{completed[-2500:]}"
             )
             cfg = GenerationConfig(temperature=0.0, max_output_tokens=700)
@@ -4778,6 +4776,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "Якщо не можеш процитувати конкретний пункт із наданих документів — НЕ пиши це твердження взагалі. "
             "Використовуй точні юридичні терміни з документа і не підміняй одне поняття іншим."
         )
+        response_instructions.append(
+            f"ТЕХНІЧНИЙ МАРКЕР ЗАВЕРШЕННЯ: коли відповідь повністю завершена, "
+            f"додай у самому кінці окремим рядком рівно {ANSWER_DONE_MARKER}. "
+            "Не пояснюй цей маркер і не додавай після нього жодного тексту."
+        )
 
         # Retrieval quality guardrail — якщо пошук слабкий, чіткий вердикт замість домислів
         _retrieval_top = results[0]["similarity"] if results else 0.0
@@ -5099,6 +5102,7 @@ async def ask(body: AskRequest):
         pass
 
     answer = await _complete_answer_if_needed(pipe, answer, finish_reason)
+    answer = _strip_answer_done_marker(answer)
 
     try:
         classification = _json.loads(clf_response.text)
@@ -5191,7 +5195,10 @@ async def ask_stream(body: AskRequest):
         from vertexai.generative_models import GenerationConfig as _GC
         loop = _asyncio.get_event_loop()
         token_queue: _asyncio.Queue = _asyncio.Queue()
+        raw_answer_parts: list[str] = []
         answer_parts: list[str] = []
+        pending_answer_tail = ""
+        marker_seen = False
         stream_finish_reason = {"value": None}
 
         clf_task = _asyncio.create_task(
@@ -5257,16 +5264,37 @@ async def ask_stream(body: AskRequest):
                 clf_task.cancel()
                 return
             else:
-                answer_parts.append(data)
-                yield _sse("message", {"token": data})
+                raw_answer_parts.append(data)
+                if marker_seen:
+                    continue
+                pending_answer_tail += data
+                marker_pos = pending_answer_tail.find(ANSWER_DONE_MARKER)
+                if marker_pos >= 0:
+                    token = pending_answer_tail[:marker_pos]
+                    pending_answer_tail = ""
+                    marker_seen = True
+                elif len(pending_answer_tail) > _ANSWER_DONE_MARKER_TAIL:
+                    token = pending_answer_tail[:-_ANSWER_DONE_MARKER_TAIL]
+                    pending_answer_tail = pending_answer_tail[-_ANSWER_DONE_MARKER_TAIL:]
+                else:
+                    token = ""
+                if token:
+                    answer_parts.append(token)
+                    yield _sse("message", {"token": token})
 
-        full_answer = "".join(answer_parts)
-        completed_answer = await _complete_answer_if_needed(pipe, full_answer, stream_finish_reason["value"])
-        if completed_answer != full_answer:
-            continuation = completed_answer[len(full_answer):]
+        if pending_answer_tail and not marker_seen:
+            answer_parts.append(pending_answer_tail)
+            yield _sse("message", {"token": pending_answer_tail})
+
+        raw_full_answer = "".join(raw_answer_parts)
+        full_answer = _strip_answer_done_marker(raw_full_answer or "".join(answer_parts))
+        completed_answer = await _complete_answer_if_needed(pipe, raw_full_answer, stream_finish_reason["value"])
+        clean_completed_answer = _strip_answer_done_marker(completed_answer)
+        if clean_completed_answer != full_answer:
+            continuation = clean_completed_answer[len(full_answer):]
             if continuation:
                 yield _sse("message", {"token": continuation})
-                full_answer = completed_answer
+                full_answer = clean_completed_answer
 
         try:
             clf_response = await clf_task
