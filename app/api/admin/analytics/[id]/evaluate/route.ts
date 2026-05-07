@@ -151,6 +151,7 @@ function compactSources(citations: unknown) {
 
 function buildPrompt(input: {
   question: string
+  questionRewritten: string | null
   answer: string | null
   actualSources: unknown[]
   feedback: unknown[]
@@ -211,8 +212,11 @@ Rules:
 - Keep notes concise and practical.
 - Write all reasons and notes in Ukrainian legal/business language.
 
-Question:
+User question (raw):
 ${input.question}
+${input.questionRewritten && input.questionRewritten !== input.question
+  ? `\nRewritten question (what RAG actually searched on — use this for source evaluation):\n${input.questionRewritten}`
+  : ""}
 
 Answer:
 ${input.answer ?? ""}
@@ -328,7 +332,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   const { data: row, error: rowError } = await sb
     .from("query_analytics")
-    .select("id, user_id, chat_id, message_id, query_text, ai_response, created_at")
+    .select("id, user_id, chat_id, message_id, query_text, query_rewritten, ai_response, created_at")
     .eq("id", id)
     .single()
 
@@ -354,6 +358,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const evalDraft = await evaluateWithVertex(
       buildPrompt({
         question: row.query_text,
+        questionRewritten: row.query_rewritten ?? null,
         answer: row.ai_response,
         actualSources,
         feedback: feedback ?? [],

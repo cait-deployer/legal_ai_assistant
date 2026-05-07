@@ -5129,6 +5129,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "main_model": main_model, "clf_model": clf_model,
         "main_gen_cfg": _main_gen_cfg, "llm_timeout": llm_timeout,
         "start_time": start_time, "max_output_tokens": max_output_tokens,
+        "query_rewritten": rewritten_query,
     }
 
 
@@ -5288,6 +5289,7 @@ async def ask(body: AskRequest):
             "low_confidence": pipe["low_confidence"],
             "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
             "n_docs": len(pipe["results"]),
+            "query_rewritten": pipe.get("query_rewritten"),
             **classification,
         },
     }
@@ -5527,6 +5529,7 @@ async def ask_stream(body: AskRequest):
                 "low_confidence": pipe["low_confidence"],
                 "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
                 "n_docs": len(pipe["results"]),
+                "query_rewritten": pipe.get("query_rewritten"),
                 **classification,
             },
         }

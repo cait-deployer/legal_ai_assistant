@@ -38,6 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       user_intent?: string
       processing_time_ms?: number
       tokens_used?: number
+      query_rewritten?: string | null
     }
   }
 
@@ -151,7 +152,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         user_intent:        analytics.user_intent ?? null,
         processing_time_ms: analytics.processing_time_ms ?? null,
         tokens_used:        analytics.tokens_used ?? 0,
-        user_ip:            clientIp,   // read from server headers, not from client body
+        user_ip:            clientIp,
+        query_rewritten:    analytics.query_rewritten ?? null,
       }
 
       const { error: analyticsError } = await admin().from("query_analytics").insert(analyticsRow)

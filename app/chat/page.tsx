@@ -602,6 +602,7 @@ function ChatPage() {
                             user_intent: meta.user_intent,
                             processing_time_ms: meta.processing_time_ms,
                             tokens_used: meta.tokens_used ?? 0,
+                            query_rewritten: meta.query_rewritten ?? null,
                         },
                     }),
                 }).then(r => r.ok ? r.json() : null).then(saved => {
