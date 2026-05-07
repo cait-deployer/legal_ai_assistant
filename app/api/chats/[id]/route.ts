@@ -22,6 +22,7 @@ async function chatBelongsToUser(chatId: string, userId: string): Promise<boolea
     .select("id")
     .eq("id", chatId)
     .eq("user_id", userId)
+    .is("deleted_at", null)
     .single()
   return !!data
 }
@@ -35,9 +36,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // Fetch chat metadata (ownership check + context_summary)
   const { data: chat } = await admin()
     .from("chats")
-    .select("id, context_summary")
+    .select("id, context_summary, deleted_at")
     .eq("id", id)
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .single()
 
   if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 })
@@ -52,7 +54,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   return NextResponse.json({ messages, context_summary: chat.context_summary ?? null })
 }
 
-// DELETE /api/chats/[id] — delete a chat (cascade deletes messages)
+// DELETE /api/chats/[id] — hide a chat for the user, keep messages for analytics/eval
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const user = await getVerifiedUser()
@@ -62,7 +64,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
-  const { error } = await admin().from("chats").delete().eq("id", id)
+  const { error } = await admin()
+    .from("chats")
+    .update({
+      deleted_at: new Date().toISOString(),
+      deleted_by_user: true,
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

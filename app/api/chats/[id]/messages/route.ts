@@ -51,6 +51,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .select("id")
     .eq("id", chatId)
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .single()
 
   if (!chat) return NextResponse.json({ error: "Not found" }, { status: 404 })

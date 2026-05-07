@@ -10,10 +10,13 @@ CREATE TABLE IF NOT EXISTS public.chats (
   user_id    UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   title      TEXT NOT NULL DEFAULT 'Новий чат',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ,
+  deleted_by_user BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_chats_user_updated ON public.chats(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chats_user_active_updated ON public.chats(user_id, updated_at DESC) WHERE deleted_at IS NULL;
 
 ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 
