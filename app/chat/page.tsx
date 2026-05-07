@@ -218,6 +218,7 @@ function ChatPage() {
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isContinuing, setIsContinuing] = useState(false);
     const [loadingStatus, setLoadingStatus] = useState('');
     const [loadingPhase, setLoadingPhase] = useState(0);
     const [historyLoading, setHistoryLoading] = useState(false);
@@ -537,6 +538,7 @@ function ChatPage() {
                                     twMsgIdRef.current = STREAMING_ID;
                                     setMessages(prev => [...prev, { id: STREAMING_ID, role: 'ai', text: '', references: [] }]);
                                 }
+                                setIsContinuing(false);
                                 accText += token;
                                 twQueueRef.current += token;
                                 if (!twTimerRef.current) twTimerRef.current = setTimeout(drainQueue, 18);
@@ -564,6 +566,7 @@ function ChatPage() {
                             } else if (currentEvent === 'status') {
                                 const message = typeof parsed.message === 'string' ? parsed.message : '';
                                 if (message) setLoadingStatus(message);
+                                if (parsed.step === 'continuation') setIsContinuing(true);
                             } else if (currentEvent === 'error') {
                                 toast.error('Помилка генерації відповіді.');
                             }
@@ -626,6 +629,7 @@ function ChatPage() {
             }
         } catch { toast.error('Сервер не відповідає. Спробуйте ще раз.'); } finally {
             setIsLoading(false);
+            setIsContinuing(false);
             newChatInProgressRef.current = false;
         }
     };
@@ -724,6 +728,16 @@ function ChatPage() {
                                                     {msg.role === 'ai' ? (
                                                         <div className="space-y-4">
                                                             <MarkdownText text={msg.text} refs={msg.references ?? []} onCitationOpen={setActiveCitation} />
+                                                            {typeof msg.id === 'number' && msg.id < 0 && isContinuing && (
+                                                                <div className="flex items-center gap-2 pt-1">
+                                                                    <span className="flex gap-1">
+                                                                        <span className="w-1.5 h-1.5 rounded-full bg-[#C9A84C]/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+                                                                        <span className="w-1.5 h-1.5 rounded-full bg-[#C9A84C]/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+                                                                        <span className="w-1.5 h-1.5 rounded-full bg-[#C9A84C]/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+                                                                    </span>
+                                                                    <span className="text-[11px] font-bold text-[#C9A84C]/50 uppercase tracking-[0.2em]">доповнюю відповідь</span>
+                                                                </div>
+                                                            )}
                                                             {msg.templates && msg.templates.length > 0 && (
                                                                 <div className="mt-4 pt-4 border-t border-[#C9A84C]/10 space-y-2">
                                                                     <p className="text-[12px] font-bold text-[#C9A84C]/70 uppercase tracking-[0.2em]">Доступні бланки:</p>

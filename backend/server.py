@@ -5288,6 +5288,12 @@ async def ask_stream(body: AskRequest):
 
         raw_full_answer = "".join(raw_answer_parts)
         full_answer = _strip_answer_done_marker(raw_full_answer or "".join(answer_parts))
+        if _finish_reason_is_max_tokens(stream_finish_reason["value"]) or _answer_looks_incomplete(raw_full_answer):
+            yield _sse("status", {
+                "request_id": request_id,
+                "step": "continuation",
+                "message": "Доповнюю відповідь...",
+            })
         completed_answer = await _complete_answer_if_needed(pipe, raw_full_answer, stream_finish_reason["value"])
         clean_completed_answer = _strip_answer_done_marker(completed_answer)
         if clean_completed_answer != full_answer:
