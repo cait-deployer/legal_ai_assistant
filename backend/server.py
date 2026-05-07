@@ -3633,9 +3633,8 @@ def _answer_looks_incomplete(answer: str) -> bool:
     text = (answer or "").strip()
     if len(text) < 20:
         return False
-    if not _answer_has_done_marker(text):
-        return True
-    text = _strip_answer_done_marker(text)
+    if _answer_has_done_marker(text):
+        text = _strip_answer_done_marker(text)
     if len(text) < 20:
         return True
     if text[-1] in ".!?…]»)\"'":
@@ -3645,7 +3644,11 @@ def _answer_looks_incomplete(answer: str) -> bool:
         " та", " і", " або", " але", " якщо", " що", " який", " яка", " які",
         " на", " у", " в", " до", " від", " за", " про", " при", " для", " щодо",
     )
-    return True if any(tail.endswith(w) for w in dangling_words) else True
+    if any(tail.endswith(w) for w in dangling_words):
+        return True
+    if re.search(r"[,;:–—(\[]\s*$", text):
+        return True
+    return True
 
 
 async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None) -> str:
@@ -3659,13 +3662,12 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
     try:
         for attempt in range(2):
             continuation_prompt = (
-                "Попередня відповідь не має технічного маркера завершення або була обрізана. "
+                "Попередня відповідь була обрізана. "
                 "Допиши ТІЛЬКИ продовження з місця обриву. Не повторюй уже написаний текст, не починай заново. "
                 "Не пиши службові фрази на кшталт «доповнюю відповідь», «продовження» або «ось завершення». "
-                "Якщо відповідь фактично вже завершена, додай тільки технічний маркер. "
-                "Якщо зміст ще не завершений, заверши думку максимально коротко і природно. "
-                f"Повністю завершена відповідь ОБОВ'ЯЗКОВО має закінчуватися окремим фінальним рядком рівно: {ANSWER_DONE_MARKER}. "
-                "Після маркера не додавай жодного тексту. "
+                "Заверши поточний пункт або речення максимально коротко і природно. "
+                "Не додавай нові великі розділи. "
+                f"Якщо можеш, закінчи фінальним рядком {ANSWER_DONE_MARKER}, але головне — завершити речення. "
                 "Якщо останнє слово обрізане, почни з решти цього слова. "
                 "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
                 "Поточний кінець відповіді:\n"
@@ -5298,10 +5300,14 @@ async def ask_stream(body: AskRequest):
         completed_answer = await _complete_answer_if_needed(pipe, raw_full_answer, stream_finish_reason["value"])
         clean_completed_answer = _strip_answer_done_marker(completed_answer)
         if clean_completed_answer != full_answer:
-            continuation = clean_completed_answer[len(full_answer):]
+            continuation = (
+                clean_completed_answer[len(full_answer):]
+                if clean_completed_answer.startswith(full_answer)
+                else clean_completed_answer
+            )
             if continuation:
                 yield _sse("message", {"token": continuation})
-                full_answer = clean_completed_answer
+            full_answer = clean_completed_answer
 
         try:
             clf_response = await clf_task

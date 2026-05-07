@@ -153,13 +153,14 @@ Overall context cap is controlled by `context_char_cap`, default 30,000 characte
 ## Answer Completion Contract
 
 The backend no longer guesses completion from answer shape, such as numbered sections.
-Instead every main Gemini answer is instructed to finish with the hidden marker
-`URAI_DONE` on its own final line.
+Gemini is asked to finish with the hidden marker `URAI_DONE`, but the marker is advisory,
+not required for a valid answer.
 
 Server behavior:
 
 - if the streamed answer includes the marker, the stream buffer removes it before the user sees it;
-- if the marker is missing, or Gemini reports `MAX_TOKENS`, `_complete_answer_if_needed()` asks for a short continuation;
+- if Gemini reports `MAX_TOKENS`, or the visible text ends in an obviously dangling fragment,
+  `_complete_answer_if_needed()` asks for a short continuation;
 - continuation can add only the marker when the answer was already complete;
 - the marker is stripped before `/ask`, `/ask_stream` citations payload and saved assistant text.
 
