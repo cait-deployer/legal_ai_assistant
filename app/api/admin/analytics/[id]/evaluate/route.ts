@@ -14,6 +14,12 @@ type EvalSource = {
   reason?: string | null
 }
 
+type EvalRecommendation = {
+  action: "approve" | "reject" | "approve_gold"
+  is_gold: boolean
+  reason: string
+}
+
 type RagEval = {
   expected_answer_type: string
   has_direct_answer: boolean | null
@@ -22,6 +28,19 @@ type RagEval = {
   eval_confidence: number
   eval_notes: string
   eval_status: "ai_draft"
+  recommendation?: EvalRecommendation | null
+}
+
+type DbCheckResult = {
+  found: boolean
+  collection: string | null
+  title: string | null
+}
+
+type AnnotatedSource = EvalSource & {
+  in_db?: boolean
+  db_title?: string | null
+  db_collection?: string | null
 }
 
 const ANSWER_TYPES = new Set([
@@ -103,6 +122,20 @@ function clampConfidence(value: unknown) {
   return Math.max(0, Math.min(1, n))
 }
 
+function normalizeRecommendation(value: unknown): EvalRecommendation | null {
+  if (!value || typeof value !== "object") return null
+  const r = value as Record<string, unknown>
+  const action = typeof r.action === "string" && ["approve", "reject", "approve_gold"].includes(r.action)
+    ? r.action as EvalRecommendation["action"]
+    : null
+  if (!action) return null
+  return {
+    action,
+    is_gold: typeof r.is_gold === "boolean" ? r.is_gold : action === "approve_gold",
+    reason: typeof r.reason === "string" ? r.reason.slice(0, 500) : "",
+  }
+}
+
 function normalizeEval(value: Record<string, unknown> | null): RagEval {
   if (!value) throw new Error("AI eval returned empty or invalid JSON")
 
@@ -122,6 +155,7 @@ function normalizeEval(value: Record<string, unknown> | null): RagEval {
     eval_confidence: clampConfidence(value?.eval_confidence),
     eval_notes: typeof value?.eval_notes === "string" ? value.eval_notes.slice(0, 4000) : "",
     eval_status: "ai_draft",
+    recommendation: normalizeRecommendation(value?.recommendation),
   }
 }
 
@@ -160,34 +194,25 @@ function buildPrompt(input: {
 
 Return ONLY valid JSON. Do not add markdown.
 
-Your task is not to decide final truth. Create an AI draft for a human admin.
-
 Language rule:
 - All human-readable text values MUST be in Ukrainian.
-- This includes every "reason" and "eval_notes" value.
 - Do not write explanations in English, Russian, or mixed language.
-- Keep technical enum values unchanged exactly as requested.
+- Keep technical enum values unchanged exactly as specified.
 
 Allowed expected_answer_type values:
-- direct_norm
-- no_direct_norm
-- procedure
-- risk_analysis
-- document_draft
-- clarification_needed
-- mixed
+direct_norm | no_direct_norm | procedure | risk_analysis | document_draft | clarification_needed | mixed
 
-JSON schema:
+JSON schema (return exactly this structure):
 {
   "expected_answer_type": "one allowed value",
   "has_direct_answer": true | false | null,
   "expected_sources": [
     {
       "num": 1,
-      "title": "...",
-      "law_id": "...",
-      "collection": "...",
-      "reason": "українською: чому це джерело потрібне для відповіді"
+      "title": "назва закону/постанови",
+      "law_id": "ідентифікатор у форматі rada (наприклад 80731-10, 254к/96-вр, 2341-14)",
+      "collection": "назва колекції якщо відома",
+      "reason": "чому це джерело потрібне для відповіді на це питання"
     }
   ],
   "bad_sources": [
@@ -196,36 +221,48 @@ JSON schema:
       "title": "...",
       "law_id": "...",
       "collection": "...",
-      "reason": "українською: чому це джерело слабке, фонове або не про цю фактичну ситуацію"
+      "reason": "чому це джерело слабке або нерелевантне"
     }
   ],
-  "eval_confidence": 0.0,
-  "eval_notes": "коротка примітка українською для людини-рецензента"
+  "eval_confidence": 0.85,
+  "eval_notes": "коротка примітка для людини-рецензента",
+  "recommendation": {
+    "action": "approve" | "reject" | "approve_gold",
+    "is_gold": false,
+    "reason": "1-2 речення чому саме така рекомендація"
+  }
 }
 
-Rules:
-- Use the provided actual sources first. Do not invent law_id or collection if they are missing.
-- expected_sources are sources that should be present or are genuinely useful for the answer.
-- bad_sources are sources that were cited but should not drive the answer.
-- If the answer says no direct norm was found, check whether the cited sources only support a cautious indirect answer.
-- Lower confidence if the answer/source fit is ambiguous.
-- Keep notes concise and practical.
-- Write all reasons and notes in Ukrainian legal/business language.
+Rules for expected_sources:
+- Include sources from actualSources that ARE relevant to the question.
+- ALSO include laws/norms you know from legal training that SHOULD answer this question, even if RAG did NOT retrieve them.
+- For Ukrainian laws use rada law_id format: numeric id like "80731-10", "254к/96-вр", "2341-14".
+- Do NOT invent law_id if you are not certain — leave law_id null but provide the title.
+- expected_sources = docs that SHOULD be retrieved for this question to be answered correctly.
+
+Rules for bad_sources:
+- Sources that were retrieved but are irrelevant, background-only, or misleading for this question.
+
+Rules for recommendation:
+- "approve" — query is well-formed, sources are evaluable → good eval case
+- "approve_gold" — approve AND this is a canonical test case (important legal question, clear correct answer, high value for ongoing eval)
+- "reject" — query is a follow-up ("так?", "зрозуміло", clarification request), too vague, or not RAG-evaluable
 
 User question (raw):
 ${input.question}
 ${input.questionRewritten && input.questionRewritten !== input.question
-  ? `\nRewritten question (what RAG actually searched on — use this for source evaluation):\n${input.questionRewritten}`
+  ? `\nRewritten question (what RAG actually searched on):
+${input.questionRewritten}`
   : ""}
 
 Answer:
 ${input.answer ?? ""}
 
 Actual cited/retrieved sources:
-${JSON.stringify(input.actualSources).slice(0, 14000)}
+${JSON.stringify(input.actualSources).slice(0, 12000)}
 
 User/admin feedback:
-${JSON.stringify(input.feedback).slice(0, 4000)}
+${JSON.stringify(input.feedback).slice(0, 3000)}
 `
 }
 
@@ -267,7 +304,7 @@ async function evaluateWithVertex(prompt: string, settings: Record<string, strin
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0,
-        maxOutputTokens: 1400,
+        maxOutputTokens: 2000,
         responseMimeType: "application/json",
         thinkingConfig: { thinkingBudget: 0 },
       },
@@ -366,6 +403,41 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       settings,
     )
 
+    // Verify AI-suggested law_ids against Qdrant
+    const allLawIds = [
+      ...evalDraft.expected_sources.map(s => s.law_id),
+      ...evalDraft.bad_sources.map(s => s.law_id),
+    ].filter((id): id is string => Boolean(id))
+
+    let dbCheck: Record<string, DbCheckResult> = {}
+    if (allLawIds.length > 0) {
+      try {
+        const checkRes = await fetch(
+          `${process.env.BACKEND_URL ?? "http://localhost:8001"}/admin/eval/check_ids?ids=${encodeURIComponent(allLawIds.join(","))}`,
+          { signal: AbortSignal.timeout(10000) },
+        )
+        if (checkRes.ok) dbCheck = await checkRes.json()
+      } catch { /* non-fatal */ }
+    }
+
+    function annotate(sources: EvalSource[]): AnnotatedSource[] {
+      return sources.map(s => {
+        const check = s.law_id ? dbCheck[s.law_id] : undefined
+        if (!check) return s
+        return {
+          ...s,
+          in_db: check.found,
+          db_title: check.found ? (check.title ?? null) : null,
+          db_collection: check.found ? (check.collection ?? null) : null,
+          title: s.title ?? (check.found ? (check.title ?? null) : null),
+          collection: s.collection ?? (check.found ? (check.collection ?? null) : null),
+        }
+      })
+    }
+
+    const annotatedExpected = annotate(evalDraft.expected_sources)
+    const annotatedBad = annotate(evalDraft.bad_sources)
+
     await sb
       .from("query_analytics")
       .update({ ai_eval: evalDraft, message_id: messageId })
@@ -381,8 +453,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         question: row.query_text,
         answer: row.ai_response,
         actual_sources: actualSources,
-        expected_sources: evalDraft.expected_sources,
-        bad_sources: evalDraft.bad_sources,
+        expected_sources: annotatedExpected,
+        bad_sources: annotatedBad,
         answer_type: evalDraft.expected_answer_type,
         has_direct_answer: evalDraft.has_direct_answer,
         eval_confidence: evalDraft.eval_confidence,
@@ -393,7 +465,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       .single()
 
     if (caseError) throw new Error(caseError.message)
-    return NextResponse.json({ ok: true, eval: evalCase, ai_eval: evalDraft })
+    return NextResponse.json({
+      ok: true,
+      eval: evalCase,
+      ai_eval: evalDraft,
+      annotated_expected: annotatedExpected,
+      annotated_bad: annotatedBad,
+      recommendation: evalDraft.recommendation ?? null,
+    })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }

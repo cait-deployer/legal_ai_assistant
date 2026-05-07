@@ -64,7 +64,7 @@ export async function GET(request: Request) {
     sb.from("query_analytics").select("user_intent").gte("created_at", since).not("user_intent", "is", null),
     sb.from("query_analytics").select("complexity_score").gte("created_at", since).not("complexity_score", "is", null),
     sb.from("query_analytics")
-      .select("id, query_text, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id, chat_id, message_id, ai_eval", { count: "exact" })
+      .select("id, query_text, query_rewritten, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id, chat_id, message_id, ai_eval", { count: "exact" })
       .gte("created_at", since)
       .order(sortColumn, { ascending: sortDir === "asc", nullsFirst: false })
       .range(from, to),

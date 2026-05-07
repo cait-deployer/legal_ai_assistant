@@ -8,6 +8,8 @@ import {
   MessageSquare, AlertCircle, Smile, Meh, Frown,
   UserPlus, Repeat2, Target, Timer, X,
   Sparkles, CheckCircle2, ShieldCheck, XCircle,
+  PlayCircle, StopCircle, ChevronDown, ChevronRight,
+  CheckCircle, XCircle as XCircleIcon, AlertTriangle,
 } from "lucide-react"
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -33,6 +35,7 @@ interface AnalyticsData {
   recent: {
     id: string
     query_text: string
+    query_rewritten?: string | null
     ai_response: string | null
     category: string | null
     sentiment: string | null
@@ -98,6 +101,251 @@ type QuerySortBy =
   | "sentiment"
   | "user_intent"
   | "eval_status"
+
+// ── Eval Runner Types ─────────────────────────────────────────────────────────
+
+type EvalSource = { law_id?: string | null; title?: string | null; found_in_top?: boolean; rank?: number | null; reason?: string | null }
+type EvalLogEntry = {
+  index: number; total: number; case_id: string; is_gold: boolean
+  question: string; status: "running" | "done" | "error"
+  hit5: boolean | null; hit10: boolean | null; bad5: boolean | null
+  expected_checked: EvalSource[]; bad_checked: EvalSource[]
+  top5: { law_id: string; title: string; collection: string; score: number }[]
+  error: string | null
+}
+type EvalReport = {
+  total: number; with_expected: number
+  hit5: number; hit10: number; missed: number; bad5_cases: number
+  hit5_rate: number | null; hit10_rate: number | null; bad5_rate: number | null
+  finished_at: string
+}
+type EvalState = {
+  running: boolean; session_id: string | null; started_at: string | null
+  logs: EvalLogEntry[]; report: EvalReport | null; error: string | null
+}
+
+// ── Eval Runner Component ─────────────────────────────────────────────────────
+
+function EvalRunner() {
+  const [open, setOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [expandedCase, setExpandedCase] = useState<string | null>(null)
+  const { data: state, mutate } = useSWR<EvalState>(
+    "/api/admin/eval/status",
+    fetcher,
+    { refreshInterval: (s: EvalState | undefined) => s?.running ? 1500 : 0 },
+  )
+
+  async function start() {
+    setStarting(true)
+    try {
+      const res = await fetch("/api/admin/eval/run", { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) { alert(data.error ?? "Помилка запуску"); return }
+      mutate()
+      setOpen(true)
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  async function stop() {
+    await fetch("/api/admin/eval/run", { method: "DELETE" })
+    mutate()
+  }
+
+  const logs = state?.logs ?? []
+  const report = state?.report
+  const running = state?.running ?? false
+  const done = logs.length > 0 && !running
+
+  function pct(n: number | null | undefined, d: number | null | undefined) {
+    if (n == null || !d) return "—"
+    return `${Math.round((n / d) * 100)}%`
+  }
+
+  return (
+    <div className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 flex items-center justify-between gap-3">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex items-center gap-2 text-sm font-semibold text-[#E0E6ED] hover:text-[#C9A84C] transition-colors"
+        >
+          {open ? <ChevronDown className="w-4 h-4 text-[#C9A84C]" /> : <ChevronRight className="w-4 h-4 text-[#6B7CA3]" />}
+          <BarChart2 className="w-4 h-4 text-[#C9A84C]" />
+          Eval Runner
+          {running && <span className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 animate-pulse">запущено</span>}
+          {done && report && (
+            <span className="text-[11px] text-[#6B7CA3]">
+              hit@10: {pct(report.hit10, report.with_expected)} · bad@5: {pct(report.bad5_cases, report.total)}
+            </span>
+          )}
+        </button>
+        <div className="flex items-center gap-2">
+          {state?.started_at && (
+            <span className="text-[11px] text-[#6B7CA3] hidden sm:block">
+              {new Date(state.started_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+          {running ? (
+            <button onClick={stop} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-300 text-xs font-semibold">
+              <StopCircle className="w-3.5 h-3.5" /> Зупинити
+            </button>
+          ) : (
+            <button onClick={start} disabled={starting} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C9A84C] text-[#0A0E1A] text-xs font-bold disabled:opacity-60">
+              <PlayCircle className="w-3.5 h-3.5" />
+              {starting ? "Завантаження..." : "Запустити"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {open && (
+        <div className="border-t border-[#C9A84C]/10 px-5 py-4 space-y-4">
+          {/* Explanation */}
+          <div className="bg-[#0A0E1A] border border-[#C9A84C]/10 rounded-xl px-4 py-3 text-xs text-[#6B7CA3] space-y-1">
+            <p><span className="text-[#E0E6ED]">Що робить:</span> бере всі approved/gold кейси → для кожного запускає реальний RAG retrieval → перевіряє чи expected sources потрапили в top-5 і top-10 → показує де система помиляється.</p>
+            <p><span className="text-[#C9A84C]">hit@5</span> — expected source в перших 5 результатах · <span className="text-[#C9A84C]">hit@10</span> — в перших 10 · <span className="text-red-300">bad@5</span> — поганий source потрапив у top-5</p>
+          </div>
+
+          {/* Summary report */}
+          {report && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: "hit@5", value: `${report.hit5}/${report.with_expected}`, sub: pct(report.hit5, report.with_expected), color: "#10B981" },
+                { label: "hit@10", value: `${report.hit10}/${report.with_expected}`, sub: pct(report.hit10, report.with_expected), color: "#C9A84C" },
+                { label: "missed", value: String(report.missed), sub: "не знайшов взагалі", color: "#EF4444" },
+                { label: "bad@5", value: `${report.bad5_cases}/${report.total}`, sub: pct(report.bad5_cases, report.total), color: "#F59E0B" },
+              ].map(({ label, value, sub, color }) => (
+                <div key={label} className="bg-[#0A0E1A] border border-[#C9A84C]/10 rounded-xl p-3">
+                  <p className="text-[10px] text-[#6B7CA3] uppercase tracking-widest">{label}</p>
+                  <p className="text-xl font-bold mt-0.5" style={{ color }}>{value}</p>
+                  <p className="text-[11px] text-[#6B7CA3] mt-0.5">{sub}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {state?.error && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-xs text-red-300">{state.error}</div>
+          )}
+
+          {/* Progress */}
+          {running && logs.length > 0 && (
+            <div className="flex items-center gap-3 text-xs text-[#6B7CA3]">
+              <div className="flex-1 h-1.5 bg-[#1a2035] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#C9A84C] rounded-full transition-all"
+                  style={{ width: `${Math.round((logs.length / (logs[logs.length - 1]?.total || 1)) * 100)}%` }}
+                />
+              </div>
+              <span>{logs.length} / {logs[logs.length - 1]?.total ?? "?"}</span>
+            </div>
+          )}
+
+          {/* Case logs — collapsible, no auto-scroll */}
+          {logs.length > 0 && (
+            <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
+              {logs.map((entry) => {
+                const isExpanded = expandedCase === entry.case_id
+                const statusIcon = entry.status === "running"
+                  ? <span className="w-3 h-3 rounded-full bg-[#C9A84C] animate-pulse inline-block" />
+                  : entry.status === "error"
+                    ? <XCircleIcon className="w-3.5 h-3.5 text-red-400" />
+                    : entry.hit10 === false
+                      ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                      : <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+
+                return (
+                  <div key={entry.case_id} className="border border-[#C9A84C]/10 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setExpandedCase(isExpanded ? null : entry.case_id)}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#C9A84C]/5 transition-colors text-left"
+                    >
+                      <span className="shrink-0">{statusIcon}</span>
+                      {entry.is_gold && <span className="text-[10px] text-[#C9A84C] bg-[#C9A84C]/10 rounded-full px-1.5 py-0.5 shrink-0">gold</span>}
+                      <span className="text-xs text-[#E0E6ED]/80 flex-1 truncate">{entry.question}</span>
+                      <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
+                        {entry.hit5 != null && <span className={entry.hit5 ? "text-emerald-400" : "text-red-400"}>h@5:{entry.hit5 ? "✓" : "✗"}</span>}
+                        {entry.hit10 != null && <span className={entry.hit10 ? "text-emerald-400" : "text-amber-400"}>h@10:{entry.hit10 ? "✓" : "✗"}</span>}
+                        {entry.bad5 != null && entry.bad5 && <span className="text-amber-400">bad@5:!</span>}
+                      </div>
+                      {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-[#6B7CA3] shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-[#6B7CA3] shrink-0" />}
+                    </button>
+
+                    {isExpanded && (
+                      <div className="px-3 pb-3 pt-1 border-t border-[#C9A84C]/5 space-y-3">
+                        {entry.error && <p className="text-xs text-red-300">{entry.error}</p>}
+
+                        {entry.expected_checked.length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-[#6B7CA3] uppercase tracking-wider mb-1">Expected sources</p>
+                            <div className="space-y-1">
+                              {entry.expected_checked.map((s, i) => (
+                                <div key={i} className={`flex items-start gap-2 text-xs px-2 py-1.5 rounded-lg ${s.found_in_top ? "bg-emerald-500/5 border border-emerald-500/15" : "bg-red-500/5 border border-red-500/15"}`}>
+                                  {s.found_in_top
+                                    ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                                    : <XCircleIcon className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />}
+                                  <div>
+                                    <p className="text-[#E0E6ED]/80">{s.title || s.law_id || "?"}</p>
+                                    <p className="text-[#6B7CA3]">{s.found_in_top ? `rank #${s.rank}` : s.rank ? `rank #${s.rank} (поза top-5)` : "не знайдено"}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {entry.bad_checked.some(s => s.found_in_top) && (
+                          <div>
+                            <p className="text-[10px] text-amber-400/70 uppercase tracking-wider mb-1">Bad sources що потрапили в top-5</p>
+                            <div className="space-y-1">
+                              {entry.bad_checked.filter(s => s.found_in_top).map((s, i) => (
+                                <div key={i} className="flex items-start gap-2 text-xs px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/15">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                                  <div>
+                                    <p className="text-[#E0E6ED]/80">{s.title || s.law_id || "?"}</p>
+                                    <p className="text-amber-400/70">rank #{s.rank}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {entry.top5.length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-[#6B7CA3] uppercase tracking-wider mb-1">Top-5 що повернув RAG</p>
+                            <div className="space-y-0.5">
+                              {entry.top5.map((r, i) => (
+                                <div key={i} className="flex items-center gap-2 text-[11px] text-[#6B7CA3]">
+                                  <span className="text-[#C9A84C]/50 w-4">#{i + 1}</span>
+                                  <span className="truncate flex-1">{r.title || r.law_id}</span>
+                                  <span className="shrink-0">{r.score.toFixed(3)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {!running && logs.length === 0 && (
+            <p className="text-xs text-[#6B7CA3] text-center py-4">
+              Натисни &ldquo;Запустити&rdquo; — система перевірить всі approved/gold кейси.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -235,6 +483,13 @@ function DailyChart({ data }: { data: { date: string; count: number }[] }) {
 
 type QueryRow = AnalyticsData["recent"][number]
 
+type AnnotatedSource = {
+  num?: number; title?: string | null; law_id?: string | null
+  collection?: string | null; reason?: string | null
+  in_db?: boolean; db_title?: string | null; db_collection?: string | null
+}
+type EvalRecommendation = { action: "approve" | "reject" | "approve_gold"; is_gold: boolean; reason: string }
+
 function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
   const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
   const [evalCase, setEvalCase] = useState<RagEvalCase | null>(() => normalizeEvalCase(row.rag_eval_case ?? row.ai_eval))
@@ -244,6 +499,9 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
   const [expectedText, setExpectedText] = useState("")
   const [badText, setBadText] = useState("")
   const [notesText, setNotesText] = useState("")
+  const [recommendation, setRecommendation] = useState<EvalRecommendation | null>(null)
+  const [annotatedExpected, setAnnotatedExpected] = useState<AnnotatedSource[] | null>(null)
+  const [annotatedBad, setAnnotatedBad] = useState<AnnotatedSource[] | null>(null)
 
   useEffect(() => {
     setExpectedText(JSON.stringify(evalCase?.expected_sources ?? [], null, 2))
@@ -253,11 +511,29 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
 
   async function runAiEval() {
     setEvaluating(true)
+    setRecommendation(null)
+    setAnnotatedExpected(null)
+    setAnnotatedBad(null)
     try {
       const res = await fetch(`/api/admin/analytics/${row.id}/evaluate`, { method: "POST" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "AI eval failed")
       setEvalCase(normalizeEvalCase(data.eval))
+      if (data.recommendation) setRecommendation(data.recommendation)
+      if (data.annotated_expected) {
+        setAnnotatedExpected(data.annotated_expected)
+        setExpectedText(JSON.stringify(
+          data.annotated_expected.map(({ in_db: _, db_title: __, db_collection: ___, ...s }: AnnotatedSource) => s),
+          null, 2,
+        ))
+      }
+      if (data.annotated_bad) {
+        setAnnotatedBad(data.annotated_bad)
+        setBadText(JSON.stringify(
+          data.annotated_bad.map(({ in_db: _, db_title: __, db_collection: ___, ...s }: AnnotatedSource) => s),
+          null, 2,
+        ))
+      }
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error))
     } finally {
@@ -341,6 +617,16 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
               </div>
             </div>
 
+            {/* Rewritten query */}
+            {row.query_rewritten && row.query_rewritten !== row.query_text && (
+              <div>
+                <p className="text-[12px] font-black text-[#4E9FBF]/60 uppercase tracking-[0.2em] mb-2">RAG шукав по</p>
+                <div className="bg-[#4E9FBF]/5 border border-[#4E9FBF]/20 rounded-xl px-4 py-3 text-sm text-[#E0E6ED]/80 leading-relaxed">
+                  {row.query_rewritten}
+                </div>
+              </div>
+            )}
+
             {/* Answer */}
             <div>
               <p className="text-[12px] font-black text-[#C9A84C]/50 uppercase tracking-[0.2em] mb-2">Відповідь</p>
@@ -408,32 +694,108 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
                 </button>
               </div>
 
-              {evalCase && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <p className="text-[#6B7CA3] uppercase tracking-wider mb-1">Expected sources</p>
-                    <div className="space-y-1">
-                      {(evalCase.expected_sources ?? []).length > 0 ? (evalCase.expected_sources ?? []).map((source, i) => (
-                        <div key={`${sourceLabel(source, i)}-${i}`} className="bg-[#1a2035]/60 border border-[#C9A84C]/10 rounded-lg px-2 py-1.5">
-                          <p className="text-[#E0E6ED]/80">{sourceLabel(source, i)}</p>
-                          {source.reason && <p className="text-[#6B7CA3] mt-0.5">{source.reason}</p>}
-                        </div>
-                      )) : <p className="text-[#6B7CA3]">None</p>}
-                    </div>
+              {/* AI Recommendation block */}
+              {recommendation && (
+                <div className={`rounded-xl border px-4 py-3 space-y-1 ${
+                  recommendation.action === "approve_gold"
+                    ? "bg-[#C9A84C]/8 border-[#C9A84C]/30"
+                    : recommendation.action === "approve"
+                      ? "bg-emerald-500/8 border-emerald-500/25"
+                      : "bg-red-500/8 border-red-500/25"
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-[#6B7CA3]">Рекомендація ШІ</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      recommendation.action === "approve_gold"
+                        ? "text-[#C9A84C] bg-[#C9A84C]/15"
+                        : recommendation.action === "approve"
+                          ? "text-emerald-300 bg-emerald-500/15"
+                          : "text-red-300 bg-red-500/15"
+                    }`}>
+                      {recommendation.action === "approve_gold" ? "✦ Gold case" : recommendation.action === "approve" ? "✓ Approve" : "✗ Reject"}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-[#6B7CA3] uppercase tracking-wider mb-1">Bad sources</p>
-                    <div className="space-y-1">
-                      {(evalCase.bad_sources ?? []).length > 0 ? (evalCase.bad_sources ?? []).map((source, i) => (
-                        <div key={`${sourceLabel(source, i)}-${i}`} className="bg-red-500/5 border border-red-500/10 rounded-lg px-2 py-1.5">
-                          <p className="text-[#E0E6ED]/80">{sourceLabel(source, i)}</p>
-                          {source.reason && <p className="text-[#6B7CA3] mt-0.5">{source.reason}</p>}
-                        </div>
-                      )) : <p className="text-[#6B7CA3]">None</p>}
+                  {recommendation.reason && (
+                    <p className="text-xs text-[#A9B4C7] leading-relaxed">{recommendation.reason}</p>
+                  )}
+                  {recommendation.action !== "reject" && (
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => patchEval({ status: "approved", is_gold: recommendation.is_gold || recommendation.action === "approve_gold" })}
+                        disabled={savingEval}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold ${recommendation.action === "approve_gold" ? "bg-[#C9A84C] text-[#0A0E1A]" : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"}`}
+                      >
+                        <CheckCircle2 className="w-3 h-3" />
+                        {recommendation.action === "approve_gold" ? "Approve + Gold" : "Approve"}
+                      </button>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
+
+              {evalCase && (() => {
+                const expSources = annotatedExpected ?? (evalCase.expected_sources as AnnotatedSource[] | undefined) ?? []
+                const badSources = annotatedBad ?? (evalCase.bad_sources as AnnotatedSource[] | undefined) ?? []
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[#6B7CA3] uppercase tracking-wider">Expected sources</p>
+                        {expSources.length > 0 && (
+                          <button
+                            onClick={() => navigator.clipboard.writeText(JSON.stringify(
+                              expSources.map(({ in_db: _, db_title: __, db_collection: ___, ...s }) => s), null, 2
+                            ))}
+                            className="text-[10px] text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors"
+                          >
+                            Copy JSON
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        {expSources.length > 0 ? expSources.map((source, i) => (
+                          <div key={`exp-${i}`} className={`border rounded-lg px-2 py-1.5 ${source.in_db === false ? "bg-red-500/5 border-red-500/15" : source.in_db === true ? "bg-emerald-500/5 border-emerald-500/15" : "bg-[#1a2035]/60 border-[#C9A84C]/10"}`}>
+                            <div className="flex items-start gap-1.5">
+                              {source.in_db === true && <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />}
+                              {source.in_db === false && <XCircleIcon className="w-3 h-3 text-red-400 shrink-0 mt-0.5" />}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[#E0E6ED]/80 truncate">{sourceLabel(source, i)}</p>
+                                {source.law_id && (
+                                  <p className="text-[10px] font-mono text-[#6B7CA3]">
+                                    {source.law_id}
+                                    {source.in_db === true && <span className="ml-1 text-emerald-400">· є в базі</span>}
+                                    {source.in_db === false && <span className="ml-1 text-red-400">· нема в базі</span>}
+                                    {source.db_collection && <span className="ml-1 text-[#6B7CA3]">· {source.db_collection.replace("_v2", "")}</span>}
+                                  </p>
+                                )}
+                                {source.reason && <p className="text-[#6B7CA3] mt-0.5">{source.reason}</p>}
+                              </div>
+                            </div>
+                          </div>
+                        )) : <p className="text-[#6B7CA3]">None</p>}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[#6B7CA3] uppercase tracking-wider mb-1">Bad sources</p>
+                      <div className="space-y-1">
+                        {badSources.length > 0 ? badSources.map((source, i) => (
+                          <div key={`bad-${i}`} className="bg-red-500/5 border border-red-500/10 rounded-lg px-2 py-1.5">
+                            <p className="text-[#E0E6ED]/80">{sourceLabel(source, i)}</p>
+                            {source.law_id && (
+                              <p className="text-[10px] font-mono text-[#6B7CA3]">
+                                {source.law_id}
+                                {source.in_db === true && <span className="ml-1 text-amber-400">· є в базі</span>}
+                                {source.in_db === false && <span className="ml-1 text-[#6B7CA3]">· нема в базі</span>}
+                              </p>
+                            )}
+                            {source.reason && <p className="text-[#6B7CA3] mt-0.5">{source.reason}</p>}
+                          </div>
+                        )) : <p className="text-[#6B7CA3]">None</p>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {evalCase?.eval_notes && !editEval && (
                 <p className="text-xs text-[#A9B4C7] bg-[#1a2035]/50 border border-[#C9A84C]/10 rounded-lg px-3 py-2">
@@ -755,6 +1117,9 @@ export default function AnalyticsPage() {
               </div>
             </motion.div>
           </div>
+
+          {/* Eval Runner */}
+          <EvalRunner />
 
           {/* Recent queries table */}
           <motion.div
