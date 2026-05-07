@@ -4533,12 +4533,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         top_p            = settings_cache.get_float("top_p", 0.8)
         response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
         is_short_response = response_length_pref == "short"
+        is_detailed_response = response_length_pref in {"detailed", "full"}
+        is_full_response = response_length_pref == "full"
         configured_max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
         _pref_token_bounds = {
             "short": (1200, 1800),
-            "standard": (1600, 2400),
-            "detailed": (3000, 4200),
-            "full": (5000, 8000),
+            "standard": (1800, 2600),
+            "detailed": (4200, 5600),
+            "full": (6500, 9000),
         }
         _min_tokens, _max_tokens = _pref_token_bounds[response_length_pref]
         max_output_tokens = min(max(configured_max_output_tokens, _min_tokens), _max_tokens)
@@ -4553,10 +4555,23 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "Поясни головну норму, ключові підстави/винятки і практичний висновок. "
                 "Посилання [N] став там, де є юридичні твердження."
             )
-        if "response_detailed" in rf and not is_short_response:
+        if response_length_pref == "standard":
             response_instructions.append(
-                "Дай розгорнуту відповідь з аналізом: поясни суть, розкрий деталі, "
-                "вкажи винятки та важливі нюанси."
+                "РЕЖИМ СТАНДАРТНОЇ ВІДПОВІДІ: дай збалансовану відповідь без зайвого розширення. "
+                "Поясни норму, практичний висновок і тільки найважливіші нюанси."
+            )
+        if "response_detailed" in rf and response_length_pref == "detailed":
+            response_instructions.append(
+                "РЕЖИМ РОЗГОРНУТОЇ ВІДПОВІДІ: дай більше деталей, нюансів, винятків і практичних застережень. "
+                "Жорстка структура: 5-7 коротких секцій, у кожній 1-3 абзаци або пункти. "
+                "Не перетворюй відповідь на повний меморандум і не переказуй усі джерела підряд."
+            )
+        if "response_detailed" in rf and is_full_response:
+            response_instructions.append(
+                "РЕЖИМ ПОВНОГО АНАЛІЗУ: дай глибокий структурований розбір як юридичний memo. "
+                "Жорстка структура: 7-9 секцій. Розкрий правову рамку, фактичні умови, винятки, ризики, "
+                "докази/документи та практичну стратегію. Якщо матеріалу багато, групуй джерела за темами, "
+                "а не описуй кожне джерело окремо."
             )
         if "response_steps" in rf and is_short_response:
             response_instructions.append(
@@ -4566,7 +4581,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             response_instructions.append(
                 "Обов'язково додай розділ «Що робити далі» з конкретними покроковими діями."
             )
-        if "response_scenarios" in rf and not is_short_response:
+        if "response_scenarios" in rf and is_detailed_response:
             response_instructions.append(
                 "Розглянь альтернативні сценарії розвитку ситуації та їхні наслідки."
             )
@@ -4645,13 +4660,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "але достатньою, щоб користувач зрозумів суть і наступний крок. Обов'язково завершуй речення."
             )
         else:
-            _pref_limits = {"standard": 400, "detailed": 900, "full": 2000}
+            _pref_limits = {"standard": 400, "detailed": 850, "full": 1600}
             _word_limit = _pref_limits[response_length_pref]
-            if response_length_pref == "standard" and ("response_detailed" in rf or "response_scenarios" in rf):
-                _word_limit = 800
             response_instructions.append(
                 f"Пиши завершену відповідь до {_word_limit} слів. "
                 "Ніколи не обривай речення — якщо не вистачає місця, скорочуй менш важливі деталі, але завжди завершуй думку."
+            )
+            response_instructions.append(
+                "КОНТРОЛЬ ОБСЯГУ: перед фінальним абзацом перевір, чи вкладаєшся в ліміт. "
+                "Якщо місця мало, не додавай нові розділи — дай стислий висновок і заверши відповідь."
             )
 
         # Language style instruction
@@ -4660,6 +4677,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "СТИЛЬ МОВИ: пиши простою зрозумілою мовою без юридичного жаргону. "
                 "Замінюй складні терміни поясненнями. "
                 "Уявляй що пояснюєш людині без юридичної освіти."
+            )
+        else:
+            response_instructions.append(
+                "СТИЛЬ МОВИ: використовуй точну юридичну мову, коректні назви НПА, процесуальні терміни "
+                "і професійну структуру відповіді."
             )
 
         # Build user profile block if available

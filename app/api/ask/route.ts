@@ -104,7 +104,7 @@ export async function POST(request: Request) {
   const isProPlus   = tier === "pro"
 
   let response_length_pref = (profile?.response_length_pref ?? "standard") as string
-  let response_lang_style  = (profile?.response_lang_style  ?? "legal")    as string
+  const response_lang_style = (profile?.response_lang_style ?? "legal") as string
 
   // Downgrade locked preferences silently if plan doesn't allow them
   if (response_length_pref === "full"     && !isProPlus)   response_length_pref = "standard"

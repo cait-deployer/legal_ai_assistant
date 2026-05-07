@@ -21,9 +21,10 @@ import { motion, AnimatePresence } from "framer-motion"
 
 // ── Types
 type Segment = "legal_pro" | "business_finance" | "gov_sector" | "military_theme" | "social_vulnerable" | "daily_life" | "specialized_niche"
+type PlanTier = "free" | "daily" | "standard" | "pro"
 type Profile = {
   id: string; email: string; full_name: string | null; segment: Segment[]; role: string | null;
-  sub_role: string[]; subscription_tier: "free" | "basic" | "pro" | "ultra"; auth_provider: string;
+  sub_role: string[]; subscription_tier: PlanTier | "basic" | "ultra"; auth_provider: string;
   requests_this_month: number; monthly_limit: number | null; limit_reset_at: string | null;
   bonus_requests: number | null;
   total_requests: number; last_ip: string | null; last_city: string | null; last_country: string | null;
@@ -50,6 +51,13 @@ const ROLES = [
 ]
 
 const fetcher = (url: string) => fetch(url).then(r => { if (!r.ok) throw new Error("fetch error"); return r.json() })
+
+function effectiveTier(profile: Profile): PlanTier {
+  if (profile.is_beta_tester) return "pro"
+  if (profile.subscription_tier === "basic") return "standard"
+  if (profile.subscription_tier === "ultra") return "pro"
+  return profile.subscription_tier
+}
 
 function AuthBg() {
   return (
@@ -87,7 +95,7 @@ function ProfileTab({ profile }: { profile: Profile }) {
   const [styleSaved, setStyleSaved] = useState(false)
   const [styleError, setStyleError] = useState("")
 
-  const tier = profile.subscription_tier
+  const tier = effectiveTier(profile)
   const isBasicPlus = tier !== "free"
   const isProPlus = tier === "pro"
 
@@ -538,15 +546,16 @@ function SecurityTab({ profile }: { profile: Profile }) {
 
 // ── Tab: Usage
 function UsageTab({ profile }: { profile: Profile }) {
+  const tier = effectiveTier(profile)
   const used = profile.requests_this_month ?? 0
   const baseLimit = profile.monthly_limit
   const bonus = profile.bonus_requests ?? 0
-  const effectiveLimit = baseLimit !== null ? baseLimit + bonus : null
+  const effectiveLimit = profile.is_beta_tester ? null : baseLimit !== null ? baseLimit + bonus : null
   const isUnlim = effectiveLimit === null
-  const isFree = profile.subscription_tier === "free"
+  const isFree = tier === "free"
   const pct = effectiveLimit ? Math.min(Math.round((used / effectiveLimit) * 100), 100) : 0
   const resetAt = (!isFree && profile.limit_reset_at) ? new Date(profile.limit_reset_at) : null
-  const resetLabel = resetAt ? resetAt.toLocaleDateString("uk-UA", { day: "numeric", month: "long" }) : "—"
+  const resetLabel = isUnlim ? "—" : resetAt ? resetAt.toLocaleDateString("uk-UA", { day: "numeric", month: "long" }) : "—"
   const now = new Date()
   const daysLeft = resetAt ? Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 86400000)) : null
 
@@ -577,7 +586,7 @@ function UsageTab({ profile }: { profile: Profile }) {
               <p className="text-xs text-[#C9A84C]/60 font-medium">Оновлення: {resetLabel}</p>
             </div>
             <div className="text-right">
-              <span className="text-4xl font-bold text-[#C9A84C]">{pct}%</span>
+              <span className="text-4xl font-bold text-[#C9A84C]">{isUnlim ? "∞" : `${pct}%`}</span>
             </div>
           </div>
 
@@ -594,7 +603,9 @@ function UsageTab({ profile }: { profile: Profile }) {
 
           <div className="flex justify-between items-center mt-8">
             <p className="text-[12px] font-black text-[#C9A84C]/70 uppercase tracking-[0.2em] flex items-center gap-2">
-              {daysLeft !== null
+              {isUnlim
+                ? <><Infinity className="w-3.5 h-3.5" /> Безліміт активний</>
+                : daysLeft !== null
                 ? <><Clock className="w-3.5 h-3.5" /> Скидання через {daysLeft} дн.</>
                 : <><Clock className="w-3.5 h-3.5" /> Одноразовий ліміт</>}
             </p>
@@ -638,7 +649,7 @@ function BillingTab({ profile }: { profile: Profile }) {
     fetch("/api/plans").then(r => r.json()).then(setPlans).catch(() => { }).finally(() => setLoadingPlans(false))
   }, [])
 
-  const currentTier = profile.subscription_tier
+  const currentTier = effectiveTier(profile)
 
   const priceLabel = (plan: PlanData) => {
     if (plan.price_uah === 0) return { price: "0 грн", period: "" }
