@@ -5459,7 +5459,7 @@ async def eval_find_sources(body: dict):
     """
     For each source hint {law_id?, title?}: find the real document in Qdrant.
     Tries law_id exact match first, then vector search by title.
-    Returns one result per input item (same order).
+    Returns one result per input item (same order). Runs SEQUENTIALLY to avoid overwhelming Qdrant.
     """
     from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient, search_qdrant
     from qdrant_client import models as _qmodels
@@ -5471,59 +5471,74 @@ async def eval_find_sources(body: dict):
         return []
 
     client = _qclient()
-    _sem = _asyncio.Semaphore(3)  # max 3 concurrent embed calls
+    empty = {"found": False, "db_law_id": None, "db_title": None, "db_collection": None, "match_type": None}
 
-    async def find_one(hint: dict) -> dict:
+    def _scroll_by_id(law_id: str) -> dict | None:
+        """Synchronous scroll across all collections. Runs in a thread."""
+        for col in ALL_V2_COLLECTIONS:
+            try:
+                pts, _ = client.scroll(
+                    collection_name=col,
+                    scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
+                        key="law_id", match=_qmodels.MatchValue(value=law_id)
+                    )]),
+                    limit=1, with_payload=["title", "law_id"], with_vectors=False,
+                )
+                if pts:
+                    p = pts[0].payload or {}
+                    return {"found": True,
+                            "db_law_id": p.get("law_id", law_id),
+                            "db_title": p.get("title") or p.get("source_title"),
+                            "db_collection": col, "match_type": "law_id"}
+            except Exception:
+                continue
+        return None
+
+    def _search_by_title(vec: list, threshold: float = 0.45) -> dict | None:
+        """Synchronous vector search across all collections. Runs in a thread."""
+        try:
+            hits = search_qdrant(vec, 3, ALL_V2_COLLECTIONS, threshold)
+            if hits:
+                h = hits[0]
+                return {"found": True,
+                        "db_law_id": h.get("law_id"),
+                        "db_title": h.get("source_title") or h.get("title"),
+                        "db_collection": h.get("collection"),
+                        "match_type": "title",
+                        "score": round(float(h.get("score", 0)), 3)}
+        except Exception:
+            pass
+        return None
+
+    results = []
+    for hint in sources:
         law_id = (hint.get("law_id") or "").strip()
         title = (hint.get("title") or "").strip()
-        empty = {"found": False, "db_law_id": None, "db_title": None, "db_collection": None, "match_type": None}
 
-        # 1. Exact match by law_id
+        # 1. Try exact law_id match
         if law_id:
-            def _scroll_id():
-                for col in ALL_V2_COLLECTIONS:
-                    try:
-                        pts, _ = client.scroll(
-                            collection_name=col,
-                            scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
-                                key="law_id", match=_qmodels.MatchValue(value=law_id)
-                            )]),
-                            limit=1, with_payload=["title", "law_id"], with_vectors=False,
-                        )
-                        if pts:
-                            return {"found": True,
-                                    "db_law_id": pts[0].payload.get("law_id", law_id),
-                                    "db_title": pts[0].payload.get("title"),
-                                    "db_collection": col, "match_type": "law_id"}
-                    except Exception:
-                        continue
-                return None
-
-            res = await _asyncio.to_thread(_scroll_id)
-            if res:
-                return res
+            try:
+                res = await _asyncio.to_thread(_scroll_by_id, law_id)
+                if res:
+                    results.append(res)
+                    continue
+            except Exception:
+                pass
 
         # 2. Vector search by title
         if title:
-            async with _sem:
-                try:
-                    vec = await _asyncio.to_thread(_embed_v2.embed_query, title[:300])
-                    hits = await _asyncio.to_thread(search_qdrant, vec, 1, ALL_V2_COLLECTIONS, 0.62)
-                    if hits:
-                        h = hits[0]
-                        return {"found": True,
-                                "db_law_id": h.get("law_id"),
-                                "db_title": h.get("source_title") or h.get("title"),
-                                "db_collection": h.get("collection"),
-                                "match_type": "title",
-                                "score": round(float(h.get("score", 0)), 3)}
-                except Exception:
-                    pass
+            try:
+                vec = await _asyncio.to_thread(_embed_v2.embed_query, title[:300])
+                res = await _asyncio.to_thread(_search_by_title, vec)
+                if res:
+                    results.append(res)
+                    continue
+            except Exception:
+                pass
 
-        return empty
+        results.append(dict(empty))
 
-    results = await _asyncio.gather(*[find_one(s) for s in sources])
-    return list(results)
+    return results
 
 
 @app.post("/ask")
