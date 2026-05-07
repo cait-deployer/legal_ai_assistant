@@ -443,24 +443,51 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
 
               {editEval && (
                 <div className="space-y-2">
+                  <div className="rounded-lg border border-[#C9A84C]/15 bg-[#C9A84C]/5 px-3 py-2 text-xs text-[#A9B4C7] leading-relaxed">
+                    <p className="font-semibold text-[#E0E6ED] mb-1">Що це за масиви?</p>
+                    <p>
+                      <span className="text-[#C9A84C]">expected_sources</span> - джерела, які мали бути в правильній відповіді або реально підтверджують висновок.
+                    </p>
+                    <p>
+                      <span className="text-red-300">bad_sources</span> - джерела, які AI використав невдало: не про це питання, лише фон або інша фактична ситуація.
+                    </p>
+                    <p className="mt-1">
+                      Поля: <span className="text-[#E0E6ED]">num</span> - номер citation у відповіді, <span className="text-[#E0E6ED]">title</span> - назва джерела, <span className="text-[#E0E6ED]">law_id/collection</span> - технічні ідентифікатори, <span className="text-[#E0E6ED]">reason</span> - чому джерело добре або погане.
+                    </p>
+                  </div>
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-[#C9A84C] mb-1">
+                      expected_sources - правильні/потрібні джерела
+                    </span>
                   <textarea
                     value={expectedText}
                     onChange={(e) => setExpectedText(e.target.value)}
                     className="w-full h-28 bg-[#070B14] border border-[#C9A84C]/15 rounded-lg px-3 py-2 text-xs text-[#E0E6ED] font-mono"
-                    placeholder="expected_sources JSON"
+                    placeholder='[{"num":1,"title":"...","law_id":"...","collection":"...","reason":"чому джерело потрібне"}]'
                   />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-red-300 mb-1">
+                      bad_sources - нерелевантні/шкідливі джерела
+                    </span>
                   <textarea
                     value={badText}
                     onChange={(e) => setBadText(e.target.value)}
                     className="w-full h-28 bg-[#070B14] border border-[#C9A84C]/15 rounded-lg px-3 py-2 text-xs text-[#E0E6ED] font-mono"
-                    placeholder="bad_sources JSON"
+                    placeholder='[{"num":2,"title":"...","law_id":"...","collection":"...","reason":"чому джерело погане"}]'
                   />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7CA3] mb-1">
+                      eval_notes - короткий висновок для нас
+                    </span>
                   <textarea
                     value={notesText}
                     onChange={(e) => setNotesText(e.target.value)}
                     className="w-full h-20 bg-[#070B14] border border-[#C9A84C]/15 rounded-lg px-3 py-2 text-xs text-[#E0E6ED]"
-                    placeholder="eval notes"
+                    placeholder="Наприклад: відповідь коректна, але джерело 4 лише фонове."
                   />
+                  </label>
                   <button
                     onClick={saveEvalEdits}
                     disabled={savingEval}
