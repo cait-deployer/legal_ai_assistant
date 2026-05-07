@@ -5547,43 +5547,46 @@ async def eval_find_sources(body: dict):
 @app.get("/admin/eval/debug_scroll")
 async def eval_debug_scroll(law_id: str):
     """Debug: shows which V2 collections contain a given law_id (exact match)."""
-    from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient
-    from qdrant_client import models as _qmodels
     import asyncio as _asyncio
+    try:
+        from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient
+        from qdrant_client import models as _qmodels
 
-    client = _qclient()
+        client = _qclient()
 
-    def _check():
-        found_in = []
-        errors = []
-        for col in ALL_V2_COLLECTIONS:
-            try:
-                pts, _ = client.scroll(
-                    collection_name=col,
-                    scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
-                        key="law_id", match=_qmodels.MatchValue(value=law_id)
-                    )]),
-                    limit=3, with_payload=["source", "law_id"], with_vectors=False,
-                )
-                if pts:
-                    p = pts[0].payload or {}
-                    found_in.append({
-                        "collection": col,
-                        "db_law_id": p.get("law_id"),
-                        "db_title": p.get("source"),
-                        "chunks_found": len(pts),
-                    })
-            except Exception as e:
-                errors.append(f"{col}: {e}")
-        return {
-            "searched_for": law_id,
-            "found": len(found_in) > 0,
-            "found_in": found_in,
-            "collections_checked": len(ALL_V2_COLLECTIONS),
-            "errors": errors,
-        }
+        def _check():
+            found_in = []
+            errors = []
+            for col in ALL_V2_COLLECTIONS:
+                try:
+                    pts, _ = client.scroll(
+                        collection_name=col,
+                        scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
+                            key="law_id", match=_qmodels.MatchValue(value=law_id)
+                        )]),
+                        limit=3, with_payload=["source", "law_id"], with_vectors=False,
+                    )
+                    if pts:
+                        p = pts[0].payload or {}
+                        found_in.append({
+                            "collection": col,
+                            "db_law_id": p.get("law_id"),
+                            "db_title": p.get("source"),
+                            "chunks_found": len(pts),
+                        })
+                except Exception as e:
+                    errors.append(f"{col}: {type(e).__name__}: {e}")
+            return {
+                "searched_for": law_id,
+                "found": len(found_in) > 0,
+                "found_in": found_in,
+                "collections_checked": len(ALL_V2_COLLECTIONS),
+                "errors": errors,
+            }
 
-    return await _asyncio.to_thread(_check)
+        return await _asyncio.to_thread(_check)
+    except Exception as e:
+        return {"searched_for": law_id, "found": False, "error": f"{type(e).__name__}: {e}"}
 
 
 @app.post("/ask")
