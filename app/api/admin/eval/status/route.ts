@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 
-const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8001"
+const BACKEND = process.env.BACKEND_URL || process.env.API_URL || "http://localhost:8000"
 
 async function checkAdmin() {
   const c = await cookies()

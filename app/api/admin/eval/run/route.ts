@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { createClient } from "@supabase/supabase-js"
 
-const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8001"
+const BACKEND = process.env.BACKEND_URL || process.env.API_URL || "http://localhost:8000"
 
 function admin() {
   return createClient(

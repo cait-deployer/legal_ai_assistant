@@ -413,7 +413,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (hints.some(h => h.law_id || h.title)) {
       try {
         const findRes = await fetch(
-          `${process.env.BACKEND_URL ?? "http://localhost:8001"}/admin/eval/find_sources`,
+          `${process.env.BACKEND_URL || process.env.API_URL || "http://localhost:8000"}/admin/eval/find_sources`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

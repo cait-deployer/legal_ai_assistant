@@ -5224,9 +5224,23 @@ _eval_state: dict = {
 _eval_lock = threading.Lock()
 
 
-async def _eval_retrieve(question: str, top_n: int = 20) -> list[dict]:
-    """Embed question, search all V2 collections, return top_n deduplicated by law_id."""
+def _eval_result_row(r: dict) -> dict:
+    meta = r.get("out_metadata") or {}
+    ans = r.get("_answerability") or {}
+    return {
+        "law_id": meta.get("law_id", ""),
+        "title": (meta.get("source") or meta.get("title") or "")[:240],
+        "collection": r.get("_collection", ""),
+        "score": round(float(r.get("similarity", 0.0) or 0.0), 4),
+        "answerability": round(float(ans.get("score", 0.0) or 0.0), 4) if ans else None,
+        "coverage": round(float(ans.get("coverage", 0.0) or 0.0), 3) if ans else None,
+    }
+
+
+async def _eval_vector_retrieve(question: str, top_n: int = 20) -> list[dict]:
+    """Fallback: embed question and search all V2 collections directly."""
     import asyncio as _asyncio
+    import embed_v2 as _embed_v2
     from qdrant_storage import get_client, ALL_V2_COLLECTIONS
 
     vec = await _asyncio.to_thread(_embed_v2.embed_query, question)
@@ -5263,11 +5277,57 @@ async def _eval_retrieve(question: str, top_n: int = 20) -> list[dict]:
     return deduped
 
 
+async def _eval_retrieve(question: str, top_n: int = 20) -> list[dict]:
+    """
+    Run the same retrieval/rerank/context selection pipeline as the chat,
+    but stop before answer generation. This makes eval results reflect the
+    real RAG path: rewrite, routing, keyword/title boosts, answerability
+    rerank, and context squeeze.
+    """
+    body = AskRequest(
+        question=question,
+        max_docs=max(top_n, 20),
+        filter_sources=None,
+        response_features=["response_detailed", "response_vs_position"],
+        response_length_pref="full",
+        response_lang_style="legal",
+    )
+    try:
+        pipe = await _ask_pipeline(body)
+        if pipe.get("early_answer"):
+            return []
+        return [_eval_result_row(r) for r in (pipe.get("results") or [])][:top_n]
+    except Exception as exc:
+        logger.warning("EVAL PIPELINE fallback to vector search: %s", exc)
+        return await _eval_vector_retrieve(question, top_n=top_n)
+
+
+def _eval_norm(text: str | None) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\wА-Яа-яІіЇїЄєҐґ]+", " ", (text or "").lower())).strip()
+
+
+def _eval_source_matches_result(src: dict, result: dict) -> bool:
+    src_law_id = (src.get("law_id") or "").strip()
+    src_collection = (src.get("collection") or src.get("db_collection") or "").strip()
+    res_law_id = (result.get("law_id") or "").strip()
+    res_collection = (result.get("collection") or "").strip()
+
+    if src_collection and res_collection and src_collection != res_collection:
+        return False
+    if src_law_id and res_law_id:
+        return src_law_id == res_law_id
+
+    src_title = _eval_norm(src.get("title") or src.get("db_title"))
+    res_title = _eval_norm(result.get("title"))
+    if not src_title or not res_title:
+        return False
+    return len(src_title) >= 16 and (src_title in res_title or res_title in src_title)
+
+
 def _check_sources(results: list[dict], sources: list[dict], top_k: int) -> list[dict]:
     checked = []
     for src in sources:
-        lid = src.get("law_id", "")
-        rank = next((i + 1 for i, r in enumerate(results) if r["law_id"] and r["law_id"] == lid), None)
+        rank = next((i + 1 for i, r in enumerate(results) if _eval_source_matches_result(src, r)), None)
         checked.append({
             **src,
             "found_in_top": rank is not None and rank <= top_k,
