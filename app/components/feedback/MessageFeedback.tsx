@@ -35,7 +35,13 @@ export function MessageFeedback({ messageId, chatId, initialIsPositive = null, b
   useEffect(() => {
     if (!autoOpen || submitted || autoOpenedRef.current) return
     autoOpenedRef.current = true
-    setShowModal(true)
+    const timer = setTimeout(() => {
+      setVote("positive")
+      setTags([])
+      setText("")
+      setShowModal(true)
+    }, 30000)
+    return () => clearTimeout(timer)
   }, [autoOpen, submitted])
 
   const openModal = (v: Vote) => {
