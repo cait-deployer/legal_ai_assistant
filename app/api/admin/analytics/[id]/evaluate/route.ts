@@ -31,10 +31,12 @@ type RagEval = {
   recommendation?: EvalRecommendation | null
 }
 
-type DbCheckResult = {
+type FindResult = {
   found: boolean
-  collection: string | null
-  title: string | null
+  db_law_id: string | null
+  db_title: string | null
+  db_collection: string | null
+  match_type: string | null
 }
 
 type AnnotatedSource = EvalSource & {
@@ -403,40 +405,47 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       settings,
     )
 
-    // Verify AI-suggested law_ids against Qdrant
-    const allLawIds = [
-      ...evalDraft.expected_sources.map(s => s.law_id),
-      ...evalDraft.bad_sources.map(s => s.law_id),
-    ].filter((id): id is string => Boolean(id))
+    // Find each AI-suggested source in Qdrant — by law_id or by title (vector search)
+    const allSources = [...evalDraft.expected_sources, ...evalDraft.bad_sources]
+    const hints = allSources.map(s => ({ law_id: s.law_id ?? null, title: s.title ?? null }))
 
-    let dbCheck: Record<string, DbCheckResult> = {}
-    if (allLawIds.length > 0) {
+    let findResults: FindResult[] = hints.map(() => ({ found: false, db_law_id: null, db_title: null, db_collection: null, match_type: null }))
+    if (hints.some(h => h.law_id || h.title)) {
       try {
-        const checkRes = await fetch(
-          `${process.env.BACKEND_URL ?? "http://localhost:8001"}/admin/eval/check_ids?ids=${encodeURIComponent(allLawIds.join(","))}`,
-          { signal: AbortSignal.timeout(10000) },
+        const findRes = await fetch(
+          `${process.env.BACKEND_URL ?? "http://localhost:8001"}/admin/eval/find_sources`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sources: hints }),
+            signal: AbortSignal.timeout(25000),
+          },
         )
-        if (checkRes.ok) dbCheck = await checkRes.json()
+        if (findRes.ok) findResults = await findRes.json()
       } catch { /* non-fatal */ }
     }
 
-    function annotate(sources: EvalSource[]): AnnotatedSource[] {
-      return sources.map(s => {
-        const check = s.law_id ? dbCheck[s.law_id] : undefined
-        if (!check) return s
+    const expLen = evalDraft.expected_sources.length
+
+    function annotateWithFind(sources: EvalSource[], offset: number): AnnotatedSource[] {
+      return sources.map((s, i) => {
+        const r = findResults[offset + i]
+        if (!r?.found) return { ...s, in_db: false }
         return {
           ...s,
-          in_db: check.found,
-          db_title: check.found ? (check.title ?? null) : null,
-          db_collection: check.found ? (check.collection ?? null) : null,
-          title: s.title ?? (check.found ? (check.title ?? null) : null),
-          collection: s.collection ?? (check.found ? (check.collection ?? null) : null),
+          // Fill in law_id and title from DB when AI left them empty
+          law_id: s.law_id || r.db_law_id || null,
+          title: s.title || r.db_title || null,
+          collection: s.collection || r.db_collection || null,
+          in_db: true,
+          db_title: r.db_title,
+          db_collection: r.db_collection,
         }
       })
     }
 
-    const annotatedExpected = annotate(evalDraft.expected_sources)
-    const annotatedBad = annotate(evalDraft.bad_sources)
+    const annotatedExpected = annotateWithFind(evalDraft.expected_sources, 0)
+    const annotatedBad = annotateWithFind(evalDraft.bad_sources, expLen)
 
     await sb
       .from("query_analytics")
