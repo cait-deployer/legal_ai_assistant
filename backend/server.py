@@ -3501,6 +3501,133 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
     return result["_answerability"]
 
 
+def _is_background_collection(col: str) -> bool:
+    return col in ("laws_wiki_v2", "laws_zir_v2")
+
+
+def _is_court_collection(col: str) -> bool:
+    return col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2")
+
+
+def _strict_context_score(result: dict, query_text: str, terms: list[str] | None = None) -> float:
+    ans = result.get("_answerability") or _answerability_score(result, query_text, terms)
+    col = result.get("_collection", "")
+    score = float(ans.get("score", 0.0) or 0.0)
+    score += (float(ans.get("content_coverage", 0.0) or 0.0) * 0.16)
+    score += ((_authority_score(result) - 1.0) * 0.18)
+    if ans.get("normative"):
+        score += 0.05
+    if _is_background_collection(col):
+        score -= 0.10
+    if col == "laws_supreme_v2":
+        score -= 0.04
+    if (result.get("out_metadata") or {}).get("rada_is_dead"):
+        score -= 0.40
+    return score
+
+
+def _squeeze_context_results(
+    results: list[dict],
+    query_text: str,
+    max_docs: int,
+    response_length_pref: str,
+    *,
+    keep_weak: bool = False,
+) -> list[dict]:
+    """Wide search stays wide; this makes the final Gemini context small and source-strict."""
+    if not results:
+        return []
+
+    terms = _query_terms(query_text, limit=18)
+    target_by_pref = {
+        "short": 6,
+        "standard": 8,
+        "detailed": 10,
+        "full": 12,
+    }
+    target = min(max_docs, target_by_pref.get(response_length_pref, 8))
+    min_cov = 0.10 if keep_weak else 0.18
+
+    scored: list[tuple[float, dict]] = []
+    for r in results:
+        ans = r.get("_answerability") or _answerability_score(r, query_text, terms)
+        protected = bool(r.get("_full_law") or r.get("_doc_expansion"))
+        if not protected and float(ans.get("coverage", 0.0) or 0.0) < min_cov:
+            continue
+        scored.append((_strict_context_score(r, query_text, terms), r))
+
+    if not scored:
+        scored = [(_strict_context_score(r, query_text, terms), r) for r in results]
+
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            float(item[1].get("_answerability", {}).get("coverage", 0.0) or 0.0),
+            _authority_score(item[1]),
+            item[1].get("similarity", 0.0),
+        ),
+        reverse=True,
+    )
+
+    picked: list[dict] = []
+    per_doc: dict[tuple[str, str], int] = {}
+    background_count = 0
+    court_count = 0
+    background_cap = 1
+    court_cap = max(1, min(2, target // 4))
+
+    for _score, r in scored:
+        col = r.get("_collection", "")
+        if _is_background_collection(col):
+            if background_count >= background_cap:
+                continue
+        if _is_court_collection(col):
+            if court_count >= court_cap:
+                continue
+        doc_key = (col, r["out_metadata"].get("law_id", ""))
+        doc_cap = 2 if r.get("_full_law") else 1
+        if per_doc.get(doc_key, 0) >= doc_cap:
+            continue
+        picked.append(r)
+        per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
+        if _is_background_collection(col):
+            background_count += 1
+        if _is_court_collection(col):
+            court_count += 1
+        if len(picked) >= target:
+            break
+
+    if len(picked) < min(target, 4):
+        picked_keys = {
+            (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+            for r in picked
+        }
+        for _score, r in scored:
+            key = (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+            if key in picked_keys:
+                continue
+            picked.append(r)
+            picked_keys.add(key)
+            if len(picked) >= min(target, 4):
+                break
+
+    counts: dict[str, int] = {}
+    for r in picked:
+        counts[r.get("_collection", "?")] = counts.get(r.get("_collection", "?"), 0) + 1
+    logger.info(
+        "CONTEXT SQUEEZE: in=%d out=%d target=%d cols=%s top=%s",
+        len(results),
+        len(picked),
+        target,
+        dict(sorted(counts.items())),
+        [
+            f"{r.get('_collection')}:{r['out_metadata'].get('law_id','?')}:s={_strict_context_score(r, query_text, terms):.3f}:a={r.get('_answerability',{}).get('score')}:cov={r.get('_answerability',{}).get('coverage')}"
+            for r in picked[:6]
+        ],
+    )
+    return picked
+
+
 def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int, *, keep_weak: bool = False) -> list[dict]:
     terms = _query_terms(query_text, limit=18)
     if len(terms) < 2 or not results:
@@ -4578,11 +4705,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         keep_weak=low_confidence,
     )
 
+    response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
+    results = _squeeze_context_results(
+        results,
+        _answerability_query,
+        body.max_docs,
+        response_length_pref,
+        keep_weak=low_confidence,
+    )
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
     # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
     # В low_confidence режимі пропускаємо (Gemini вже отримає guardrail в промпті)
-    if not low_confidence and (not results or results[0]["similarity"] < min_score):
+    top_answerability = float(results[0].get("_answerability", {}).get("score", 0.0) or 0.0) if results else 0.0
+    if not low_confidence and (not results or (results[0]["similarity"] < min_score and top_answerability < 0.35)):
         return {"early_answer": {
             "answer": (
                 "На жаль, у базі знань не знайдено достатньо інформації для відповіді на це питання. "
@@ -4729,7 +4865,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         )
         temperature      = settings_cache.get_float("temperature", 0.1)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
         is_short_response = response_length_pref == "short"
         is_detailed_response = response_length_pref in {"detailed", "full"}
         is_full_response = response_length_pref == "full"
@@ -4792,6 +4927,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "ПРАВИЛО ЦИТУВАННЯ (обов'язкове): кожне юридичне твердження МУСИТЬ мати посилання [N]. "
             "Якщо не можеш процитувати конкретний пункт із наданих документів — НЕ пиши це твердження взагалі. "
             "Використовуй точні юридичні терміни з документа і не підміняй одне поняття іншим."
+        )
+        response_instructions.append(
+            "ІЄРАРХІЯ ДЖЕРЕЛ: правовий висновок будуй насамперед на нормативних та офіційних джерелах "
+            "(закони, кодекси, постанови, накази, офіційні порядки). "
+            "Довідкові/background джерела використовуй лише для пояснення контексту, а не як самостійну підставу висновку. "
+            "Судову практику використовуй тільки якщо її фактична ситуація відповідає питанню."
         )
         response_instructions.append(
             f"ТЕХНІЧНИЙ МАРКЕР ЗАВЕРШЕННЯ: коли відповідь повністю завершена, "

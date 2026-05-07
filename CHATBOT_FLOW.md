@@ -20,7 +20,7 @@ flowchart TD
     L --> M[Boost, dedup, diversity, document expansion]
     M --> N[Keyword MatchText + title boost]
     N --> O[Deterministic answerability reranker]
-    O --> P[Expired-document filter + context buckets]
+    O --> P[Strict context squeeze + expired-document filter + context buckets]
     P --> Q[Gemini streamed answer + hidden completion marker + parallel classification]
     Q --> R[Backend strips marker and frontend displays clean tokens]
     R --> S[Assistant message, citations, analytics and usage are saved]
@@ -76,12 +76,13 @@ flowchart TD
 16. Add title MatchText candidates with a small cap.
 17. Run deterministic answerability rerank.
 18. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
-19. Filter cancelled/expired documents.
-20. Build context buckets.
-21. Generate streamed answer and parallel classification.
-22. Require a hidden answer-done marker from the model.
-23. If the marker is missing or the model hit max tokens, request a short continuation.
-24. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
+19. Squeeze final context: keep search wide, but send only the strongest source-strict chunks to Gemini.
+20. Filter cancelled/expired documents.
+21. Build context buckets.
+22. Generate streamed answer and parallel classification.
+23. Require a hidden answer-done marker from the model.
+24. If the marker is missing or the model hit max tokens, request a short continuation.
+25. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
 
 ## V2 Collections
 
@@ -133,6 +134,19 @@ Context buckets:
 - court bucket: max 6 chunks.
 
 Overall context cap is controlled by `context_char_cap`, default 30,000 characters.
+
+Before context building, the backend runs a strict context squeeze. It does not narrow
+the search space; it narrows only the final chunks sent to Gemini:
+
+- `short`: up to 6 chunks;
+- `standard`: up to 8 chunks;
+- `detailed`: up to 10 chunks;
+- `full`: up to 12 chunks.
+
+The squeeze ranks by answerability, content coverage, authority and text quality.
+Background sources such as wiki/ZIR are kept to at most one final chunk unless they
+are the only useful evidence. Court sources are also capped so they do not dominate
+questions that need a normative answer.
 
 ## Response Preferences
 

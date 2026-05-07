@@ -204,8 +204,9 @@ Backend `_ask_pipeline()`:
 20. Gemini LLM reranker is optional behind `llm_reranker_enabled`; default is deterministic reranking for speed and stability.
 21. Hard stop can return "not enough information" without main Gemini answer.
 22. Expired/cancelled documents are removed.
-23. Context is bucketed and capped.
-24. Main Gemini answer and classification are prepared.
+23. Final context is squeezed: search remains wide, but only the strongest source-strict chunks are sent to Gemini.
+24. Context is bucketed and capped.
+25. Main Gemini answer and classification are prepared.
 
 ## 9. Context building
 
@@ -218,6 +219,14 @@ Context buckets:
 | `court_chunks` | `laws_positions_v2`, `laws_supreme_v2`, `laws_ccu_v2` | 6 |
 
 Overall context cap: `context_char_cap`, default 30 000 characters.
+
+Final context squeeze:
+
+- keeps wide retrieval across all allowed collections;
+- ranks final chunks by answerability score, content coverage, source authority and text quality;
+- caps background sources such as wiki/ZIR to one final chunk by default;
+- caps court sources so court practice does not dominate normative questions;
+- target chunks: short 6, standard 8, detailed 10, full 12.
 
 Each chunk context header can include:
 
