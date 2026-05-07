@@ -38,7 +38,6 @@ export async function GET(request: Request) {
     avgTimeRes,
     allProfilesRes,
     newUsersRes,
-    chatsRes,
     messagesRes,
   ] = await Promise.all([
     sb.from("query_analytics").select("id", { count: "exact", head: true }),
@@ -48,7 +47,7 @@ export async function GET(request: Request) {
     sb.from("query_analytics").select("user_intent").gte("created_at", since).not("user_intent", "is", null),
     sb.from("query_analytics").select("complexity_score").gte("created_at", since).not("complexity_score", "is", null),
     sb.from("query_analytics")
-      .select("id, query_text, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id")
+      .select("id, query_text, ai_response, category, sentiment, complexity_score, processing_time_ms, user_intent, created_at, user_id, chat_id, message_id, ai_eval")
       .order("created_at", { ascending: false })
       .limit(20),
     sb.from("query_analytics").select("user_id").gte("created_at", since).not("user_id", "is", null),
@@ -58,8 +57,6 @@ export async function GET(request: Request) {
     sb.from("profiles").select("id, email, full_name, created_at"),
     // New users in period
     sb.from("profiles").select("id, created_at").gte("created_at", since),
-    // Chats for session duration
-    sb.from("chats").select("id, user_id, created_at").gte("created_at", since),
     // Messages for session duration
     sb.from("messages").select("chat_id, created_at").gte("created_at", since).order("created_at", { ascending: true }),
   ])
@@ -177,6 +174,24 @@ export async function GET(request: Request) {
     ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
     : null
 
+  const recentRows = recentRes.data ?? []
+  const recentIds = recentRows.map(row => row.id).filter(Boolean)
+  const evalCasesRes = recentIds.length
+    ? await sb
+      .from("rag_eval_cases")
+      .select("id, query_analytics_id, answer_type, has_direct_answer, expected_sources, bad_sources, eval_confidence, eval_notes, status, is_gold, reviewed_at, created_at")
+      .in("query_analytics_id", recentIds)
+    : { data: [] }
+
+  const evalCaseMap: Record<string, unknown> = {}
+  for (const item of (evalCasesRes.data ?? [])) {
+    evalCaseMap[item.query_analytics_id as string] = item
+  }
+  const recent = recentRows.map(row => ({
+    ...row,
+    rag_eval_case: evalCaseMap[row.id] ?? null,
+  }))
+
   return NextResponse.json({
     total: totalRes.count ?? 0,
     period: periodRes.count ?? 0,
@@ -188,7 +203,7 @@ export async function GET(request: Request) {
     intents: Object.entries(intentMap).sort((a, b) => b[1] - a[1]),
     topUsers,
     dailyTrend,
-    recent: recentRes.data ?? [],
+    recent,
     // New metrics
     newUsersTotal,
     newUsersPerDay,

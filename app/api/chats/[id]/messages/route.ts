@@ -138,9 +138,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     // Save analytics row
     if (analytics) {
-      await admin().from("query_analytics").insert({
+      const analyticsRow: Record<string, unknown> = {
         user_id:            user.id,
         chat_id:            chatId,
+        message_id:         message.id,
         query_text:         analytics.query_text,
         ai_response:        analytics.ai_response,
         category:           analytics.category ?? null,
@@ -150,7 +151,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         processing_time_ms: analytics.processing_time_ms ?? null,
         tokens_used:        analytics.tokens_used ?? 0,
         user_ip:            clientIp,   // read from server headers, not from client body
-      })
+      }
+
+      const { error: analyticsError } = await admin().from("query_analytics").insert(analyticsRow)
+      if (analyticsError && /message_id|ai_eval/i.test(analyticsError.message)) {
+        delete analyticsRow.message_id
+        await admin().from("query_analytics").insert(analyticsRow)
+      }
     }
   }
 

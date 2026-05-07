@@ -1,12 +1,13 @@
 "use client"
 
 import useSWR from "swr"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   BarChart2, Clock, Brain, Users, TrendingUp,
   MessageSquare, AlertCircle, Smile, Meh, Frown,
   UserPlus, Repeat2, Target, Timer, X,
+  Sparkles, CheckCircle2, ShieldCheck, XCircle,
 } from "lucide-react"
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -35,6 +36,10 @@ interface AnalyticsData {
     user_intent: string | null
     created_at: string
     user_id: string | null
+    chat_id?: string | null
+    message_id?: string | null
+    ai_eval?: RagEvalDraft | null
+    rag_eval_case?: RagEvalCase | null
   }[]
   newUsersTotal: number
   newUsersPerDay: { date: string; count: number }[]
@@ -43,6 +48,40 @@ interface AnalyticsData {
   avgSessionMs: number | null
   totalUsers: number
   activeUsers: number
+}
+
+type RagEvalSource = {
+  num?: number
+  title?: string | null
+  law_id?: string | null
+  collection?: string | null
+  reason?: string | null
+}
+
+type RagEvalDraft = {
+  expected_answer_type?: string
+  has_direct_answer?: boolean | null
+  expected_sources?: RagEvalSource[]
+  bad_sources?: RagEvalSource[]
+  eval_confidence?: number | null
+  eval_notes?: string | null
+  eval_status?: string | null
+}
+
+type RagEvalCase = {
+  id?: string
+  query_analytics_id?: string
+  answer_type?: string
+  expected_answer_type?: string
+  has_direct_answer?: boolean | null
+  expected_sources?: RagEvalSource[]
+  bad_sources?: RagEvalSource[]
+  eval_confidence?: number | null
+  eval_notes?: string | null
+  status?: string | null
+  eval_status?: string | null
+  is_gold?: boolean
+  reviewed_at?: string | null
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -70,6 +109,26 @@ function formatTime(ms: number | null) {
 
 
 // ── Sub-components ───────────────────────────────────────────────────────────
+
+function normalizeEvalCase(value?: RagEvalCase | RagEvalDraft | null): RagEvalCase | null {
+  if (!value) return null
+  return {
+    ...value,
+    answer_type: "answer_type" in value ? value.answer_type : value.expected_answer_type,
+    status: "status" in value ? value.status : value.eval_status,
+  }
+}
+
+function evalStatusLabel(row: QueryRow) {
+  const evalCase = normalizeEvalCase(row.rag_eval_case ?? row.ai_eval)
+  if (!evalCase) return "not evaluated"
+  if (evalCase.is_gold) return "gold"
+  return evalCase.status ?? "ai_draft"
+}
+
+function sourceLabel(source: RagEvalSource, index: number) {
+  return source.title || source.law_id || source.collection || `source ${index + 1}`
+}
 
 function StatCard({
   icon: Icon, label, value, sub, color = "#C9A84C",
@@ -143,6 +202,63 @@ type QueryRow = AnalyticsData["recent"][number]
 
 function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
   const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
+  const [evalCase, setEvalCase] = useState<RagEvalCase | null>(() => normalizeEvalCase(row.rag_eval_case ?? row.ai_eval))
+  const [evaluating, setEvaluating] = useState(false)
+  const [savingEval, setSavingEval] = useState(false)
+  const [editEval, setEditEval] = useState(false)
+  const [expectedText, setExpectedText] = useState("")
+  const [badText, setBadText] = useState("")
+  const [notesText, setNotesText] = useState("")
+
+  useEffect(() => {
+    setExpectedText(JSON.stringify(evalCase?.expected_sources ?? [], null, 2))
+    setBadText(JSON.stringify(evalCase?.bad_sources ?? [], null, 2))
+    setNotesText(evalCase?.eval_notes ?? "")
+  }, [evalCase])
+
+  async function runAiEval() {
+    setEvaluating(true)
+    try {
+      const res = await fetch(`/api/admin/analytics/${row.id}/evaluate`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "AI eval failed")
+      setEvalCase(normalizeEvalCase(data.eval))
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error))
+    } finally {
+      setEvaluating(false)
+    }
+  }
+
+  async function patchEval(payload: Record<string, unknown>) {
+    setSavingEval(true)
+    try {
+      const res = await fetch(`/api/admin/analytics/${row.id}/evaluate`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Eval save failed")
+      setEvalCase(normalizeEvalCase(data.eval))
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSavingEval(false)
+    }
+  }
+
+  function saveEvalEdits() {
+    try {
+      const expected_sources = JSON.parse(expectedText || "[]")
+      const bad_sources = JSON.parse(badText || "[]")
+      patchEval({ expected_sources, bad_sources, eval_notes: notesText, status: "human_reviewed" })
+      setEditEval(false)
+    } catch {
+      alert("Sources JSON is not valid")
+    }
+  }
+
   return (
     <AnimatePresence>
       <motion.div
@@ -196,6 +312,129 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
               <div className="bg-[#1a2035] border border-[#C9A84C]/10 rounded-xl px-4 py-3 text-sm text-[#E0E6ED]/75 leading-relaxed whitespace-pre-wrap">
                 {row.ai_response ?? <span className="text-[#6B7CA3] italic">Відповідь не збережена</span>}
               </div>
+            </div>
+
+            <div className="bg-[#0A0E1A] border border-[#C9A84C]/15 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[12px] font-black text-[#C9A84C]/60 uppercase tracking-[0.2em]">RAG eval</p>
+                  <p className="text-xs text-[#6B7CA3] mt-1">
+                    {evalCase
+                      ? `${evalCase.answer_type ?? "mixed"} / ${evalCase.status ?? "ai_draft"} / confidence ${Math.round(Number(evalCase.eval_confidence ?? 0) * 100)}%`
+                      : "No evaluation yet"}
+                  </p>
+                </div>
+                {evalCase?.is_gold && (
+                  <span className="text-[11px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-1">
+                    GOLD
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={runAiEval}
+                  disabled={evaluating}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C9A84C] text-[#0A0E1A] text-xs font-bold disabled:opacity-60"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {evaluating ? "Evaluating..." : "AI оцінити"}
+                </button>
+                <button
+                  onClick={() => patchEval({ status: "approved" })}
+                  disabled={!evalCase || savingEval}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-300 text-xs font-semibold disabled:opacity-40"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Погодитись
+                </button>
+                <button
+                  onClick={() => patchEval({ status: "approved", is_gold: true })}
+                  disabled={!evalCase || savingEval}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#C9A84C]/30 text-[#C9A84C] text-xs font-semibold disabled:opacity-40"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Gold case
+                </button>
+                <button
+                  onClick={() => setEditEval((v) => !v)}
+                  disabled={!evalCase}
+                  className="px-3 py-1.5 rounded-lg border border-[#6B7CA3]/30 text-[#A9B4C7] text-xs font-semibold disabled:opacity-40"
+                >
+                  Виправити джерела
+                </button>
+                <button
+                  onClick={() => patchEval({ status: "rejected" })}
+                  disabled={!evalCase || savingEval}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-300 text-xs font-semibold disabled:opacity-40"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  Rejected
+                </button>
+              </div>
+
+              {evalCase && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="text-[#6B7CA3] uppercase tracking-wider mb-1">Expected sources</p>
+                    <div className="space-y-1">
+                      {(evalCase.expected_sources ?? []).length > 0 ? (evalCase.expected_sources ?? []).map((source, i) => (
+                        <div key={`${sourceLabel(source, i)}-${i}`} className="bg-[#1a2035]/60 border border-[#C9A84C]/10 rounded-lg px-2 py-1.5">
+                          <p className="text-[#E0E6ED]/80">{sourceLabel(source, i)}</p>
+                          {source.reason && <p className="text-[#6B7CA3] mt-0.5">{source.reason}</p>}
+                        </div>
+                      )) : <p className="text-[#6B7CA3]">None</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[#6B7CA3] uppercase tracking-wider mb-1">Bad sources</p>
+                    <div className="space-y-1">
+                      {(evalCase.bad_sources ?? []).length > 0 ? (evalCase.bad_sources ?? []).map((source, i) => (
+                        <div key={`${sourceLabel(source, i)}-${i}`} className="bg-red-500/5 border border-red-500/10 rounded-lg px-2 py-1.5">
+                          <p className="text-[#E0E6ED]/80">{sourceLabel(source, i)}</p>
+                          {source.reason && <p className="text-[#6B7CA3] mt-0.5">{source.reason}</p>}
+                        </div>
+                      )) : <p className="text-[#6B7CA3]">None</p>}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {evalCase?.eval_notes && !editEval && (
+                <p className="text-xs text-[#A9B4C7] bg-[#1a2035]/50 border border-[#C9A84C]/10 rounded-lg px-3 py-2">
+                  {evalCase.eval_notes}
+                </p>
+              )}
+
+              {editEval && (
+                <div className="space-y-2">
+                  <textarea
+                    value={expectedText}
+                    onChange={(e) => setExpectedText(e.target.value)}
+                    className="w-full h-28 bg-[#070B14] border border-[#C9A84C]/15 rounded-lg px-3 py-2 text-xs text-[#E0E6ED] font-mono"
+                    placeholder="expected_sources JSON"
+                  />
+                  <textarea
+                    value={badText}
+                    onChange={(e) => setBadText(e.target.value)}
+                    className="w-full h-28 bg-[#070B14] border border-[#C9A84C]/15 rounded-lg px-3 py-2 text-xs text-[#E0E6ED] font-mono"
+                    placeholder="bad_sources JSON"
+                  />
+                  <textarea
+                    value={notesText}
+                    onChange={(e) => setNotesText(e.target.value)}
+                    className="w-full h-20 bg-[#070B14] border border-[#C9A84C]/15 rounded-lg px-3 py-2 text-xs text-[#E0E6ED]"
+                    placeholder="eval notes"
+                  />
+                  <button
+                    onClick={saveEvalEdits}
+                    disabled={savingEval}
+                    className="px-3 py-1.5 rounded-lg bg-[#C9A84C] text-[#0A0E1A] text-xs font-bold disabled:opacity-60"
+                  >
+                    Зберегти правки
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Meta */}
@@ -463,6 +702,9 @@ export default function AnalyticsPage() {
                       <span className="text-[12px] text-[#6B7CA3] ml-auto">
                         {new Date(row.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </span>
+                      <span className="text-[10px] text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/15 rounded-full px-2 py-0.5">
+                        {evalStatusLabel(row)}
+                      </span>
                     </div>
                   </div>
                 )
@@ -475,7 +717,7 @@ export default function AnalyticsPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-[#C9A84C]/10">
-                    {["Запит", "Категорія", "Настрій", "Складність", "Час", "Дата"].map(h => (
+                    {["Запит", "Категорія", "Настрій", "Складність", "Eval", "Час", "Дата"].map(h => (
                       <th key={h} className="text-left px-4 py-3 text-[#6B7CA3] font-semibold uppercase tracking-wider whitespace-nowrap">
                         {h}
                       </th>
@@ -518,6 +760,11 @@ export default function AnalyticsPage() {
                             </span>
                           ) : "—"}
                         </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="text-[11px] text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/15 rounded-full px-2 py-0.5">
+                            {evalStatusLabel(row)}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap text-[#6B7CA3]">
                           {formatTime(row.processing_time_ms)}
                         </td>
@@ -531,8 +778,8 @@ export default function AnalyticsPage() {
                   })}
                   {(data?.recent?.length ?? 0) === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-[#6B7CA3]">
-                        Записів поки немає — запити з'являться тут після перших звернень
+                      <td colSpan={7} className="px-4 py-8 text-center text-[#6B7CA3]">
+                        Записів поки немає - запити з&apos;являться тут після перших звернень
                       </td>
                     </tr>
                   )}
