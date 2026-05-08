@@ -330,6 +330,16 @@ async function evaluateWithVertex(prompt: string, settings: Record<string, strin
   return evalDraft
 }
 
+async function readJsonOrNull(res: Response) {
+  const contentType = res.headers.get("content-type") ?? ""
+  if (!contentType.includes("application/json")) return null
+  try {
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
 async function findAssistantMessageForAnalytics(
   sb: ReturnType<typeof admin>,
   row: { chat_id: string | null; message_id: string | null; ai_response: string | null },
@@ -421,7 +431,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
             signal: AbortSignal.timeout(25000),
           },
         )
-        if (findRes.ok) findResults = await findRes.json()
+        const found = await readJsonOrNull(findRes)
+        if (findRes.ok && Array.isArray(found)) findResults = found
       } catch { /* non-fatal */ }
     }
 

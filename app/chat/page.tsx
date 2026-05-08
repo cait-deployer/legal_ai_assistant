@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, Suspense, useCallback } from 'react';
+import { useEffect, useRef, useState, Suspense, useCallback, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { mutate } from 'swr';
 import { Textarea } from '@/components/ui/textarea';
@@ -168,8 +168,17 @@ function MarkdownText({ text, refs, onCitationOpen }: {
     refs: Citation[];
     onCitationOpen: (c: Citation) => void;
 }) {
+    const parseBold = (value: string, keyPrefix: string): ReactNode[] =>
+        value.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+            const bold = part.match(/^\*\*([^*]+)\*\*$/);
+            if (bold) {
+                return <strong key={`${keyPrefix}-b-${i}`} className="font-bold text-[#F4E7BC]">{bold[1]}</strong>;
+            }
+            return part.replace(/`([^`]+)`/g, '$1');
+        });
+
     const parseInline = (lineText: string) =>
-        lineText.split(/(\[\d+(?:,\s*\d+)*\])/g).map((part, i) => {
+        lineText.split(/(\[\d+(?:,\s*\d+)*\])/g).flatMap((part, i) => {
             if (/^\[\d+(?:,\s*\d+)*\]$/.test(part)) {
                 return part.slice(1, -1).split(',').map((numStr, j) => {
                     const num = Number(numStr.trim());
@@ -191,18 +200,48 @@ function MarkdownText({ text, refs, onCitationOpen }: {
                     );
                 });
             }
-            return part;
+            return parseBold(part, `p-${i}`);
         });
 
     const lines = text.split('\n');
     return (
-        <div className="space-y-2 min-w-0 break-words">
+        <div className="space-y-2.5 min-w-0 break-words">
             {lines.map((line, i) => {
                 const t = line.trim();
                 if (!t) return <div key={i} className="h-1" />;
-                if (line.startsWith('### ')) return <h3 key={i} className="font-serif font-bold text-[#E0E6ED] mt-4 mb-2 text-base break-words">{parseInline(line.slice(4))}</h3>;
-                if (/^[\*\-]\s/.test(t)) return <div key={i} className="flex gap-2 my-1.5 pl-1 min-w-0"><div className="h-1.5 w-1.5 rounded-full bg-[#C9A84C] mt-2 shrink-0" /><span className="min-w-0 text-[#E0E6ED]/80 text-sm leading-relaxed break-words">{parseInline(t.slice(2))}</span></div>;
-                return <p key={i} className="my-1.5 text-sm leading-relaxed text-[#E0E6ED]/90 break-words">{parseInline(t)}</p>;
+                const heading = t.match(/^(#{1,6})\s+(.+)$/);
+                if (heading) {
+                    const level = heading[1].length;
+                    const size = level <= 2 ? 'text-lg md:text-xl' : level === 3 ? 'text-base md:text-lg' : 'text-sm md:text-base';
+                    return (
+                        <h3 key={i} className={`${size} font-bold text-[#F4E7BC] mt-5 mb-2 leading-snug break-words`}>
+                            {parseInline(heading[2])}
+                        </h3>
+                    );
+                }
+
+                const numbered = t.match(/^(\d+)[.)]\s+(.+)$/);
+                if (numbered) {
+                    return (
+                        <div key={i} className="grid grid-cols-[28px_1fr] gap-2 my-2 min-w-0">
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-[#C9A84C]/15 border border-[#C9A84C]/25 text-[#C9A84C] text-[12px] font-bold">
+                                {numbered[1]}
+                            </span>
+                            <span className="min-w-0 text-[#E0E6ED]/85 text-sm leading-7 break-words">{parseInline(numbered[2])}</span>
+                        </div>
+                    );
+                }
+
+                if (/^[*\-•]\s/.test(t)) {
+                    return (
+                        <div key={i} className="flex gap-3 my-2 pl-1 min-w-0">
+                            <div className="h-1.5 w-1.5 rounded-full bg-[#C9A84C] mt-3 shrink-0" />
+                            <span className="min-w-0 text-[#E0E6ED]/85 text-sm leading-7 break-words">{parseInline(t.slice(2))}</span>
+                        </div>
+                    );
+                }
+
+                return <p key={i} className="my-2 text-sm leading-7 text-[#E0E6ED]/90 break-words">{parseInline(t)}</p>;
             })}
         </div>
     );
@@ -725,7 +764,7 @@ function ChatPage() {
                                             <div className={`max-w-[88%] md:max-w-[85%] space-y-1.5 md:space-y-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
                                                 <Card className={`p-3.5 md:p-5 text-sm leading-relaxed border-none shadow-2xl ${msg.role === 'user'
                                                     ? 'bg-[#C9A84C]/10 text-[#E0E6ED] rounded-3xl rounded-tr-none'
-                                                    : 'bg-[#0d1120]/90 text-[#E0E6ED] rounded-3xl rounded-tl-none border-l-2 border-l-[#C9A84C] font-serif tracking-wide'
+                                                    : 'bg-[#0d1120]/90 text-[#E0E6ED] rounded-3xl rounded-tl-none border-l-2 border-l-[#C9A84C]'
                                                     }`}>
                                                     {msg.role === 'ai' ? (
                                                         <div className="space-y-4">

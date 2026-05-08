@@ -15,6 +15,31 @@ import {
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
+async function readApiJson(res: Response) {
+  const contentType = res.headers.get("content-type") ?? ""
+  const text = await res.text()
+
+  if (contentType.includes("application/json")) {
+    try {
+      return text ? JSON.parse(text) : {}
+    } catch {
+      throw new Error(`API returned invalid JSON (${res.status})`)
+    }
+  }
+
+  const cleanText = text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500)
+
+  throw new Error(
+    cleanText
+      ? `API returned ${res.status} ${res.statusText}: ${cleanText}`
+      : `API returned ${res.status} ${res.statusText} without JSON`,
+  )
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface AnalyticsData {
@@ -651,7 +676,7 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
     setAnnotatedBad(null)
     try {
       const res = await fetch(`/api/admin/analytics/${row.id}/evaluate`, { method: "POST" })
-      const data = await res.json()
+      const data = await readApiJson(res)
       if (!res.ok) throw new Error(data.error ?? "AI eval failed")
       setEvalCase(normalizeEvalCase(data.eval))
       if (data.recommendation) setRecommendation(data.recommendation)
@@ -678,7 +703,7 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      const data = await res.json()
+      const data = await readApiJson(res)
       if (!res.ok) throw new Error(data.error ?? "Eval save failed")
       setEvalCase(normalizeEvalCase(data.eval))
     } catch (error) {
