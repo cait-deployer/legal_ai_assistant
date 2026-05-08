@@ -569,35 +569,42 @@ function buildExternalAiEvalPrompt({
     recommendation,
   }
 
-  return `You are an independent legal RAG quality reviewer.
+  return `Ти незалежний юридичний рев'юер якості RAG для українського legal AI assistant.
 
-Context:
-I am checking a Ukrainian legal AI assistant answer. Another AI already reviewed this RAG result and drafted Expected sources and Bad sources arrays. Please audit that review, verify whether the answer is supported by relevant Ukrainian legal sources, and improve the arrays if needed.
+Відповідай українською мовою.
 
-Question:
+Контекст:
+Я перевіряю відповідь українського юридичного AI-помічника. Інша AI вже проаналізувала цей RAG-результат і підготувала чернетки масивів Expected sources та Bad sources. Твоє завдання - перевірити цей аналіз, оцінити чи відповідь підтверджується релевантними українськими юридичними джерелами, і за потреби виправити масиви джерел.
+
+Питання користувача:
 ${row.query_text}
 
-Rewritten RAG query:
+Переписаний RAG-запит:
 ${row.query_rewritten && row.query_rewritten !== row.query_text ? row.query_rewritten : "(same as original question)"}
 
-AI answer:
+Відповідь AI:
 ${row.ai_response ?? "(answer was not saved)"}
 
-Previous AI RAG eval report:
+Попередній AI RAG eval звіт:
 ${JSON.stringify(report, null, 2)}
 
-Expected sources draft:
+Чернетка Expected sources:
 ${JSON.stringify(expected, null, 2)}
 
-Bad sources draft:
+Чернетка Bad sources:
 ${JSON.stringify(bad, null, 2)}
 
-Your task:
-1. Say whether the answer directly answers the question and whether it is legally safe.
-2. Check if Expected sources are truly necessary/relevant for the correct answer.
-3. Check if Bad sources are truly irrelevant, misleading, or harmful for this question.
-4. Return corrected JSON arrays named expected_sources and bad_sources.
-5. Add short notes explaining what should be approved, rejected, or changed.`
+Твоє завдання:
+1. Скажи, чи відповідь прямо відповідає на питання користувача і чи є вона юридично безпечною.
+2. Перевір, чи Expected sources справді потрібні та релевантні для правильної відповіді.
+3. Перевір, чи Bad sources справді нерелевантні, оманливі або шкідливі для цього питання.
+4. Поверни виправлені JSON-масиви з назвами expected_sources та bad_sources.
+5. Додай короткі нотатки українською: що варто approve, reject або змінити.
+
+Формат відповіді:
+- Короткий висновок.
+- JSON-блок з expected_sources і bad_sources.
+- Короткі нотатки щодо змін.`
 }
 
 async function copyText(text: string) {
