@@ -3753,10 +3753,19 @@ def _answer_has_done_marker(answer: str) -> bool:
 
 def _strip_answer_done_marker(answer: str) -> str:
     text = answer or ""
-    if ANSWER_DONE_MARKER not in text:
-        return text.strip()
-    before, _, _after = text.partition(ANSWER_DONE_MARKER)
-    return before.strip()
+    if ANSWER_DONE_MARKER in text:
+        before, _, _after = text.partition(ANSWER_DONE_MARKER)
+        text = before
+
+    # Streaming may end after a partial completion marker (for example "URAI").
+    # Treat marker prefixes at the very end as transport artifacts, not answer text.
+    stripped = text.rstrip()
+    for n in range(len(ANSWER_DONE_MARKER) - 1, 3, -1):
+        prefix = ANSWER_DONE_MARKER[:n]
+        if stripped.endswith(prefix):
+            stripped = stripped[: -len(prefix)].rstrip()
+            break
+    return stripped.strip()
 
 
 def _answer_looks_incomplete(answer: str) -> bool:

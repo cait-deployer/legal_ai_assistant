@@ -75,6 +75,10 @@ type Message = {
     feedback?: { is_positive: boolean } | null;
 };
 
+function stripCompletionArtifacts(text: string) {
+    return (text || '').replace(/\s*URAI(?:_DONE)?\s*$/g, '').trim();
+}
+
 function getCitationNums(text: string) {
     const nums = new Set<number>();
     for (const match of text.matchAll(/\[([\d,\s]+)\]/g)) {
@@ -589,7 +593,7 @@ function ChatPage() {
                             } else if (currentEvent === 'citations') {
                                 setIsContinuing(false);
                                 finalPayload = parsed as unknown as FinalPayload;
-                                const answer = finalPayload.answer || accText;
+                                const answer = stripCompletionArtifacts(finalPayload.answer || accText);
                                 if (firstToken) {
                                     // early_answer path: no tokens were streamed
                                     firstToken = false;
@@ -626,7 +630,7 @@ function ChatPage() {
 
             // Save AI message to DB after stream ends
             if (finalPayload || accText) {
-                const answer = finalPayload?.answer || accText;
+                const answer = stripCompletionArtifacts(finalPayload?.answer || accText);
                 const refs = finalPayload?.references ?? [];
                 const meta = finalPayload?._meta ?? {};
 
