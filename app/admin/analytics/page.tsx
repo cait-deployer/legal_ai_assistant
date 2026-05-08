@@ -10,6 +10,7 @@ import {
   Sparkles, CheckCircle2, ShieldCheck, XCircle,
   PlayCircle, StopCircle, ChevronDown, ChevronRight,
   CheckCircle, XCircle as XCircleIcon, AlertTriangle,
+  Copy,
 } from "lucide-react"
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
@@ -479,6 +480,49 @@ function DailyChart({ data }: { data: { date: string; count: number }[] }) {
   )
 }
 
+function CollapsiblePanel({
+  icon: Icon,
+  title,
+  meta,
+  children,
+  defaultOpen = false,
+  className = "",
+}: {
+  icon: React.ElementType
+  title: string
+  meta?: React.ReactNode
+  children: React.ReactNode
+  defaultOpen?: boolean
+  className?: string
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl overflow-hidden ${className}`}
+    >
+      <button
+        onClick={() => setOpen((value) => !value)}
+        className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-[#C9A84C]/5 transition-colors"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          {open ? <ChevronDown className="w-4 h-4 text-[#C9A84C] shrink-0" /> : <ChevronRight className="w-4 h-4 text-[#6B7CA3] shrink-0" />}
+          <Icon className="w-4 h-4 text-[#C9A84C] shrink-0" />
+          <span className="text-sm font-semibold text-[#E0E6ED] truncate">{title}</span>
+        </span>
+        {meta && <span className="text-[11px] text-[#6B7CA3] shrink-0">{meta}</span>}
+      </button>
+      {open && (
+        <div className="border-t border-[#C9A84C]/10 p-5">
+          {children}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
 // ── Query Modal ───────────────────────────────────────────────────────────────
 
 type QueryRow = AnalyticsData["recent"][number]
@@ -490,11 +534,95 @@ type AnnotatedSource = {
 }
 type EvalRecommendation = { action: "approve" | "reject" | "approve_gold"; is_gold: boolean; reason: string }
 
+function stripSourceAnnotations(sources: AnnotatedSource[] | RagEvalSource[] | undefined | null) {
+  return (sources ?? []).map((source) => {
+    const clean = { ...source } as Record<string, unknown>
+    delete clean.in_db
+    delete clean.db_title
+    delete clean.db_collection
+    return clean
+  })
+}
+
+function buildExternalAiEvalPrompt({
+  row,
+  evalCase,
+  expectedSources,
+  badSources,
+  recommendation,
+}: {
+  row: QueryRow
+  evalCase: RagEvalCase
+  expectedSources: AnnotatedSource[] | RagEvalSource[]
+  badSources: AnnotatedSource[] | RagEvalSource[]
+  recommendation: EvalRecommendation | null
+}) {
+  const expected = stripSourceAnnotations(expectedSources)
+  const bad = stripSourceAnnotations(badSources)
+  const report = {
+    answer_type: evalCase.answer_type ?? evalCase.expected_answer_type ?? null,
+    has_direct_answer: evalCase.has_direct_answer ?? null,
+    eval_confidence: evalCase.eval_confidence ?? null,
+    status: evalCase.status ?? evalCase.eval_status ?? null,
+    is_gold: evalCase.is_gold ?? false,
+    eval_notes: evalCase.eval_notes ?? null,
+    recommendation,
+  }
+
+  return `You are an independent legal RAG quality reviewer.
+
+Context:
+I am checking a Ukrainian legal AI assistant answer. Another AI already reviewed this RAG result and drafted Expected sources and Bad sources arrays. Please audit that review, verify whether the answer is supported by relevant Ukrainian legal sources, and improve the arrays if needed.
+
+Question:
+${row.query_text}
+
+Rewritten RAG query:
+${row.query_rewritten && row.query_rewritten !== row.query_text ? row.query_rewritten : "(same as original question)"}
+
+AI answer:
+${row.ai_response ?? "(answer was not saved)"}
+
+Previous AI RAG eval report:
+${JSON.stringify(report, null, 2)}
+
+Expected sources draft:
+${JSON.stringify(expected, null, 2)}
+
+Bad sources draft:
+${JSON.stringify(bad, null, 2)}
+
+Your task:
+1. Say whether the answer directly answers the question and whether it is legally safe.
+2. Check if Expected sources are truly necessary/relevant for the correct answer.
+3. Check if Bad sources are truly irrelevant, misleading, or harmful for this question.
+4. Return corrected JSON arrays named expected_sources and bad_sources.
+5. Add short notes explaining what should be approved, rejected, or changed.`
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement("textarea")
+  textarea.value = text
+  textarea.style.position = "fixed"
+  textarea.style.left = "-9999px"
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  document.execCommand("copy")
+  document.body.removeChild(textarea)
+}
+
 function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
   const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
   const [evalCase, setEvalCase] = useState<RagEvalCase | null>(() => normalizeEvalCase(row.rag_eval_case ?? row.ai_eval))
   const [evaluating, setEvaluating] = useState(false)
   const [savingEval, setSavingEval] = useState(false)
+  const [copiedEvalPrompt, setCopiedEvalPrompt] = useState(false)
   const [editEval, setEditEval] = useState(false)
   const [expectedText, setExpectedText] = useState("")
   const [badText, setBadText] = useState("")
@@ -522,17 +650,11 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
       if (data.recommendation) setRecommendation(data.recommendation)
       if (data.annotated_expected) {
         setAnnotatedExpected(data.annotated_expected)
-        setExpectedText(JSON.stringify(
-          data.annotated_expected.map(({ in_db: _, db_title: __, db_collection: ___, ...s }: AnnotatedSource) => s),
-          null, 2,
-        ))
+        setExpectedText(JSON.stringify(stripSourceAnnotations(data.annotated_expected), null, 2))
       }
       if (data.annotated_bad) {
         setAnnotatedBad(data.annotated_bad)
-        setBadText(JSON.stringify(
-          data.annotated_bad.map(({ in_db: _, db_title: __, db_collection: ___, ...s }: AnnotatedSource) => s),
-          null, 2,
-        ))
+        setBadText(JSON.stringify(stripSourceAnnotations(data.annotated_bad), null, 2))
       }
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error))
@@ -567,6 +689,26 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
       setEditEval(false)
     } catch {
       alert("Sources JSON is not valid")
+    }
+  }
+
+  async function copyExternalEvalPrompt() {
+    if (!evalCase) return
+    const expSources = annotatedExpected ?? evalCase.expected_sources ?? []
+    const badSources = annotatedBad ?? evalCase.bad_sources ?? []
+    const prompt = buildExternalAiEvalPrompt({
+      row,
+      evalCase,
+      expectedSources: expSources,
+      badSources,
+      recommendation,
+    })
+    try {
+      await copyText(prompt)
+      setCopiedEvalPrompt(true)
+      window.setTimeout(() => setCopiedEvalPrompt(false), 1800)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Copy failed")
     }
   }
 
@@ -662,6 +804,15 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
                   {evaluating ? "Evaluating..." : "AI оцінити"}
                 </button>
                 <button
+                  onClick={copyExternalEvalPrompt}
+                  disabled={!evalCase}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#4E9FBF]/30 text-[#8FD3F4] text-xs font-semibold disabled:opacity-40"
+                  title="Copy a ready prompt for checking this RAG eval in another AI"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedEvalPrompt ? "Prompt copied" : "Copy AI review prompt"}
+                </button>
+                <button
                   onClick={() => patchEval({ status: "approved" })}
                   disabled={!evalCase || savingEval}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-300 text-xs font-semibold disabled:opacity-40"
@@ -744,7 +895,7 @@ function QueryModal({ row, onClose }: { row: QueryRow; onClose: () => void }) {
                         {expSources.length > 0 && (
                           <button
                             onClick={() => navigator.clipboard.writeText(JSON.stringify(
-                              expSources.map(({ in_db: _, db_title: __, db_collection: ___, ...s }) => s), null, 2
+                              stripSourceAnnotations(expSources), null, 2
                             ))}
                             className="text-[10px] text-[#C9A84C]/60 hover:text-[#C9A84C] transition-colors"
                           >
@@ -982,30 +1133,20 @@ export default function AnalyticsPage() {
           {/* Daily trend + Sentiments */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {/* Daily chart */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
+            <CollapsiblePanel
+              icon={TrendingUp}
+              title="Тренд (7 днів)"
+              meta={`${data?.dailyTrend?.reduce((sum, item) => sum + item.count, 0) ?? 0} за 7д`}
             >
-              <div className="flex items-center gap-2 mb-3">
-                <TrendingUp className="w-4 h-4 text-[#C9A84C]" />
-                <h2 className="text-sm font-semibold text-[#E0E6ED]">Тренд (7 днів)</h2>
-              </div>
               <DailyChart data={data?.dailyTrend ?? []} />
-            </motion.div>
+            </CollapsiblePanel>
 
             {/* Sentiments */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
+            <CollapsiblePanel
+              icon={Smile}
+              title="Настрій запитів"
+              meta={`${data?.sentiments?.reduce((sum, [, count]) => sum + count, 0) ?? 0}`}
             >
-              <div className="flex items-center gap-2 mb-4">
-                <Smile className="w-4 h-4 text-[#C9A84C]" />
-                <h2 className="text-sm font-semibold text-[#E0E6ED]">Настрій запитів</h2>
-              </div>
               <div className="space-y-3">
                 {(data?.sentiments ?? []).map(([key, count]) => {
                   const cfg = SENTIMENT_CONFIG[key] ?? { label: key, color: "#6B7CA3", icon: Meh }
@@ -1026,22 +1167,18 @@ export default function AnalyticsPage() {
                   <p className="text-xs text-[#6B7CA3] py-4 text-center">Даних поки немає</p>
                 )}
               </div>
-            </motion.div>
+            </CollapsiblePanel>
           </div>
 
           {/* Categories + Intents + Top users */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             {/* Categories */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5 xl:col-span-1"
+            <CollapsiblePanel
+              icon={BarChart2}
+              title="Категорії"
+              meta={`${data?.categories?.length ?? 0}`}
+              className="xl:col-span-1"
             >
-              <div className="flex items-center gap-2 mb-4">
-                <BarChart2 className="w-4 h-4 text-[#C9A84C]" />
-                <h2 className="text-sm font-semibold text-[#E0E6ED]">Категорії</h2>
-              </div>
               <div className="space-y-3 max-h-[300px] overflow-y-auto">
                 {(data?.categories ?? []).map(([cat, count], i) => (
                   <div key={cat}>
@@ -1056,20 +1193,15 @@ export default function AnalyticsPage() {
                   <p className="text-xs text-[#6B7CA3] py-4 text-center">Немає даних</p>
                 )}
               </div>
-            </motion.div>
+            </CollapsiblePanel>
 
             {/* Intents */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.25 }}
-              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
+            <CollapsiblePanel
+              icon={Brain}
+              title="Намір запиту"
+              meta={`${data?.intents?.length ?? 0}`}
             >
-              <div className="flex items-center gap-2 mb-4">
-                <Brain className="w-4 h-4 text-[#C9A84C]" />
-                <h2 className="text-sm font-semibold text-[#E0E6ED]">Намір запиту</h2>
-              </div>
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
                 {(data?.intents ?? []).map(([intent, count], i) => {
                   const intentMax = data?.intents?.reduce((a, [, c]) => a + c, 0) || 1
                   return (
@@ -1086,21 +1218,15 @@ export default function AnalyticsPage() {
                   <p className="text-xs text-[#6B7CA3] py-4 text-center">Немає даних</p>
                 )}
               </div>
-            </motion.div>
+            </CollapsiblePanel>
 
             {/* Top users */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="bg-[#0d1120] border border-[#C9A84C]/15 rounded-2xl p-5"
+            <CollapsiblePanel
+              icon={Users}
+              title="Топ користувачів"
+              meta={`за ${days}д`}
             >
-              <div className="flex items-center gap-2 mb-4">
-                <Users className="w-4 h-4 text-[#C9A84C]" />
-                <h2 className="text-sm font-semibold text-[#E0E6ED]">Топ користувачів</h2>
-                <span className="text-xs text-[#6B7CA3]">за {days}д</span>
-              </div>
-              <div className="space-y-2.5">
+              <div className="space-y-2.5 max-h-[300px] overflow-y-auto">
                 {(data?.topUsers ?? []).map(({ user_id, count, email, full_name }, i) => (
                   <div key={user_id} className="flex items-center gap-3">
                     <span className="text-xs font-bold text-[#C9A84C]/60 w-4">{i + 1}</span>
@@ -1115,7 +1241,7 @@ export default function AnalyticsPage() {
                   <p className="text-xs text-[#6B7CA3] py-4 text-center">Немає даних</p>
                 )}
               </div>
-            </motion.div>
+            </CollapsiblePanel>
           </div>
 
           {/* Eval Runner */}
@@ -1178,10 +1304,36 @@ export default function AnalyticsPage() {
             <div className="sm:hidden divide-y divide-[#C9A84C]/5">
               {(data?.recent ?? []).map((row) => {
                 const sentCfg = SENTIMENT_CONFIG[row.sentiment ?? ""] ?? null
+                const evalLabel = evalStatusLabel(row)
                 return (
                   <div key={row.id} onClick={() => setActiveQuery(row)}
-                    className="px-4 py-3 cursor-pointer hover:bg-[#C9A84C]/5 active:bg-[#C9A84C]/10 transition-colors">
-                    <p className="text-sm text-[#E0E6ED]/80 line-clamp-2 mb-1">{row.query_text}</p>
+                    className="px-4 py-3.5 cursor-pointer hover:bg-[#C9A84C]/5 active:bg-[#C9A84C]/10 transition-colors">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="text-sm text-[#E0E6ED]/90 leading-snug line-clamp-3 flex-1">{row.query_text}</p>
+                      <span className="text-[11px] text-[#6B7CA3] shrink-0">
+                        {new Date(row.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    {row.query_rewritten && row.query_rewritten !== row.query_text && (
+                      <p className="text-[11px] text-[#4E9FBF]/80 line-clamp-1 mb-2">
+                        RAG: {row.query_rewritten}
+                      </p>
+                    )}
+                    {row.ai_response && (
+                      <p className="text-[12px] text-[#A9B4C7]/80 line-clamp-2 mb-2 leading-relaxed">
+                        {row.ai_response}
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-1.5 mb-2">
+                      <div className="rounded-lg bg-[#070B14] border border-[#C9A84C]/10 px-2 py-1">
+                        <p className="text-[9px] uppercase tracking-wider text-[#6B7CA3]">Time</p>
+                        <p className="text-[11px] font-semibold text-[#E0E6ED]/80">{formatTime(row.processing_time_ms)}</p>
+                      </div>
+                      <div className="rounded-lg bg-[#070B14] border border-[#C9A84C]/10 px-2 py-1">
+                        <p className="text-[9px] uppercase tracking-wider text-[#6B7CA3]">Eval</p>
+                        <p className="text-[11px] font-semibold text-[#C9A84C] truncate">{evalLabel}</p>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       {row.category && (
                         <span className="bg-[#C9A84C]/10 text-[#C9A84C] px-2 py-0.5 rounded-full text-[12px] font-medium">{row.category}</span>
@@ -1191,11 +1343,13 @@ export default function AnalyticsPage() {
                           <sentCfg.icon className="w-3 h-3" />{sentCfg.label}
                         </span>
                       )}
-                      <span className="text-[12px] text-[#6B7CA3] ml-auto">
-                        {new Date(row.created_at).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                      <span className="text-[10px] text-[#C9A84C] bg-[#C9A84C]/10 border border-[#C9A84C]/15 rounded-full px-2 py-0.5">
-                        {evalStatusLabel(row)}
+                      {row.user_intent && (
+                        <span className="text-[10px] text-[#A9B4C7] bg-[#1a2035]/70 rounded-full px-2 py-0.5">
+                          {row.user_intent}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-[#6B7CA3] ml-auto">
+                        {row.complexity_score ? `★ ${row.complexity_score}/5` : "★ —"}
                       </span>
                     </div>
                   </div>
