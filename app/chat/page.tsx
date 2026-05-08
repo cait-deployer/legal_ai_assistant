@@ -177,13 +177,15 @@ function MarkdownText({ text, refs, onCitationOpen }: {
             return part.replace(/`([^`]+)`/g, '$1');
         });
 
-    const parseInline = (lineText: string) =>
-        lineText.split(/(\[\d+(?:,\s*\d+)*\])/g).flatMap((part, i) => {
+    const parseInline = (lineText: string): ReactNode[] => {
+        const nodes: ReactNode[] = [];
+
+        lineText.split(/(\[\d+(?:,\s*\d+)*\])/g).forEach((part, i) => {
             if (/^\[\d+(?:,\s*\d+)*\]$/.test(part)) {
-                return part.slice(1, -1).split(',').map((numStr, j) => {
+                part.slice(1, -1).split(',').forEach((numStr, j) => {
                     const num = Number(numStr.trim());
                     const citation = refs.find(r => r.num === num);
-                    return (
+                    nodes.push(
                         <button
                             key={`${i}-${j}`}
                             type="button"
@@ -199,9 +201,12 @@ function MarkdownText({ text, refs, onCitationOpen }: {
                         </button>
                     );
                 });
+                return;
             }
-            return parseBold(part, `p-${i}`);
+            nodes.push(...parseBold(part, `p-${i}`));
         });
+        return nodes;
+    };
 
     const lines = text.split('\n');
     return (
