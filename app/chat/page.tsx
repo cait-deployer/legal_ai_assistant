@@ -932,7 +932,17 @@ function ChatPage() {
                             </div>
                             <div className="min-w-0 flex-1">
                                 <span className="text-[9px] font-black text-[#0A0E1A]/50 uppercase tracking-[0.2em] block mb-1">Джерело №{activeCitation?.num}</span>
-                                <DialogTitle className="font-serif font-bold text-base sm:text-lg leading-snug">{activeCitation?.source_title}</DialogTitle>
+                                <DialogTitle
+                                    className="font-serif font-bold text-base sm:text-lg leading-snug overflow-hidden"
+                                    style={{
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 3,
+                                        WebkitBoxOrient: 'vertical',
+                                    }}
+                                    title={activeCitation?.source_title}
+                                >
+                                    {activeCitation?.source_title}
+                                </DialogTitle>
                                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                                     <StatusBadge status={activeCitation?.status} />
                                     {activeCitation?.rada_is_dead && (
