@@ -3799,7 +3799,7 @@ def _build_answer_continuation_prompt(completed: str) -> str:
         "Не додавай нові великі розділи. "
         f"Якщо можеш, закінчи фінальним рядком {ANSWER_DONE_MARKER}, але головне — завершити речення. "
         "Якщо останнє слово обрізане, почни з решти цього слова. "
-        "Якщо потрібне юридичне посилання, використовуй той самий формат [N].\n\n"
+        "Якщо потрібне юридичне посилання, збережи формат посилань із попередньої відповіді.\n\n"
         "Поточний кінець відповіді:\n"
         f"{completed[-2500:]}"
     )
@@ -4724,14 +4724,19 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     )
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
-    # Hard-stop: якщо нічого релевантного — не викликаємо Gemini, не галюцинуємо
-    # В low_confidence режимі пропускаємо (Gemini вже отримає guardrail в промпті)
+    # Fast path: if retrieval found no usable legal context, do not spend a full
+    # LLM call. Normal weak-but-present context still goes through Gemini so the
+    # admin system prompt controls the answer style.
     top_answerability = float(results[0].get("_answerability", {}).get("score", 0.0) or 0.0) if results else 0.0
     if not low_confidence and (not results or (results[0]["similarity"] < min_score and top_answerability < 0.35)):
         return {"early_answer": {
             "answer": (
-                "На жаль, у базі знань не знайдено достатньо інформації для відповіді на це питання. "
-                "Спробуйте переформулювати запит або зверніться до юриста."
+                "Коротко:\n"
+                "У наявній базі знань не знайдено норми, яка прямо відповідає на це питання.\n\n"
+                "Що зробити:\n"
+                "1. Уточнити ключові обставини запиту.\n"
+                "2. Додати або знайти релевантне джерело для точної відповіді.\n"
+                "3. Поставити питання конкретніше: хто, яка ситуація, дата/період і який документ або дія потрібні."
             ),
             "references": [],
             "templates": [],
