@@ -4719,14 +4719,17 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     )
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
-    # Drop documents with similarity below min_retrieval_score (configurable via admin panel).
-    # Applied only when confidence is normal — in low_confidence mode we keep everything we have.
+    # Drop documents with similarity below threshold (configurable via admin panel).
+    # Normal mode: min_retrieval_score (default 0.55).
+    # Low-confidence mode: hard floor of 0.40 to still filter obvious garbage while keeping weak but real matches.
     _min_ret_score = settings_cache.get_float("min_retrieval_score", 0.55)
-    if not low_confidence and results:
+    _ret_threshold = _min_ret_score if not low_confidence else max(_min_ret_score * 0.80, 0.40)
+    if results:
         _before = len(results)
-        results = [r for r in results if r.get("similarity", 0.0) >= _min_ret_score]
+        results = [r for r in results if r.get("similarity", 0.0) >= _ret_threshold]
         if len(results) < _before:
-            logger.info("min_retrieval_score=%.2f: dropped %d irrelevant chunks", _min_ret_score, _before - len(results))
+            logger.info("min_retrieval_score=%.2f (low_conf=%s): dropped %d irrelevant chunks",
+                        _ret_threshold, low_confidence, _before - len(results))
 
     # Fast path: if retrieval found no usable legal context, do not spend a full
     # LLM call. Normal weak-but-present context still goes through Gemini so the
