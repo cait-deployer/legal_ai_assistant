@@ -32,6 +32,7 @@ const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "int" | "bool";
   match_threshold_docs:      { type: "float", default: 0.4 },
   match_threshold_templates: { type: "float", default: 0.3 },
   min_relevance_score:       { type: "float", default: 0.35 },
+  min_retrieval_score:       { type: "float", default: 0.55 },
   raw_gate_threshold:    { type: "float", default: 0.42 },
   rada_source_boost:     { type: "float", default: 1.15 },
   llm_timeout_seconds:   { type: "float", default: 90 },
