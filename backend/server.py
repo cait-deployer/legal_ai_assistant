@@ -4089,8 +4089,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     else:
         plan_collections = ALL_V2_COLLECTIONS
 
-    # Крок 2: vector pre-scan звужує до релевантних колекцій в межах дозволених тарифом
-    target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
+    # Centroid router вимкнено — шукаємо у всіх дозволених тарифом колекціях паралельно
+    # (router коштував 2-4с на probe-запити і міг відсікати релевантні колекції)
+    # target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
+    target_collections = plan_collections
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.33))
@@ -4299,7 +4301,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             reverse=True,
         )[:_seed_limit]
 
-        _FULL_LAW_MIN_SCORE = 0.75  # якщо топ-1 seed скорить так — беремо ВСІ чанки
+        _FULL_LAW_MIN_SCORE = 0.60  # якщо топ-1 seed скорить так — беремо ВСІ чанки
         _FULL_LAW_MAX = 20          # максимум чанків для full-law expansion
 
         for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
@@ -4694,11 +4696,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                                 len(_rr_protected), len(reranked), len(results))
                 logger.info("RERANKER: %d→%d chunks (indices: %s)", len(_candidates), len(results), _indices[:body.max_docs])
             else:
-                results = results[:body.max_docs]
+                results = _rerank_by_answerability(results, _answerability_query, body.max_docs, keep_weak=low_confidence)
                 logger.info("RERANKER: fallback (parsed 0 indices, raw=%r)", _rr_raw[:80])
         except Exception as _rr_err:
             logger.warning("Reranker error: %s", _rr_err)
-            results = results[:body.max_docs]
+            results = _rerank_by_answerability(results, _answerability_query, body.max_docs, keep_weak=low_confidence)
     else:
         results = _rerank_by_answerability(
             results,
@@ -4706,13 +4708,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             body.max_docs,
             keep_weak=low_confidence,
         )
-
-    results = _rerank_by_answerability(
-        results,
-        _answerability_query,
-        body.max_docs,
-        keep_weak=low_confidence,
-    )
 
     response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
     results = _squeeze_context_results(
