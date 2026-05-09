@@ -157,6 +157,23 @@ def _get_all_nregs(sources: list[str]) -> list[tuple[str, str]]:
     return result
 
 
+def _get_unenriched_nregs(sources: list[str]) -> list[tuple[str, str]]:
+    """Повертає тільки ті (source, nreg), де .meta.json ще не має rada_enriched_at."""
+    result = []
+    for src, nreg in _get_all_nregs(sources):
+        meta_path = RAW_BASE / src / f"{nreg}.meta.json"
+        if not meta_path.exists():
+            result.append((src, nreg))
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if not meta.get("rada_enriched_at"):
+                result.append((src, nreg))
+        except Exception:
+            result.append((src, nreg))
+    return result
+
+
 def _api_nreg(src: str, nreg: str) -> str:
     """Повертає nreg для запиту до OpenData API (без source-prefix)."""
     if src == "kmu" and nreg.startswith("kmu_"):
@@ -178,10 +195,10 @@ def _eta(started: float, done: int, total: int) -> str:
     return f"{int(remaining // 3600)}г {int((remaining % 3600) // 60)}хв"
 
 
-def run_phase1(sources: list[str], force: bool = False) -> dict:
+def run_phase1(sources: list[str], force: bool = False, new_only: bool = False) -> dict:
     """Завантажує картки API — WORKERS паралельних потоків."""
     cards_cache = _load_cards_cache()
-    all_nregs   = _get_all_nregs(sources)
+    all_nregs   = _get_unenriched_nregs(sources) if new_only else _get_all_nregs(sources)
     total       = len(all_nregs)
     t0          = time.time()
 
@@ -476,9 +493,10 @@ def run_phase3(
     cards_cache: dict,
     reverse_dead: dict,
     dokid_to_nreg: dict,
+    new_only: bool = False,
 ) -> dict:
     """Записує збагачені поля у .meta.json (merge, не overwrite)."""
-    all_nregs = _get_all_nregs(sources)
+    all_nregs = _get_unenriched_nregs(sources) if new_only else _get_all_nregs(sources)
     total     = len(all_nregs)
     updated = skipped = errors = dead_total = dead_by_link = dead_by_status = no_text = 0
     t0 = time.time()
@@ -738,6 +756,7 @@ def run_enrich(
     stop_event: threading.Event | None = None,
     sources: list[str] | None = None,
     force: bool = False,
+    new_only: bool = False,
 ) -> None:
     """Entry point для server.py. Запускається в окремому потоці."""
     global _stop_event, _log_fn
@@ -764,7 +783,9 @@ def run_enrich(
         _log("--- Phase 1: Завантаження карток з API ---")
         state["phase"] = "phase1"
         _save_state(state)
-        p1 = run_phase1(sources, force=force)
+        if new_only:
+            _log("--- Режим new_only: тільки документи без rada_enriched_at ---")
+        p1 = run_phase1(sources, force=force, new_only=new_only)
         state["phase1_stats"] = p1
         _save_state(state)
 
@@ -796,7 +817,7 @@ def run_enrich(
         _log("--- Phase 3: Запис у .meta.json ---")
         state["phase"] = "phase3"
         _save_state(state)
-        p3 = run_phase3(sources, cards_cache, p2["reverse_dead"], p2["dokid_to_nreg"])
+        p3 = run_phase3(sources, cards_cache, p2["reverse_dead"], p2["dokid_to_nreg"], new_only=new_only)
         state["phase3_stats"] = p3
         _save_state(state)
 

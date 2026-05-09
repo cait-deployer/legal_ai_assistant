@@ -6179,7 +6179,7 @@ def _do_pipeline(session_id: str) -> None:
             _enrich_stop.clear()
             from enrich_opendata_meta import run_enrich
             run_enrich(log_callback=_pipeline_log, stop_event=_enrich_stop,
-                       sources=["rada", "kmu"], force=False)
+                       sources=["rada", "kmu"], force=False, new_only=True)
         except Exception as e:
             _step_log(f"⚠️ Enrich OpenData: {e}", "warning")
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[2]} завершено")
@@ -6265,9 +6265,13 @@ async def pipeline_stop_route():
         if not _sync["pipeline"]["running"]:
             raise HTTPException(400, "Пайплайн не виконується")
         _pipeline_stop.set()
-        # Also signal all per-source scrape stop events so the active scraper exits
+        # Signal all sub-process stop events (scrape steps 1, enrich 3, text 4, apply 5, qdrant 6)
         for _evt in _v2_scrape_stop.values():
             _evt.set()
+        _enrich_stop.set()
+        _text_cancel_stop.set()
+        _apply_text_cancel_stop.set()
+        _qdrant_meta_stop.set()
         _sync["pipeline"]["pause_requested"] = True
     return {"ok": True}
 
