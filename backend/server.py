@@ -4054,7 +4054,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         async def _extract_act_hints(q: str) -> list[str]:
             """Витягує назви нормативних актів з запиту для посилення title-пошуку.
             Повертає список назв або порожній список при будь-якій помилці/невпевненості."""
-            if not settings_cache.get_bool("retrieval_hints_enabled", False):
+            if not settings_cache.get_bool("retrieval_hints_enabled", True):
                 return []
             try:
                 import json as _json
@@ -4506,10 +4506,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
-        # Додаємо слова з act_hints (назви актів від LLM) — збагачуємо title search
+        # Слова з act_hints (назви актів від LLM) — для title search і пріоритетного буста
         _hints_words = []
         for _ht in _act_hints:
             _hints_words += [_strip_punct(w) for w in _ht.split() if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
+        _hints_words_set = set(w.lower() for w in _hints_words)  # для швидкої перевірки hint-матчу
         _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words + _hints_words[:6]))[:14]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
@@ -4540,7 +4541,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         r.get("out_content", "")[:1500]
                     ).lower()
                     _tmatched = sum(1 for kw in _title_kws if kw.lower() in _tsrc)
-                    r["similarity"] = 0.50 + 0.35 * (_tmatched / max(len(_title_kws), 1))
+                    _base_score = 0.50 + 0.35 * (_tmatched / max(len(_title_kws), 1))
+                    # Якщо документ знайдено по словах з act_hints (LLM вказала цей закон) —
+                    # гарантуємо мінімальний score 0.87 щоб він точно потрапив у контекст
+                    _hint_matched = _hints_words_set and any(kw.lower() in _tsrc for kw in _hints_words_set)
+                    r["similarity"] = max(_base_score, 0.87) if _hint_matched else _base_score
                     results.append(r)
                     _existing_ids.add(_key)
                     _title_added += 1
