@@ -122,16 +122,9 @@ def _index_law(law_id: str) -> bool:
     sys.path.insert(0, str(Path(__file__).parent))
     import reindex_v2
 
-    # Critical laws are large codes — index full text, not just first 8000 chars.
-    original_truncate = reindex_v2.TRUNCATE.get("rada")
-    reindex_v2.TRUNCATE["rada"] = 1_000_000
-
     meta_path = str(RAW_DIR / f"{law_id}.meta.json")
     print(f"  Індексування {law_id} (повний текст)...")
-    try:
-        stats = reindex_v2._process_law("rada", law_id, meta_path)
-    finally:
-        reindex_v2.TRUNCATE["rada"] = original_truncate
+    stats = reindex_v2._process_law("rada", law_id, meta_path)
 
     ok = stats["uploaded"] > 0
     print(f"  {'✅' if ok else '❌'} chunks={stats['chunks']} uploaded={stats['uploaded']} errors={stats['errors']}")
