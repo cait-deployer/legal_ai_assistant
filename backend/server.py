@@ -4532,8 +4532,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
+        # Міжнародне право (rada_intl_v2) виключаємо з title boost:
+        # конвенції МОП/ООН знаходяться за загальними словами (працівник, право, договір)
+        # і забивають слоти, але рідко є правильною відповіддю на внутрішньоправові запити.
+        _TITLE_BOOST_EXCLUDE = {"rada_intl_v2"}
+        _title_cols = [c for c in target_collections if c not in _TITLE_BOOST_EXCLUDE]
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
+            _title_results = search_qdrant_by_title(_title_kws, _title_cols, chunks_per_doc=2)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
