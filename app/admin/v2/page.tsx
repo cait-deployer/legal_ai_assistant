@@ -1497,6 +1497,236 @@ const SOURCES_INFO: SourceInfo[] = [
   },
 ]
 
+// ── Fix Truncated tab ──────────────────────────────────────────────────────────
+
+type FixSourceStatus = {
+  running: boolean
+  pause_requested: boolean
+  live_logs: LogEntry[]
+  resume_progress: { done: number; failed: number; total: number } | null
+  total_on_disk: number
+}
+
+type FixAllStatus = Record<string, FixSourceStatus>
+
+const FIX_SOURCES: { id: string; label: string; threshold: string }[] = [
+  { id: "rada", label: "Верховна Рада", threshold: "> 8 KB (старий ліміт 8 000 символів)" },
+  { id: "kmu",  label: "Кабінет Міністрів", threshold: "> 15 KB (старий ліміт 15 000 символів)" },
+]
+
+function FixTruncatedTab() {
+  const [status, setStatus] = useState<FixAllStatus>({})
+  const [loading, setLoading] = useState<Record<string, boolean>>({})
+  const [error, setError] = useState<Record<string, string>>({})
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
+  const logRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/v2/fix-truncated/status")
+      if (res.ok) setStatus(await res.json())
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  const anyRunning = FIX_SOURCES.some(s => status[s.id]?.running)
+
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (anyRunning) pollRef.current = setInterval(fetchStatus, 3000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [anyRunning, fetchStatus])
+
+  // Auto-scroll logs
+  useEffect(() => {
+    FIX_SOURCES.forEach(({ id }) => {
+      if (expandedLogs[id] && logRefs.current[id]) {
+        logRefs.current[id]!.scrollTop = logRefs.current[id]!.scrollHeight
+      }
+    })
+  }, [status, expandedLogs])
+
+  async function handleStart(source: string) {
+    setLoading(l => ({ ...l, [source]: true }))
+    setError(e => ({ ...e, [source]: "" }))
+    try {
+      const res = await fetch("/api/admin/v2/fix-truncated/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+      })
+      const data = await res.json()
+      if (!res.ok) setError(e => ({ ...e, [source]: data.detail || data.error || "Помилка" }))
+      else { await fetchStatus(); setExpandedLogs(l => ({ ...l, [source]: true })) }
+    } catch { setError(e => ({ ...e, [source]: "Помилка з'єднання" })) }
+    setLoading(l => ({ ...l, [source]: false }))
+  }
+
+  async function handleStop(source: string) {
+    try {
+      await fetch("/api/admin/v2/fix-truncated/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+      })
+      await fetchStatus()
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Info */}
+      <div className="bg-[#0d1120] rounded-2xl border border-amber-500/20 p-5 space-y-3">
+        <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">Виправлення обрізаних документів</h3>
+        <p className="text-sm text-gray-400 leading-relaxed">
+          Старий реіндекс обрізав документи: <b className="text-white">rada</b> → 8 000 символів,{" "}
+          <b className="text-white">kmu</b> → 15 000 символів. Великі закони (Податковий кодекс 7 MB,
+          Митний кодекс 3 MB...) потрапляли в базу тільки першими 2–3 сторінками.
+        </p>
+        <div className="grid grid-cols-3 gap-3 text-xs">
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-center">
+            <div className="text-red-300 font-bold text-base">29 225</div>
+            <div className="text-gray-400">файлів rada обрізано</div>
+          </div>
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 text-center">
+            <div className="text-amber-300 font-bold text-base">4 926</div>
+            <div className="text-gray-400">файлів &gt;50 KB (критично)</div>
+          </div>
+          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-center">
+            <div className="text-emerald-300 font-bold text-base">∞</div>
+            <div className="text-gray-400">новий ліміт (повний текст)</div>
+          </div>
+        </div>
+        <div className="text-xs text-gray-500 border-t border-white/5 pt-3">
+          ⚠️ Запускати по одному джерелу. Підтримує паузу/відновлення — можна зупинити і продовжити будь-коли.
+        </div>
+      </div>
+
+      {/* Per-source panels */}
+      {FIX_SOURCES.map(({ id, label, threshold }) => {
+        const src = status[id]
+        const running   = src?.running ?? false
+        const stopping  = running && (src?.pause_requested ?? false)
+        const progress  = src?.resume_progress
+        const totalDisk = src?.total_on_disk ?? 0
+        const logs      = src?.live_logs ?? []
+        const pct       = progress && progress.total > 0
+          ? Math.round((progress.done / progress.total) * 100) : 0
+
+        return (
+          <div key={id} className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs bg-[#0A0E1A] text-[#C9A84C] px-2 py-0.5 rounded font-bold">{id}</span>
+                  <span className="text-sm font-bold text-[#E0E6ED]">{label}</span>
+                  {running && !stopping && (
+                    <span className="text-xs font-bold text-emerald-400 animate-pulse">● Виконується</span>
+                  )}
+                  {stopping && (
+                    <span className="text-xs font-bold text-amber-400 animate-pulse">⏸ Зупиняється...</span>
+                  )}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">{threshold}</div>
+              </div>
+              <div className="flex gap-2">
+                {!running ? (
+                  <button
+                    onClick={() => handleStart(id)}
+                    disabled={loading[id] || FIX_SOURCES.some(s => s.id !== id && status[s.id]?.running)}
+                    className="px-4 py-2 rounded-lg bg-[#C9A84C] text-[#0A0E1A] font-bold text-xs hover:bg-amber-400 disabled:opacity-40 transition-colors"
+                  >
+                    {loading[id] ? "..." : progress ? "▶ Продовжити" : "▶ Запустити"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleStop(id)}
+                    disabled={stopping}
+                    className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold text-xs hover:bg-red-700 disabled:opacity-40 transition-colors"
+                  >
+                    ⏸ Пауза
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {error[id] && (
+              <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error[id]}</div>
+            )}
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-[#0A0E1A] rounded-lg p-2 text-center">
+                <div className="text-[#C9A84C] font-bold text-sm">{totalDisk.toLocaleString()}</div>
+                <div className="text-gray-500">файлів для обробки</div>
+              </div>
+              <div className="bg-[#0A0E1A] rounded-lg p-2 text-center">
+                <div className="text-emerald-400 font-bold text-sm">{progress?.done ?? 0}</div>
+                <div className="text-gray-500">оброблено</div>
+              </div>
+              <div className="bg-[#0A0E1A] rounded-lg p-2 text-center">
+                <div className="text-red-400 font-bold text-sm">{progress?.failed ?? 0}</div>
+                <div className="text-gray-500">помилок</div>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            {progress && progress.total > 0 && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>{progress.done} / {progress.total}</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="h-2 bg-[#0A0E1A] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#C9A84C] rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Logs toggle */}
+            {logs.length > 0 && (
+              <div className="space-y-2">
+                <button
+                  onClick={() => setExpandedLogs(l => ({ ...l, [id]: !l[id] }))}
+                  className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+                >
+                  {expandedLogs[id] ? "▲ Сховати логи" : `▼ Показати логи (${logs.length})`}
+                </button>
+                {expandedLogs[id] && (
+                  <div
+                    ref={el => { logRefs.current[id] = el }}
+                    className="h-56 overflow-y-auto bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-3 font-mono text-[11px] space-y-0.5"
+                  >
+                    {logs.map((log, i) => (
+                      <div
+                        key={i}
+                        className={
+                          log.level === "error" ? "text-red-400" :
+                          log.level === "warning" ? "text-amber-400" :
+                          "text-gray-300"
+                        }
+                      >
+                        <span className="text-gray-600 mr-2">{log.ts?.slice(11, 19)}</span>
+                        {log.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function SourcesTab() {
   return (
     <div className="space-y-6">
@@ -1588,11 +1818,12 @@ function SourcesTab() {
   )
 }
 
-type Tab = "scraper" | "reindex" | "analytics" | "disk" | "sources"
+type Tab = "scraper" | "reindex" | "analytics" | "disk" | "sources" | "fix"
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "scraper", label: "Скрапер" },
   { id: "reindex", label: "Реіндекс" },
+  { id: "fix",     label: "Виправлення" },
   { id: "analytics", label: "Аналітика" },
   { id: "disk", label: "Диск" },
   { id: "sources", label: "Джерела" },
@@ -1631,6 +1862,7 @@ export default function V2AdminPage() {
         {/* Tab content */}
         {tab === "scraper" && <ScraperTab />}
         {tab === "reindex" && <ReindexTab />}
+        {tab === "fix" && <FixTruncatedTab />}
         {tab === "analytics" && <AnalyticsTab />}
         {tab === "disk" && <DiskTab />}
         {tab === "sources" && <SourcesTab />}

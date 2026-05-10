@@ -52,7 +52,7 @@ SPLITTERS = {
 }
 
 TRUNCATE = {
-    "rada": 8000, "kmu": 15000, "ccu": 15000, "supreme": 15000,
+    "rada": 2_000_000, "kmu": 2_000_000, "ccu": 15000, "supreme": 15000,
     "wiki": 8000, "positions": 8000, "mod": 15000, "zir": 8000,
 }
 

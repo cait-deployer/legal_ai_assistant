@@ -118,6 +118,7 @@ _SOURCES = (
     "reindex_v2",  # "all sources" fallback
     "reindex_v2_rada", "reindex_v2_kmu", "reindex_v2_ccu",
     "reindex_v2_supreme", "reindex_v2_wiki", "reindex_v2_positions", "reindex_v2_mod", "reindex_v2_zir",
+    "fix_truncated_rada", "fix_truncated_kmu",  # виправлення обрізаних великих файлів
     "enrich_opendata",    # збагачення метаданих Rada+KMU через OpenData API
     "extract_text_cancellations",
     "check_text_missing",
@@ -150,6 +151,7 @@ _text_missing_scrape_stop = threading.Event()
 _apply_text_cancel_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
 _pipeline_stop    = threading.Event()
+_fix_truncated_stop = {"rada": threading.Event(), "kmu": threading.Event()}
 
 _PIPELINE_LAST_RUN_FILE    = BASE_DIR / "pipeline_last_run.json"
 _PIPELINE_RESUME_FILE      = BASE_DIR / "pipeline_resume_state.json"
@@ -1980,6 +1982,77 @@ async def v2_reindex_stop(body: dict = Body(default={})):
         if not _sync[slot]["running"]:
             raise HTTPException(400, "Реіндекс не виконується")
         _v2_stop[stop_key].set()
+        _sync[slot]["pause_requested"] = True
+    return {"ok": True}
+
+
+FIX_TRUNCATED_SOURCES = ["rada", "kmu"]
+
+
+def _do_fix_truncated(source: str):
+    slot = f"fix_truncated_{source}"
+    log  = _make_reindex_log_cb(slot)
+    try:
+        from reindex_truncated import run_fix_truncated
+        _fix_truncated_stop[source].clear()
+        run_fix_truncated(source, log_callback=log, stop_event=_fix_truncated_stop[source], resume=True)
+    except Exception as e:
+        log(f"Критична помилка: {e}", "error")
+    finally:
+        with _lock:
+            _sync[slot]["running"] = False
+            _sync[slot]["pause_requested"] = False
+
+
+@app.get("/admin/v2/fix-truncated/status")
+async def fix_truncated_status():
+    from reindex_truncated import get_resume_progress, _get_truncated_files
+    result = {}
+    for src in FIX_TRUNCATED_SOURCES:
+        slot = f"fix_truncated_{src}"
+        with _lock:
+            running   = _sync[slot]["running"]
+            pause_req = _sync[slot]["pause_requested"]
+            logs      = list(_sync[slot]["live_logs"])
+        progress = get_resume_progress(src)
+        try:
+            total_on_disk = len(_get_truncated_files(src))
+        except Exception:
+            total_on_disk = 0
+        result[src] = {
+            "running":          running,
+            "pause_requested":  pause_req,
+            "live_logs":        logs,
+            "resume_progress":  progress,
+            "total_on_disk":    total_on_disk,
+        }
+    return result
+
+
+@app.post("/admin/v2/fix-truncated/trigger")
+async def fix_truncated_trigger(body: dict = Body(default={})):
+    source = body.get("source")
+    if source not in FIX_TRUNCATED_SOURCES:
+        raise HTTPException(400, f"source must be one of {FIX_TRUNCATED_SOURCES}")
+    slot = f"fix_truncated_{source}"
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync(slot, _do_fix_truncated, session_id, source=source)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/v2/fix-truncated/stop")
+async def fix_truncated_stop(body: dict = Body(default={})):
+    source = body.get("source")
+    if source not in FIX_TRUNCATED_SOURCES:
+        raise HTTPException(400, f"source must be one of {FIX_TRUNCATED_SOURCES}")
+    slot = f"fix_truncated_{source}"
+    with _lock:
+        if not _sync[slot]["running"]:
+            raise HTTPException(400, "Не виконується")
+        _fix_truncated_stop[source].set()
         _sync[slot]["pause_requested"] = True
     return {"ok": True}
 
