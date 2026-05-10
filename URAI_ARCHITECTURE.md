@@ -236,6 +236,9 @@ target collections, flags and compact top-source snapshots. Backend logs mirror
 this with `RAG PLAN`, `RAG VECTOR`, `RAG KEYWORD`, `RAG TITLE` and
 `RAG FINAL TOP` entries.
 
+`title_boost_max_keywords` limits broad title-search keyword fanout. This is a
+generic latency/noise control, not a topic-specific rule.
+
 Context buckets:
 
 | Bucket | Collections | Max chunks |

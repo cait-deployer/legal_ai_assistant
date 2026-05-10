@@ -24,6 +24,7 @@ type Settings = {
   raw_gate_threshold: number
   rada_source_boost: number
   retrieval_hints_enabled: boolean
+  title_boost_max_keywords: number
   max_output_tokens: number
   review_first_message_count: number
   review_repeat_message_count: number
@@ -95,6 +96,7 @@ const DEFAULTS: Settings = {
   raw_gate_threshold: 0.42,
   rada_source_boost: 1.15,
   retrieval_hints_enabled: true,
+  title_boost_max_keywords: 8,
   max_output_tokens: 3000,
   review_first_message_count: 1,
   review_repeat_message_count: 5,
@@ -614,6 +616,14 @@ export default function AiSettingsPage() {
               tooltip="Окремий короткий AI-крок формує гіпотези для пошуку: можливі назви законів, постанов, порядків, статті та ключові терміни. Це не відкриває закриті тарифом колекції і не забороняє Wiki, ZIR, MOD або судову практику."
             >
               <BooleanInput value={settings.retrieval_hints_enabled} onChange={v => set("retrieval_hints_enabled", v)} />
+            </Field>
+            <Field
+              label="Максимум title-keywords (title_boost_max_keywords)"
+              hint="Обмежує ширину пошуку по назвах документів. Рекомендовано: 6-8."
+              restart="cache"
+              tooltip="Менше значення пришвидшує title boost і зменшує шум. Більше значення може знайти рідкісні назви, але довше сканує Qdrant title index."
+            >
+              <NumberInput value={settings.title_boost_max_keywords} onChange={v => set("title_boost_max_keywords", v)} min={3} max={14} />
             </Field>
             <Field
               label="Поріг розширення пошуку (raw_gate_threshold)"

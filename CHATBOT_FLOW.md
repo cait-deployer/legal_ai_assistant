@@ -128,6 +128,10 @@ Backend logs also emit `RAG PLAN`, `RAG VECTOR`, `RAG BOOSTED TOP`,
 `RAGDBG VECTOR #01 ...` and `RAGDBG FINAL #01 ...`. These logs are diagnostic
 only and do not add hardcoded source or document exceptions.
 
+`title_boost_max_keywords` caps broad title-keyword fanout. Exact title probes
+from retrieval hints still run separately, but generic title keywords should stay
+small enough to avoid slow noisy Qdrant scrolls.
+
 ## V2 Collections
 
 Production chat retrieval uses V2 Qdrant collections:

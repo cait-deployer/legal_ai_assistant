@@ -4174,7 +4174,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     except Exception:
                         pass
                 raw = re.sub(r"^```(?:json)?\s*|\s*```\s*$", "", raw.strip(), flags=re.DOTALL)
-                parsed = json.loads(raw)
+                parsed = _json.loads(raw)
                 if not isinstance(parsed, dict):
                     return {}
 
@@ -4222,7 +4222,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 retrieval_debug["counts"]["hint_terms"] = len(hints["must_terms"])
                 retrieval_debug["counts"]["hint_articles"] = len(hints["article_hints"])
                 retrieval_debug["flags"]["hint_confidence"] = hints.get("confidence", "")
-                logger.info("RETRIEVAL HINTS: %s", json.dumps(hints, ensure_ascii=False)[:800])
+                logger.info("RETRIEVAL HINTS: %s", _json.dumps(hints, ensure_ascii=False)[:800])
                 return hints
             except Exception as e:
                 retrieval_debug["timings_ms"]["retrieval_hints"] = _tock(_hint_start)
@@ -4295,6 +4295,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         retrieval_hints.get("likely_act_titles") or [],
         retrieval_hints.get("collection_roles") or {},
     )
+    retrieval_debug["flags"]["response_length_pref"] = body.response_length_pref
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.33))
@@ -4731,7 +4732,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 lm for w in _raw_kws
                 if (lm := _ua_lemma(w)) and lm.lower() not in _TITLE_STOPWORDS
             ]
-        ))[:14]
+        ))
+        _title_kw_limit = int(settings_cache.get_float("title_boost_max_keywords", 8))
+        _title_kw_limit = max(3, min(_title_kw_limit, 14))
+        _title_kws = _title_kws[:_title_kw_limit]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
