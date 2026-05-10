@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       const sources = features
         .map((f) => SOURCE_FEATURE_MAP[f.feature_key])
         .filter(Boolean) as string[]
-      if (sources.length > 0) filter_sources = [...new Set([...sources, "mod", "zir"])]
+      if (sources.length > 0) filter_sources = [...new Set([...sources, "kmu", "mod", "zir"])]
 
       // Response quality features
       response_features = features
