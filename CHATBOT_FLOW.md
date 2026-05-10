@@ -13,12 +13,12 @@ flowchart TD
     E --> F[FastAPI /ask_stream]
     F --> G[Optional RU to UA translation]
     G --> H[Follow-up resolver for ambiguous short questions]
-    H --> I[Parallel: query embedding + query rewrite]
+    H --> I[Parallel: query embedding + query rewrite + retrieval hints]
     I --> J[Plan sources -> allowed V2 Qdrant collections]
     J --> K[Routing probe across allowed collections]
     K --> L[Vector search: original and rewrite]
     L --> M[Boost, dedup, diversity, document expansion]
-    M --> N[Keyword MatchText + title boost]
+    M --> N[Keyword MatchText + title boost + hint title boost]
     N --> O[Deterministic answerability reranker]
     O --> P[Strict context squeeze + expired-document filter + context buckets]
     P --> Q[Gemini streamed answer + hidden completion marker + parallel classification]
@@ -62,7 +62,7 @@ flowchart TD
 2. Initialize Vertex AI if needed.
 3. Translate Russian-looking questions to Ukrainian for search.
 4. Resolve follow-up questions using recent history.
-5. Run query rewrite and query embedding.
+5. Run query rewrite, query embedding and optional retrieval hints.
 6. Convert plan source features into allowed V2 collections.
 7. Probe allowed collections and route to likely collections.
 8. Run vector search for original and rewritten queries.
@@ -73,7 +73,7 @@ flowchart TD
 13. Apply diversity caps.
 14. Expand promising documents with sibling chunks.
 15. Add keyword MatchText candidates.
-16. Add title MatchText candidates with a small cap.
+16. Add title MatchText and hint-title candidates with a small cap.
 17. Run deterministic answerability rerank.
 18. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
 19. Squeeze final context: keep search wide, but send only the strongest source-strict chunks to Gemini.
@@ -83,6 +83,34 @@ flowchart TD
 23. Require a hidden answer-done marker from the model.
 24. If the marker is missing or the model hit max tokens, request a short continuation.
 25. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
+
+## Retrieval Hints
+
+`retrieval_hints_enabled` controls a soft AI planning step that runs in parallel
+with query rewrite. It returns JSON hints, not user-facing legal conclusions:
+
+- `rewritten_query`;
+- `likely_act_titles`;
+- `must_terms`;
+- `article_hints`;
+- `collection_roles`;
+- `answer_type`;
+- `confidence`.
+
+Hints enrich keyword and title search, especially when the user asks casually and
+the relevant Rada or KMU document title is not present in the question.
+
+Hard constraints:
+
+- tariff source gating remains the boundary;
+- searches still run only inside `plan_collections`;
+- hinted collections never unlock sources that the plan did not allow;
+- Wiki, ZIR, MOD, Supreme Court, legal positions and CCU are not banned;
+- source roles are soft priorities, not filters;
+- if a hinted title is not confirmed by Qdrant title search, it is ignored.
+
+The final SSE `_meta` may include `retrieval_hints` and `confirmed_title_hits`
+for debugging and eval review.
 
 ## V2 Collections
 

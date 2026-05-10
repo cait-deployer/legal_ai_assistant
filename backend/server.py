@@ -4045,17 +4045,141 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 logger.info("REWRITE failed: %s", e)
                 return None
 
+        async def _build_retrieval_hints(q: str) -> dict:
+            if not settings_cache.get_bool("retrieval_hints_enabled", True):
+                return {}
+            try:
+                _hint_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
+                _hint_model = GenerativeModel(
+                    _hint_model_name,
+                    system_instruction=(
+                        "Ти плануєш пошук у юридичній RAG-базі України. "
+                        "Поверни тільки JSON без markdown. Не відповідай користувачу. "
+                        "Назви актів є лише гіпотезами для пошуку, не фактами. "
+                        "Не забороняй джерела: Рада, КМУ, MOD, ZIR, Wiki, Верховний Суд, КСУ можуть бути корисними. "
+                        "Не вигадуй точні номери статей або актів, якщо не впевнений."
+                    ),
+                )
+                _hint_prompt = (
+                    "Сформуй короткий план пошуку для питання.\n"
+                    "JSON schema:\n"
+                    "{"
+                    "\"rewritten_query\":\"стислий юридичний запит\","
+                    "\"likely_act_titles\":[\"можлива назва закону/кодексу/постанови/порядку\"],"
+                    "\"must_terms\":[\"ключовий термін\"],"
+                    "\"article_hints\":[\"стаття або пункт, якщо користувач явно натякнув\"],"
+                    "\"collection_roles\":{"
+                    "\"primary\":[\"rada|kmu|mod|zir|supreme|positions|ccu|wiki\"],"
+                    "\"secondary\":[\"...\"],"
+                    "\"background\":[\"...\"]"
+                    "},"
+                    "\"answer_type\":\"direct_norm|procedure|risk_analysis|document_draft|clarification_needed|mixed\","
+                    "\"confidence\":\"low|medium|high\""
+                    "}\n\n"
+                    f"Питання: {q}"
+                )
+                try:
+                    from vertexai.generative_models import ThinkingConfig as _HintThinkingConfig
+                    _hint_cfg = GenerationConfig(
+                        temperature=0.0,
+                        max_output_tokens=1200,
+                        response_mime_type="application/json",
+                        thinking_config=_HintThinkingConfig(thinking_budget=0),
+                    )
+                except Exception:
+                    _hint_cfg = GenerationConfig(
+                        temperature=0.0,
+                        max_output_tokens=1200,
+                        response_mime_type="application/json",
+                    )
+                _resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        _hint_model.generate_content,
+                        _hint_prompt,
+                        generation_config=_hint_cfg,
+                    ),
+                    timeout=8.0,
+                )
+                raw = ""
+                try:
+                    raw = _resp.text or ""
+                except Exception:
+                    pass
+                if not raw:
+                    try:
+                        raw = " ".join(
+                            getattr(p, "text", "").strip()
+                            for p in _resp.candidates[0].content.parts
+                            if not getattr(p, "thought", False) and getattr(p, "text", "")
+                        )
+                    except Exception:
+                        pass
+                raw = re.sub(r"^```(?:json)?\s*|\s*```\s*$", "", raw.strip(), flags=re.DOTALL)
+                parsed = json.loads(raw)
+                if not isinstance(parsed, dict):
+                    return {}
+
+                def _str_list(key: str, *, limit: int, max_len: int = 140) -> list[str]:
+                    values = parsed.get(key)
+                    if not isinstance(values, list):
+                        return []
+                    out: list[str] = []
+                    for item in values:
+                        if not isinstance(item, str):
+                            continue
+                        text = re.sub(r"\s+", " ", item).strip()
+                        if 2 <= len(text) <= max_len and text not in out:
+                            out.append(text)
+                        if len(out) >= limit:
+                            break
+                    return out
+
+                roles_raw = parsed.get("collection_roles")
+                allowed_roles = {"rada", "kmu", "mod", "zir", "supreme", "positions", "ccu", "wiki"}
+                roles: dict[str, list[str]] = {}
+                if isinstance(roles_raw, dict):
+                    for role in ("primary", "secondary", "background"):
+                        vals = roles_raw.get(role)
+                        if not isinstance(vals, list):
+                            roles[role] = []
+                            continue
+                        roles[role] = [
+                            str(v).strip().lower()
+                            for v in vals
+                            if str(v).strip().lower() in allowed_roles
+                        ][:8]
+
+                hints = {
+                    "rewritten_query": str(parsed.get("rewritten_query") or "").strip()[:240],
+                    "likely_act_titles": _str_list("likely_act_titles", limit=6, max_len=180),
+                    "must_terms": _str_list("must_terms", limit=10, max_len=80),
+                    "article_hints": _str_list("article_hints", limit=8, max_len=80),
+                    "collection_roles": roles,
+                    "answer_type": str(parsed.get("answer_type") or "").strip()[:40],
+                    "confidence": str(parsed.get("confidence") or "").strip()[:20],
+                }
+                logger.info("RETRIEVAL HINTS: %s", json.dumps(hints, ensure_ascii=False)[:800])
+                return hints
+            except Exception as e:
+                logger.info("RETRIEVAL HINTS failed: %s", e)
+                return {}
+
         async def _embed_query_with_timeout(text: str):
             return await _asyncio.wait_for(
                 _asyncio.to_thread(_embed_v2.embed_query, text),
                 timeout=15.0,
             )
 
-        # Embed оригінального запиту + rewrite паралельно
-        query_vector, rewritten_query = await _asyncio.gather(
+        # Embed оригінального запиту + rewrite + retrieval hints паралельно
+        query_vector, rewritten_query, retrieval_hints = await _asyncio.gather(
             _embed_query_with_timeout(search_question),
             _rewrite_query(search_question),
+            _build_retrieval_hints(search_question),
         )
+        if not rewritten_query and retrieval_hints.get("rewritten_query"):
+            _hint_rewrite = str(retrieval_hints.get("rewritten_query") or "").strip()
+            if 5 < len(_hint_rewrite) < 300 and len(_hint_rewrite.split()) >= 4:
+                rewritten_query = _hint_rewrite
         hypothetical_text = rewritten_query  # alias для title boost keywords
         logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
@@ -4376,7 +4500,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     }
     try:
         from qdrant_storage import search_qdrant_text
-        _kw_query = f"{search_question} {rewritten_query or ''}".strip()
+        _hint_terms_text = " ".join(
+            (retrieval_hints.get("must_terms") or [])
+            + (retrieval_hints.get("article_hints") or [])
+            + (retrieval_hints.get("likely_act_titles") or [])
+        )
+        _kw_query = f"{search_question} {rewritten_query or ''} {_hint_terms_text}".strip()
         _kw_results = (
             search_qdrant_text(_kw_query, target_collections, limit=15)
             if settings_cache.get_bool("lexical_fallback_enabled", True)
@@ -4441,16 +4570,31 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
         "надай", "надайте", "інформацію", "інфо", "покажи", "покажіть",
     }
+    confirmed_title_hits: list[dict] = []
     try:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
-        _search_terms_text = f"{search_question} {rewritten_query or ''}".strip()
+        _hint_titles = retrieval_hints.get("likely_act_titles") or []
+        _hint_terms = (retrieval_hints.get("must_terms") or []) + (retrieval_hints.get("article_hints") or [])
+        _search_terms_text = f"{search_question} {rewritten_query or ''} {' '.join(_hint_terms)}".strip()
         _q_words = [_strip_punct(w) for w in _search_terms_text.split() if len(w) > 4]
         _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
-        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
+        _hint_title_words: list[str] = []
+        for _title in _hint_titles[:4]:
+            for _w in _title.split():
+                _clean = _strip_punct(_w)
+                if len(_clean) > 4 and _clean.lower() not in _TITLE_STOPWORDS:
+                    _hint_title_words.append(_clean)
+        _hint_term_words = [
+            _strip_punct(w)
+            for term in _hint_terms[:8]
+            for w in str(term).split()
+            if len(_strip_punct(w)) > 4 and _strip_punct(w).lower() not in _TITLE_STOPWORDS
+        ]
+        _raw_kws = list(dict.fromkeys(_hint_title_words[:6] + _hint_term_words[:4] + _q_words[:3] + _hyde_words))[:12]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
@@ -4462,6 +4606,33 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
+        if _hint_titles and settings_cache.get_bool("retrieval_hints_enabled", True):
+            _hint_title_results: list[dict] = []
+            for _hint_title in _hint_titles[:4]:
+                _hint_title_results.extend(
+                    search_qdrant_by_title([_hint_title], target_collections, chunks_per_doc=2)
+                )
+            _hint_added = 0
+            for r in _hint_title_results[:12]:
+                _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+                if _key in _existing_ids:
+                    continue
+                r["similarity"] = max(r.get("similarity", 0.0), 0.76)
+                r["_retrieval_hint_match"] = True
+                results.append(r)
+                _existing_ids.add(_key)
+                _hint_added += 1
+                meta = r.get("out_metadata") or {}
+                hit = {
+                    "law_id": meta.get("law_id", ""),
+                    "title": (meta.get("source") or meta.get("title") or "")[:180],
+                    "collection": r.get("_collection", ""),
+                }
+                if hit not in confirmed_title_hits:
+                    confirmed_title_hits.append(hit)
+            if _hint_added:
+                results.sort(key=lambda x: x["similarity"], reverse=True)
+                logger.info("RETRIEVAL HINT TITLE: додано %d чанків", _hint_added)
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
@@ -4993,6 +5164,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "main_gen_cfg": _main_gen_cfg, "llm_timeout": llm_timeout,
         "start_time": start_time, "max_output_tokens": max_output_tokens,
         "query_rewritten": rewritten_query,
+        "retrieval_hints": retrieval_hints,
+        "confirmed_title_hits": confirmed_title_hits,
     }
 
 
@@ -5591,6 +5764,8 @@ async def ask(body: AskRequest):
             "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
             "n_docs": len(pipe["results"]),
             "query_rewritten": pipe.get("query_rewritten"),
+            "retrieval_hints": pipe.get("retrieval_hints"),
+            "confirmed_title_hits": pipe.get("confirmed_title_hits"),
             **classification,
         },
     }
@@ -5831,6 +6006,8 @@ async def ask_stream(body: AskRequest):
                 "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
                 "n_docs": len(pipe["results"]),
                 "query_rewritten": pipe.get("query_rewritten"),
+                "retrieval_hints": pipe.get("retrieval_hints"),
+                "confirmed_title_hits": pipe.get("confirmed_title_hits"),
                 **classification,
             },
         }

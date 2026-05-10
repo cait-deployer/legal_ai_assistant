@@ -35,6 +35,7 @@ const SETTINGS_SCHEMA: Record<string, { type: "text" | "float" | "int" | "bool";
   min_retrieval_score:       { type: "float", default: 0.55 },
   raw_gate_threshold:    { type: "float", default: 0.42 },
   rada_source_boost:     { type: "float", default: 1.15 },
+  retrieval_hints_enabled: { type: "bool", default: true },
   llm_timeout_seconds:   { type: "float", default: 90 },
   max_output_tokens:     { type: "float", default: 3000 },
   review_first_message_count: { type: "int", default: 1 },

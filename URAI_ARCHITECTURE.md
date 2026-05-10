@@ -210,6 +210,27 @@ Backend `_ask_pipeline()`:
 
 ## 9. Context building
 
+### Retrieval hints before context
+
+`retrieval_hints_enabled` adds a soft AI planning step before keyword/title
+fallbacks. The step uses the rewrite model and returns a small JSON object with:
+
+- rewritten query fallback;
+- likely legal act titles;
+- must-have legal terms;
+- article or clause hints;
+- source roles such as primary, secondary and background;
+- answer type and confidence.
+
+This layer does not change tariff access. The backend first builds
+`plan_collections` from `filter_sources`, and every hint lookup is intersected
+with those allowed V2 collections by using the same `target_collections`.
+
+Source roles are not bans. Wiki, ZIR, MOD, Supreme Court, legal positions and
+CCU remain searchable when the user's plan allows them. Hints only add soft
+title/keyword candidates and metadata for eval review. The answerability reranker
+still decides which chunks reach the final context.
+
 Context buckets:
 
 | Bucket | Collections | Max chunks |
