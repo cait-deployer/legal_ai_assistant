@@ -5304,6 +5304,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if body.context_summary and body.context_summary.strip():
             summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:4000]}\n\n"
 
+        _answer_needles = (
+            "вимог", "вимоги", "умов", "умови", "критер", "хто може", "які саме",
+            "порядок", "процедур", "требован", "услов", "критер", "кто может",
+            "каких", "какие", "порядок", "процедур",
+        )
+        needs_structured_conditions = any(
+            needle in question.lower() or needle in search_question.lower()
+            for needle in _answer_needles
+        )
+        retrieval_debug["flags"]["needs_structured_conditions_answer"] = needs_structured_conditions
         answer_type_hint = ""
         if isinstance(retrieval_hints, dict):
             answer_type_hint = str(retrieval_hints.get("answer_type") or "").strip()
@@ -5331,9 +5341,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"- {length_rules[response_length_pref]}\n"
             "- Якщо питання питає 'які вимоги/умови/критерії', обов'язково дай окремий перелік вимог/умов.\n"
             "- Якщо джерела містять кілька рівнів регулювання, розділи: закон/кодекс, КМУ/міністерства, судова практика.\n"
-            "- Кожне юридичне твердження прив'язуй до citation [N].\n"
+            "- Кожне юридичне твердження прив'язуй до реального номера citation, наприклад [1] або [2]. Не використовуй буквальний маркер [N].\n"
             f"- Тип відповіді за retrieval hints: {answer_type_hint or 'не визначено'}.\n\n"
         )
+        if needs_structured_conditions:
+            answer_contract_block += (
+                "Обов'язковий формат для цього питання:\n"
+                "1. Прямий висновок: чи є інформація в джерелах.\n"
+                "2. Хто може підпадати під правило / для кого застосовується.\n"
+                "3. Основні вимоги або критерії окремими пунктами.\n"
+                "4. Який орган/процедура згадується у джерелах.\n"
+                "5. Важливе застереження, якщо воно є в контексті.\n"
+                "Навіть у short-режимі дай не менше 4 змістовних пунктів, якщо контекст це дозволяє.\n"
+                "Не відповідай лише однією загальною фразою.\n\n"
+            )
 
         # Build conversation history block — last 3 turns (6 messages) only
         # Older turns are already covered by context_summary
@@ -5359,7 +5380,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"{answer_contract_block}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
-            f"---\nПитання: {question}"
+            f"---\nПитання: {question}\n\n"
+            "Фінальна перевірка перед відповіддю: якщо відповідь вийшла коротшою за потрібний формат, "
+            "розшир її за рахунок умов, критеріїв, процедури та застережень, які є в контексті. "
+            "Не додавай інформацію поза контекстом."
         )
 
         clf_prompt = (

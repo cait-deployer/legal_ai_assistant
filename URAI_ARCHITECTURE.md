@@ -244,6 +244,10 @@ Retrieval budget settings also include `title_boost_max_pages`,
 `doc_expansion_chunks_per_doc`. These control broad search cost and context noise
 without changing tariff source access.
 
+For questions asking about requirements, conditions, criteria, coverage or
+procedure, the prompt adds a generic structure guard so the model returns several
+concrete cited points even when the user preference is `short`.
+
 Context buckets:
 
 | Bucket | Collections | Max chunks |

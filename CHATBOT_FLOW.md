@@ -143,6 +143,11 @@ Budget settings for latency control:
 These are generic caps. They should be tuned by eval metrics and logs, not by
 hardcoded topic exceptions.
 
+Answer generation also has a generic structure guard: when the question asks for
+conditions, requirements, criteria, who is covered, or procedure, even `short`
+answers must include several concrete cited points instead of a single generic
+sentence. This is query-shape based, not topic-specific.
+
 ## V2 Collections
 
 Production chat retrieval uses V2 Qdrant collections:
