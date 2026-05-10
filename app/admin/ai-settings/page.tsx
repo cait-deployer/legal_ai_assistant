@@ -25,6 +25,10 @@ type Settings = {
   rada_source_boost: number
   retrieval_hints_enabled: boolean
   title_boost_max_keywords: number
+  title_boost_max_pages: number
+  title_boost_max_docs_per_collection: number
+  doc_expansion_max_docs: number
+  doc_expansion_chunks_per_doc: number
   max_output_tokens: number
   review_first_message_count: number
   review_repeat_message_count: number
@@ -97,6 +101,10 @@ const DEFAULTS: Settings = {
   rada_source_boost: 1.15,
   retrieval_hints_enabled: true,
   title_boost_max_keywords: 8,
+  title_boost_max_pages: 2,
+  title_boost_max_docs_per_collection: 12,
+  doc_expansion_max_docs: 4,
+  doc_expansion_chunks_per_doc: 2,
   max_output_tokens: 3000,
   review_first_message_count: 1,
   review_repeat_message_count: 5,
@@ -625,6 +633,42 @@ export default function AiSettingsPage() {
             >
               <NumberInput value={settings.title_boost_max_keywords} onChange={v => set("title_boost_max_keywords", v)} min={3} max={14} />
             </Field>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field
+                label="Сторінок title-scroll (title_boost_max_pages)"
+                hint="Скільки сторінок Qdrant scroll читати на keyword. Рекомендовано: 1-2."
+                restart="cache"
+                tooltip="Захищає пошук від довгого сканування по дуже загальних словах у назвах документів."
+              >
+                <NumberInput value={settings.title_boost_max_pages} onChange={v => set("title_boost_max_pages", v)} min={1} max={5} />
+              </Field>
+              <Field
+                label="Документів title на колекцію"
+                hint="Скільки знайдених документів розгортати в chunks. Рекомендовано: 8-12."
+                restart="cache"
+                tooltip="Менше значення зменшує шум і час пошуку. Більше може знадобитись для дуже розмитих запитів."
+              >
+                <NumberInput value={settings.title_boost_max_docs_per_collection} onChange={v => set("title_boost_max_docs_per_collection", v)} min={4} max={30} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Field
+                label="Документів для розширення"
+                hint="Скільки top-документів розгортати в сусідні chunks. Рекомендовано: 3-4."
+                restart="cache"
+                tooltip="Менше значення пришвидшує retrieval і зменшує ризик, що контекст заповнять сусідні, але не головні документи."
+              >
+                <NumberInput value={settings.doc_expansion_max_docs} onChange={v => set("doc_expansion_max_docs", v)} min={1} max={8} />
+              </Field>
+              <Field
+                label="Chunks на документ"
+                hint="Скільки chunks брати при розширенні документа. Рекомендовано: 2."
+                restart="cache"
+                tooltip="Більше chunks корисно для довгих таблиць і повного аналізу, але збільшує час і шум у контексті."
+              >
+                <NumberInput value={settings.doc_expansion_chunks_per_doc} onChange={v => set("doc_expansion_chunks_per_doc", v)} min={1} max={5} />
+              </Field>
+            </div>
             <Field
               label="Поріг розширення пошуку (raw_gate_threshold)"
               hint="Якщо найкращий результат нижче — пошук розширюється на всі колекції. Рекомендовано: 0.38–0.45"

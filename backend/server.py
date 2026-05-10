@@ -3855,6 +3855,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "question is required")
+    retrieval_response_pref = (
+        body.response_length_pref
+        if body.response_length_pref in {"short", "standard", "detailed", "full"}
+        else "standard"
+    )
     retrieval_debug: dict = {
         "timings_ms": {},
         "counts": {},
@@ -4295,7 +4300,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         retrieval_hints.get("likely_act_titles") or [],
         retrieval_hints.get("collection_roles") or {},
     )
-    retrieval_debug["flags"]["response_length_pref"] = body.response_length_pref
+    retrieval_debug["flags"]["response_length_pref"] = retrieval_response_pref
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.33))
@@ -4523,8 +4528,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         _expanded_added = 0
         _expansion_vector = rw_vector or query_vector
-        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", min(8, max(4, body.max_docs // 2))))
-        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", 3))
+        _seed_default_by_pref = {"short": 3, "standard": 4, "detailed": 6, "full": 8}
+        _seed_default = min(
+            _seed_default_by_pref.get(retrieval_response_pref, 4),
+            max(2, body.max_docs // 2),
+        )
+        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", _seed_default))
+        _per_doc_default = 2 if retrieval_response_pref == "short" else 3
+        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", _per_doc_default))
         _seed_docs = sorted(
             _seed_candidates.items(),
             key=lambda item: (
@@ -4541,7 +4552,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
             _seed_score = _seed_info["similarity"]
-            if _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE:
+            if retrieval_response_pref != "short" and _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE:
                 # Топ-1 закон з високою впевненістю → ВСІ чанки по порядку (включно з таблицями)
                 _doc_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
                 logger.info("FULL LAW: %s/%s score=%.3f → %d chunks", _col, _lid, _seed_score, len(_doc_chunks))
@@ -4698,6 +4709,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "правда", "справді", "взнати", "дізнатись", "дізнатися", "пояснити",
         "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
         "надай", "надайте", "інформацію", "інфо", "покажи", "покажіть",
+        "закон", "закону", "закони", "україни", "україна", "постанова",
+        "постанови", "кабінету", "міністрів", "порядок", "порядку",
     }
     confirmed_title_hits: list[dict] = []
     _title_start = _tick()
@@ -4741,9 +4754,17 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_kws = []
         if _hint_titles and settings_cache.get_bool("retrieval_hints_enabled", True):
             _hint_title_results: list[dict] = []
+            _title_pages = int(settings_cache.get_float("title_boost_max_pages", 2))
+            _title_docs = int(settings_cache.get_float("title_boost_max_docs_per_collection", 12))
             for _hint_title in _hint_titles[:4]:
                 _hint_title_results.extend(
-                    search_qdrant_by_title([_hint_title], target_collections, chunks_per_doc=2)
+                    search_qdrant_by_title(
+                        [_hint_title],
+                        target_collections,
+                        chunks_per_doc=2,
+                        max_pages_per_keyword=_title_pages,
+                        max_docs_per_collection=_title_docs,
+                    )
                 )
             _hint_added = 0
             for r in _hint_title_results[:12]:
@@ -4769,7 +4790,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             retrieval_debug["counts"]["hint_title_raw_hits"] = len(_hint_title_results)
             retrieval_debug["counts"]["hint_title_added"] = _hint_added
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
+            _title_pages = int(settings_cache.get_float("title_boost_max_pages", 2))
+            _title_docs = int(settings_cache.get_float("title_boost_max_docs_per_collection", 12))
+            _title_results = search_qdrant_by_title(
+                _title_kws,
+                target_collections,
+                chunks_per_doc=2,
+                max_pages_per_keyword=_title_pages,
+                max_docs_per_collection=_title_docs,
+            )
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
@@ -5275,6 +5304,37 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if body.context_summary and body.context_summary.strip():
             summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:4000]}\n\n"
 
+        answer_type_hint = ""
+        if isinstance(retrieval_hints, dict):
+            answer_type_hint = str(retrieval_hints.get("answer_type") or "").strip()
+        length_rules = {
+            "short": (
+                "Режим відповіді: коротко, але змістовно. "
+                "Якщо в контексті є умови, критерії, порядок або винятки, дай 3-6 конкретних пунктів з citations. "
+                "Не обмежуйся загальною фразою."
+            ),
+            "standard": (
+                "Режим відповіді: стандартно. Дай прямий висновок, ключові умови/критерії, порядок дій "
+                "і важливі застереження з citations."
+            ),
+            "detailed": (
+                "Режим відповіді: детально. Структуруй за нормами, підзаконними актами, процедурою, ризиками "
+                "і практичними кроками з citations."
+            ),
+            "full": (
+                "Режим відповіді: повний аналіз. Розкрий правову рамку, критерії, процедуру, винятки, ризики "
+                "і практичний алгоритм з citations."
+            ),
+        }
+        answer_contract_block = (
+            "Інструкція до цієї відповіді:\n"
+            f"- {length_rules[response_length_pref]}\n"
+            "- Якщо питання питає 'які вимоги/умови/критерії', обов'язково дай окремий перелік вимог/умов.\n"
+            "- Якщо джерела містять кілька рівнів регулювання, розділи: закон/кодекс, КМУ/міністерства, судова практика.\n"
+            "- Кожне юридичне твердження прив'язуй до citation [N].\n"
+            f"- Тип відповіді за retrieval hints: {answer_type_hint or 'не визначено'}.\n\n"
+        )
+
         # Build conversation history block — last 3 turns (6 messages) only
         # Older turns are already covered by context_summary
         history_block = ""
@@ -5296,6 +5356,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"{personal_block}"
             f"{summary_block}"
             f"{history_block}"
+            f"{answer_contract_block}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
             f"---\nПитання: {question}"

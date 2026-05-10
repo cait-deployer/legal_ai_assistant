@@ -132,6 +132,17 @@ only and do not add hardcoded source or document exceptions.
 from retrieval hints still run separately, but generic title keywords should stay
 small enough to avoid slow noisy Qdrant scrolls.
 
+Budget settings for latency control:
+
+- `title_boost_max_keywords`;
+- `title_boost_max_pages`;
+- `title_boost_max_docs_per_collection`;
+- `doc_expansion_max_docs`;
+- `doc_expansion_chunks_per_doc`.
+
+These are generic caps. They should be tuned by eval metrics and logs, not by
+hardcoded topic exceptions.
+
 ## V2 Collections
 
 Production chat retrieval uses V2 Qdrant collections:

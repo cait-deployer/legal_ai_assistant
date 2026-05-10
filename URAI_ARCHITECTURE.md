@@ -239,6 +239,11 @@ this with `RAG PLAN`, `RAG VECTOR`, `RAG KEYWORD`, `RAG TITLE` and
 `title_boost_max_keywords` limits broad title-search keyword fanout. This is a
 generic latency/noise control, not a topic-specific rule.
 
+Retrieval budget settings also include `title_boost_max_pages`,
+`title_boost_max_docs_per_collection`, `doc_expansion_max_docs` and
+`doc_expansion_chunks_per_doc`. These control broad search cost and context noise
+without changing tariff source access.
+
 Context buckets:
 
 | Bucket | Collections | Max chunks |
