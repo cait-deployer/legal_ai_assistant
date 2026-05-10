@@ -781,11 +781,6 @@ function ChatPage() {
                                                     }`}>
                                                     {msg.role === 'ai' ? (
                                                         <div className="space-y-4">
-                                                            {msg.rewritten_query && (
-                                                                <p className="text-[11px] text-[#C9A84C]/50 italic border-l-2 border-[#C9A84C]/20 pl-2">
-                                                                    Пошук за: «{msg.rewritten_query}»
-                                                                </p>
-                                                            )}
                                                             <MarkdownText text={msg.text} refs={msg.references ?? []} onCitationOpen={setActiveCitation} />
                                                             {typeof msg.id === 'number' && msg.id < 0 && isContinuing && (
                                                                 <div className="flex items-center gap-2 pt-1">
