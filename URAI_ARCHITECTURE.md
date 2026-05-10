@@ -231,6 +231,11 @@ CCU remain searchable when the user's plan allows them. Hints only add soft
 title/keyword candidates and metadata for eval review. The answerability reranker
 still decides which chunks reach the final context.
 
+For diagnostics, `_meta.retrieval_debug` records per-stage timings, hit counts,
+target collections, flags and compact top-source snapshots. Backend logs mirror
+this with `RAG PLAN`, `RAG VECTOR`, `RAG KEYWORD`, `RAG TITLE` and
+`RAG FINAL TOP` entries.
+
 Context buckets:
 
 | Bucket | Collections | Max chunks |

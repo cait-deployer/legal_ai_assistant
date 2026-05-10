@@ -112,6 +112,19 @@ Hard constraints:
 The final SSE `_meta` may include `retrieval_hints` and `confirmed_title_hits`
 for debugging and eval review.
 
+`_meta.retrieval_debug` contains detailed diagnostics for quality review:
+
+- `timings_ms`: translation, follow-up, rewrite, hints, vector search, document
+  expansion, keyword search, title search, rerank and context squeeze timings;
+- `counts`: raw hits, added keyword/title/hint chunks, dedup drops and final
+  candidate counts;
+- `collections`: plan-limited and final target collections;
+- `flags`: low-confidence mode, rerank mode, hint status and thresholds;
+- `top_candidates` / `top_final`: compact ranked source snapshots.
+
+Backend logs also emit `RAG PLAN`, `RAG VECTOR`, `RAG BOOSTED TOP`,
+`RAG KEYWORD`, `RAG TITLE` and `RAG FINAL TOP` lines.
+
 ## V2 Collections
 
 Production chat retrieval uses V2 Qdrant collections:
