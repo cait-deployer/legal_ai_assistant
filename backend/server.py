@@ -4951,10 +4951,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         is_full_response = response_length_pref == "full"
         configured_max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
         _pref_token_bounds = {
-            "short": (800, 1200),
-            "standard": (1200, 1700),
-            "detailed": (2600, 3800),
-            "full": (4200, 6500),
+            "short":    (800,  1400),
+            "standard": (2000, 3500),
+            "detailed": (3500, 5500),
+            "full":     (5000, 8000),
         }
         _min_tokens, _max_tokens = _pref_token_bounds[response_length_pref]
         max_output_tokens = min(max(configured_max_output_tokens, _min_tokens), _max_tokens)
@@ -4964,10 +4964,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         # Response style/length/features instruction block
         _WORD_LIMITS = {
-            "short":    "Відповідь коротка — до 120 слів. Лише ключовий висновок і 2-3 практичних кроки.",
-            "standard": "Відповідь збалансована — 350-500 слів: короткий висновок, кроки, деталі та джерела.",
-            "detailed": "Відповідь детальна — 800-1200 слів. Повний аналіз з усіма нюансами та виключеннями.",
-            "full":     "Відповідь повна — 1500-2000 слів. Глибокий правовий розбір із судовою практикою.",
+            "short":    "Відповідь коротка — 100-180 слів. Лише ключовий висновок і 2-3 практичних кроки.",
+            "standard": "Відповідь повна та структурована — 500-900 слів. Використай усі блоки системного промпту: Коротко, Що зробити, Деталі, На що звернути увагу.",
+            "detailed": "Відповідь детальна — 1000-1600 слів. Повний аналіз з усіма нюансами, таблицями та виключеннями з контексту.",
+            "full":     "Відповідь максимально повна — 1600-2500 слів. Глибокий правовий розбір, судова практика, всі варіанти.",
         }
         _LANG_STYLES = {
             "plain": "Мова відповіді: розмовна, без юридичного жаргону. Поясни як людині без юридичної освіти.",
