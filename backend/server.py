@@ -4258,14 +4258,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     results = _deduped
 
     # Diversity: кожна колекція отримує гарантовані слоти; court collections обмежені
-    # rada_court_v2 cap: якщо є ZIR або KMU (практичні джерела) — лімітуємо до 1,
-    # бо судові рішення часто обговорюють скасовані норми і плутають LLM.
-    _has_practical = any(
-        r.get("_collection") in ("laws_zir_v2", "laws_kmu_v2")
-        for r in results
-    )
-    _MAX_COURT = max(2, body.max_docs // 4)
-    _MAX_RADA_COURT = 1 if _has_practical else max(2, body.max_docs // 4)
+    _MAX_COURT = max(2, body.max_docs // 4)  # cap for laws_supreme і laws_positions
     _max_pos = max(1, body.max_docs // 4)    # strict cap for laws_positions
 
     # Групуємо результати по колекціях
@@ -4276,10 +4269,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     _pos_col = _by_col.pop("laws_positions_v2", [])
     _sup_col = _by_col.pop("laws_supreme_v2", [])
-    _court_col = _by_col.pop("rada_court_v2", [])
-    pos_taken   = _pos_col[:_max_pos]
-    sup_taken   = _sup_col[:_MAX_COURT]
-    court_taken = _court_col[:_MAX_RADA_COURT]
+    pos_taken = _pos_col[:_max_pos]
+    sup_taken = _sup_col[:_MAX_COURT]
 
     _n_cols = len(_by_col) or 1
     # Скільки слотів гарантовано кожній колекції (мін 2, лишаємо ~1/4 для overflow)
@@ -4292,12 +4283,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         guaranteed.extend(docs[:_guaranteed_each])
         overflow.extend(docs[_guaranteed_each:_per_col_cap])
 
-    remaining = body.max_docs - len(pos_taken) - len(sup_taken) - len(court_taken) - len(guaranteed)
+    remaining = body.max_docs - len(pos_taken) - len(sup_taken) - len(guaranteed)
     filler = sorted(
-        overflow + _pos_col[_max_pos:] + _sup_col[_MAX_COURT:] + _court_col[_MAX_RADA_COURT:],
+        overflow + _pos_col[_max_pos:] + _sup_col[_MAX_COURT:],
         key=lambda x: x["similarity"], reverse=True,
     )
-    results = pos_taken + sup_taken + court_taken + guaranteed + filler[:max(0, remaining)]
+    results = pos_taken + sup_taken + guaranteed + filler[:max(0, remaining)]
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
@@ -4532,13 +4523,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
-        # Міжнародне право (rada_intl_v2) виключаємо з title boost:
-        # конвенції МОП/ООН знаходяться за загальними словами (працівник, право, договір)
-        # і забивають слоти, але рідко є правильною відповіддю на внутрішньоправові запити.
-        _TITLE_BOOST_EXCLUDE = {"rada_intl_v2"}
-        _title_cols = [c for c in target_collections if c not in _TITLE_BOOST_EXCLUDE]
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, _title_cols, chunks_per_doc=2)
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
