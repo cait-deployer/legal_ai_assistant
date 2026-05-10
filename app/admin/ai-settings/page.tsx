@@ -654,7 +654,7 @@ export default function AiSettingsPage() {
               restart="cache"
               tooltip="Головна інструкція яка визначає поведінку AI. Тут задаєш роль, стиль, обмеження. Не треба писати сюди правила тарифу чи профіль юзера — вони додаються автоматично кодом. Зміни набирають чинності одразу після Зберегти."
             >
-              <TextareaInput value={settings.system_prompt} onChange={v => set("system_prompt", v)} rows={12} />
+              <TextareaInput value={settings.system_prompt} onChange={v => set("system_prompt", v)} rows={28} />
             </Field>
             <div className="bg-[#0A0E1A]/60 border border-[#C9A84C]/10 rounded-xl p-3 text-[11px] text-[#E0E6ED]/40 space-y-1">
               <p className="font-bold text-[#C9A84C]/50 uppercase tracking-wider text-[10px]">Що додається автоматично до промпту:</p>
