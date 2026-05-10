@@ -256,22 +256,6 @@ Routing:
 
 ## Definition of Done for RAG 2
 
-## Implemented note: retrieval hints
-
-Added a soft `retrieval_hints_enabled` layer in `_ask_pipeline()`:
-
-- runs in parallel with query rewrite;
-- returns JSON hints such as `likely_act_titles`, `must_terms`, `article_hints`,
-  `collection_roles`, `answer_type` and `confidence`;
-- uses hints only to enrich keyword/title retrieval;
-- keeps `plan_collections` as the hard tariff boundary;
-- does not ban Wiki, ZIR, MOD, Supreme Court, legal positions or CCU;
-- exposes `retrieval_hints` and `confirmed_title_hits` in response `_meta` for eval.
-
-This is a recall boost, not a guarantee. Eval should compare hit@5/hit@10,
-bad-source rate, latency and confirmed-title-hit usefulness before increasing
-its weight.
-
 RAG 2 можно считать реально полезным, когда:
 - есть минимум 30-50 approved/gold eval cases;
 - eval runner показывает hit@5/hit@10;

@@ -3847,110 +3847,6 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
     return completed
 
 
-def _answer_quality_repair_reasons(pipe: dict, answer: str) -> list[str]:
-    text = (answer or "").strip()
-    reasons: list[str] = []
-    flags = (pipe.get("retrieval_debug") or {}).get("flags") or {}
-    needs_structured = bool(flags.get("needs_structured_conditions_answer"))
-
-    if re.search(r"\[[Nn]\]", text):
-        reasons.append("literal_N_citation")
-
-    has_real_citation = bool(re.search(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", text))
-    if pipe.get("citations") and not has_real_citation:
-        reasons.append("missing_real_citations")
-
-    if needs_structured:
-        word_count = len(re.findall(r"\w+", text, flags=re.UNICODE))
-        cited_claims = len(re.findall(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", text))
-        bullet_or_numbered_lines = len(
-            re.findall(r"(?m)^\s*(?:[-*]|\d+\.)\s+\S+", text)
-        )
-        if word_count < 110:
-            reasons.append("too_short_for_structured_question")
-        if cited_claims < 2:
-            reasons.append("too_few_cited_points")
-        if bullet_or_numbered_lines < 3:
-            reasons.append("missing_structured_points")
-
-    return reasons
-
-
-def _build_answer_quality_repair_prompt(pipe: dict, answer: str, reasons: list[str]) -> str:
-    return (
-        "Перепиши фінальну відповідь так, щоб вона була корисною для користувача і відповідала контексту.\n"
-        "Використовуй ТІЛЬКИ наданий нижче контекст і питання з початкового prompt. Не додавай фактів поза контекстом.\n"
-        "Вимоги:\n"
-        "- якщо питання просить умови, критерії, вимоги, порядок або хто може підпадати під правило, дай 4-7 змістовних пунктів;\n"
-        "- кожне юридичне твердження підтверджуй реальними citation-номерами з контексту: [1], [2], [3];\n"
-        "- ніколи не використовуй буквальний маркер [N];\n"
-        "- якщо джерела не дають деталі, прямо скажи, які саме деталі не підтверджені контекстом;\n"
-        "- збережи українську мову відповіді;\n"
-        "- поверни тільки готову відповідь, без службових пояснень.\n\n"
-        f"Причини перегенерації: {', '.join(reasons)}\n\n"
-        "Початковий prompt з контекстом:\n"
-        f"{pipe.get('prompt', '')}\n\n"
-        "Поточна невдала відповідь:\n"
-        f"{answer or ''}"
-    )
-
-
-async def _repair_answer_quality_if_needed(pipe: dict, answer: str) -> str:
-    reasons = _answer_quality_repair_reasons(pipe, answer)
-    debug = pipe.get("retrieval_debug")
-    if isinstance(debug, dict):
-        debug.setdefault("flags", {})["answer_quality_repair_reasons"] = reasons
-
-    if not reasons:
-        if isinstance(debug, dict):
-            debug.setdefault("flags", {})["answer_quality_repaired"] = False
-        return answer
-
-    import asyncio as _asyncio
-    from vertexai.generative_models import GenerationConfig
-
-    started = time.time()
-    try:
-        repair_tokens = min(max(int(pipe.get("max_output_tokens") or 1200), 1600), 2600)
-        cfg = GenerationConfig(temperature=0.0, max_output_tokens=repair_tokens)
-        repaired_resp = await _asyncio.wait_for(
-            _asyncio.to_thread(
-                pipe["main_model"].generate_content,
-                _build_answer_quality_repair_prompt(pipe, answer, reasons),
-                generation_config=cfg,
-            ),
-            timeout=min(float(pipe.get("llm_timeout") or 90.0), 45.0),
-        )
-        repaired = _strip_answer_done_marker((repaired_resp.text or "").strip())
-        repaired_reasons = _answer_quality_repair_reasons(pipe, repaired)
-        if repaired and "literal_N_citation" not in repaired_reasons:
-            logger.info(
-                "ANSWER QUALITY REPAIR: reasons=%s chars_before=%d chars_after=%d ms=%d remaining=%s",
-                reasons,
-                len(answer or ""),
-                len(repaired),
-                int((time.time() - started) * 1000),
-                repaired_reasons,
-            )
-            if isinstance(debug, dict):
-                debug.setdefault("flags", {})["answer_quality_repaired"] = True
-                debug.setdefault("timings_ms", {})["answer_quality_repair"] = int((time.time() - started) * 1000)
-                debug.setdefault("flags", {})["answer_quality_repair_remaining"] = repaired_reasons
-            return repaired
-        logger.warning(
-            "ANSWER QUALITY REPAIR kept original: reasons=%s repaired_reasons=%s chars_after=%d",
-            reasons,
-            repaired_reasons,
-            len(repaired or ""),
-        )
-    except Exception as e:
-        logger.warning("ANSWER QUALITY REPAIR failed: %s", e)
-
-    if isinstance(debug, dict):
-        debug.setdefault("flags", {})["answer_quality_repaired"] = False
-    return answer
-
-
 async def _ask_pipeline(body: AskRequest) -> dict:
     """Retrieval → rerank → context → prompt building. Повертає dict для /ask і /ask_stream."""
     import asyncio as _asyncio
@@ -3959,53 +3855,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "question is required")
-    retrieval_response_pref = (
-        body.response_length_pref
-        if body.response_length_pref in {"short", "standard", "detailed", "full"}
-        else "standard"
-    )
-    retrieval_debug: dict = {
-        "timings_ms": {},
-        "counts": {},
-        "collections": {},
-        "flags": {},
-        "top_candidates": [],
-    }
-
-    def _tick() -> float:
-        return time.perf_counter()
-
-    def _tock(start: float) -> int:
-        return int((time.perf_counter() - start) * 1000)
-
-    def _short_doc(r: dict) -> dict:
-        meta = r.get("out_metadata") or {}
-        return {
-            "collection": r.get("_collection", ""),
-            "law_id": meta.get("law_id", ""),
-            "chunk": meta.get("chunk_index", 0),
-            "score": round(float(r.get("similarity", 0.0) or 0.0), 3),
-            "title": (meta.get("source") or meta.get("title") or "")[:140],
-            "hint": bool(r.get("_retrieval_hint_match")),
-            "title_match": bool(r.get("_title_match")),
-            "keyword": bool(r.get("_keyword_match")),
-            "doc_expansion": bool(r.get("_doc_expansion")),
-        }
-
-    def _log_docs(label: str, docs: list[dict], limit: int = 8) -> None:
-        for idx, item in enumerate(docs[:limit], start=1):
-            meta = item.get("out_metadata") or {}
-            logger.info(
-                "RAGDBG %s #%02d col=%s law_id=%s chunk=%s score=%.3f hint=%s title=%s",
-                label,
-                idx,
-                item.get("_collection", ""),
-                meta.get("law_id", ""),
-                meta.get("chunk_index", 0),
-                float(item.get("similarity", 0.0) or 0.0),
-                bool(item.get("_retrieval_hint_match") or item.get("_title_match") or item.get("_keyword_match")),
-                (meta.get("source") or meta.get("title") or "")[:220],
-            )
 
     # 1. Ініціалізація + embed query + HyDE гіпотетична відповідь (паралельно)
     try:
@@ -4028,7 +3877,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         search_question = question  # текст для embedding/пошуку
         if _is_russian(question):
             try:
-                _tr_start = _tick()
                 _tr_model = GenerativeModel(_model_name)
                 try:
                     from vertexai.generative_models import ThinkingConfig as _TrThinkingConfig
@@ -4073,11 +3921,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 except Exception:
                     pass
                 search_question = _tr_text or question
-                retrieval_debug["timings_ms"]["translation"] = _tock(_tr_start)
-                retrieval_debug["flags"]["translated_ru_to_ua"] = bool(_tr_text)
                 logger.info("RU→UA: %s → %s", question[:80], search_question)
             except Exception:
-                retrieval_debug["flags"]["translation_failed"] = True
                 pass  # fallback — шукаємо оригінальним текстом
 
         async def _resolve_followup(q: str) -> str:
@@ -4129,10 +3974,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             return q
 
         _question_before_followup = search_question
-        _followup_start = _tick()
         search_question = await _resolve_followup(search_question)
-        retrieval_debug["timings_ms"]["followup_resolve"] = _tock(_followup_start)
-        retrieval_debug["flags"]["followup_changed"] = search_question != _question_before_followup
         _previous_user_question = _last_user_question(body.history)
         if _previous_user_question and _looks_like_followup(_question_before_followup):
             search_question = f"{search_question}\nКонтекст попереднього питання: {_previous_user_question}"
@@ -4140,7 +3982,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         async def _rewrite_query(q: str) -> str | None:
             """Переформулює запит у формальний юридичний стиль без вигадування законів."""
-            _rw_start = _tick()
             try:
                 # Для rewrite використовуємо легку flash-модель — думаюча модель виробляє сміття на цій задачі
                 _rw_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
@@ -4197,147 +4038,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 text = raw.strip().split("\n")[0].strip()
                 logger.info("REWRITE raw=%r", text)
                 if text and text.lower() != q.lower() and 5 < len(text) < 300 and len(text.split()) >= 4:
-                    retrieval_debug["timings_ms"]["rewrite"] = _tock(_rw_start)
-                    retrieval_debug["counts"]["rewrite_words"] = len(text.split())
                     logger.info("REWRITE: %s → %s", q[:80], text)
                     return text
-                retrieval_debug["timings_ms"]["rewrite"] = _tock(_rw_start)
-                retrieval_debug["flags"]["rewrite_skipped"] = True
                 return None
             except Exception as e:
-                retrieval_debug["timings_ms"]["rewrite"] = _tock(_rw_start)
-                retrieval_debug["flags"]["rewrite_failed"] = True
                 logger.info("REWRITE failed: %s", e)
                 return None
-
-        async def _build_retrieval_hints(q: str) -> dict:
-            if not settings_cache.get_bool("retrieval_hints_enabled", True):
-                retrieval_debug["flags"]["retrieval_hints_enabled"] = False
-                return {}
-            retrieval_debug["flags"]["retrieval_hints_enabled"] = True
-            _hint_start = _tick()
-            try:
-                _hint_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
-                _hint_model = GenerativeModel(
-                    _hint_model_name,
-                    system_instruction=(
-                        "Ти плануєш пошук у юридичній RAG-базі України. "
-                        "Поверни тільки JSON без markdown. Не відповідай користувачу. "
-                        "Назви актів є лише гіпотезами для пошуку, не фактами. "
-                        "Не забороняй джерела: Рада, КМУ, MOD, ZIR, Wiki, Верховний Суд, КСУ можуть бути корисними. "
-                        "Не вигадуй точні номери статей або актів, якщо не впевнений."
-                    ),
-                )
-                _hint_prompt = (
-                    "Сформуй короткий план пошуку для питання.\n"
-                    "JSON schema:\n"
-                    "{"
-                    "\"rewritten_query\":\"стислий юридичний запит\","
-                    "\"likely_act_titles\":[\"можлива назва закону/кодексу/постанови/порядку\"],"
-                    "\"must_terms\":[\"ключовий термін\"],"
-                    "\"article_hints\":[\"стаття або пункт, якщо користувач явно натякнув\"],"
-                    "\"collection_roles\":{"
-                    "\"primary\":[\"rada|kmu|mod|zir|supreme|positions|ccu|wiki\"],"
-                    "\"secondary\":[\"...\"],"
-                    "\"background\":[\"...\"]"
-                    "},"
-                    "\"answer_type\":\"direct_norm|procedure|risk_analysis|document_draft|clarification_needed|mixed\","
-                    "\"confidence\":\"low|medium|high\""
-                    "}\n\n"
-                    f"Питання: {q}"
-                )
-                try:
-                    from vertexai.generative_models import ThinkingConfig as _HintThinkingConfig
-                    _hint_cfg = GenerationConfig(
-                        temperature=0.0,
-                        max_output_tokens=1200,
-                        response_mime_type="application/json",
-                        thinking_config=_HintThinkingConfig(thinking_budget=0),
-                    )
-                except Exception:
-                    _hint_cfg = GenerationConfig(
-                        temperature=0.0,
-                        max_output_tokens=1200,
-                        response_mime_type="application/json",
-                    )
-                _resp = await _asyncio.wait_for(
-                    _asyncio.to_thread(
-                        _hint_model.generate_content,
-                        _hint_prompt,
-                        generation_config=_hint_cfg,
-                    ),
-                    timeout=8.0,
-                )
-                raw = ""
-                try:
-                    raw = _resp.text or ""
-                except Exception:
-                    pass
-                if not raw:
-                    try:
-                        raw = " ".join(
-                            getattr(p, "text", "").strip()
-                            for p in _resp.candidates[0].content.parts
-                            if not getattr(p, "thought", False) and getattr(p, "text", "")
-                        )
-                    except Exception:
-                        pass
-                raw = re.sub(r"^```(?:json)?\s*|\s*```\s*$", "", raw.strip(), flags=re.DOTALL)
-                parsed = _json.loads(raw)
-                if not isinstance(parsed, dict):
-                    return {}
-
-                def _str_list(key: str, *, limit: int, max_len: int = 140) -> list[str]:
-                    values = parsed.get(key)
-                    if not isinstance(values, list):
-                        return []
-                    out: list[str] = []
-                    for item in values:
-                        if not isinstance(item, str):
-                            continue
-                        text = re.sub(r"\s+", " ", item).strip()
-                        if 2 <= len(text) <= max_len and text not in out:
-                            out.append(text)
-                        if len(out) >= limit:
-                            break
-                    return out
-
-                roles_raw = parsed.get("collection_roles")
-                allowed_roles = {"rada", "kmu", "mod", "zir", "supreme", "positions", "ccu", "wiki"}
-                roles: dict[str, list[str]] = {}
-                if isinstance(roles_raw, dict):
-                    for role in ("primary", "secondary", "background"):
-                        vals = roles_raw.get(role)
-                        if not isinstance(vals, list):
-                            roles[role] = []
-                            continue
-                        roles[role] = [
-                            str(v).strip().lower()
-                            for v in vals
-                            if str(v).strip().lower() in allowed_roles
-                        ][:8]
-
-                hints = {
-                    "rewritten_query": str(parsed.get("rewritten_query") or "").strip()[:240],
-                    "likely_act_titles": _str_list("likely_act_titles", limit=6, max_len=180),
-                    "must_terms": _str_list("must_terms", limit=10, max_len=80),
-                    "article_hints": _str_list("article_hints", limit=8, max_len=80),
-                    "collection_roles": roles,
-                    "answer_type": str(parsed.get("answer_type") or "").strip()[:40],
-                    "confidence": str(parsed.get("confidence") or "").strip()[:20],
-                }
-                retrieval_debug["timings_ms"]["retrieval_hints"] = _tock(_hint_start)
-                retrieval_debug["counts"]["hint_titles"] = len(hints["likely_act_titles"])
-                retrieval_debug["counts"]["hint_terms"] = len(hints["must_terms"])
-                retrieval_debug["counts"]["hint_articles"] = len(hints["article_hints"])
-                retrieval_debug["flags"]["hint_confidence"] = hints.get("confidence", "")
-                logger.info("RETRIEVAL HINTS: %s", _json.dumps(hints, ensure_ascii=False)[:800])
-                return hints
-            except Exception as e:
-                retrieval_debug["timings_ms"]["retrieval_hints"] = _tock(_hint_start)
-                retrieval_debug["flags"]["retrieval_hints_failed"] = True
-                logger.info("RETRIEVAL HINTS failed: %s", e)
-                return {}
 
         async def _embed_query_with_timeout(text: str):
             return await _asyncio.wait_for(
@@ -4345,18 +4051,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 timeout=15.0,
             )
 
-        # Embed оригінального запиту + rewrite + retrieval hints паралельно
-        _parallel_start = _tick()
-        query_vector, rewritten_query, retrieval_hints = await _asyncio.gather(
+        # Embed оригінального запиту + rewrite паралельно
+        query_vector, rewritten_query = await _asyncio.gather(
             _embed_query_with_timeout(search_question),
             _rewrite_query(search_question),
-            _build_retrieval_hints(search_question),
         )
-        retrieval_debug["timings_ms"]["query_prepare_parallel"] = _tock(_parallel_start)
-        if not rewritten_query and retrieval_hints.get("rewritten_query"):
-            _hint_rewrite = str(retrieval_hints.get("rewritten_query") or "").strip()
-            if 5 < len(_hint_rewrite) < 300 and len(_hint_rewrite.split()) >= 4:
-                rewritten_query = _hint_rewrite
         hypothetical_text = rewritten_query  # alias для title boost keywords
         logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
@@ -4394,17 +4093,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # (router коштував 2-4с на probe-запити і міг відсікати релевантні колекції)
     # target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
     target_collections = plan_collections
-    retrieval_debug["collections"]["plan"] = list(plan_collections)
-    retrieval_debug["collections"]["target_initial"] = list(target_collections)
-    logger.info(
-        "RAG PLAN: max_docs=%s filter_sources=%s collections=%d hints_titles=%s hints_roles=%s",
-        body.max_docs,
-        body.filter_sources,
-        len(target_collections),
-        retrieval_hints.get("likely_act_titles") or [],
-        retrieval_hints.get("collection_roles") or {},
-    )
-    retrieval_debug["flags"]["response_length_pref"] = retrieval_response_pref
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.33))
@@ -4419,7 +4107,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
 
     rw_vector = None
-    _vector_start = _tick()
     try:
         if rewritten_query:
             rw_vector, orig_results = await _asyncio.gather(
@@ -4430,33 +4117,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 search_qdrant, rw_vector, fetch_k, target_collections, match_threshold
             )
             results = _merge_results([orig_results, rw_results])
-            retrieval_debug["counts"]["vector_original_hits"] = len(orig_results)
-            retrieval_debug["counts"]["vector_rewrite_hits"] = len(rw_results)
         else:
             results = await _asyncio.to_thread(
                 search_qdrant, query_vector, fetch_k, target_collections, match_threshold
             )
-            retrieval_debug["counts"]["vector_original_hits"] = len(results)
-            retrieval_debug["counts"]["vector_rewrite_hits"] = 0
     except Exception:
-        retrieval_debug["flags"]["vector_retry_after_error"] = True
         results = await _asyncio.to_thread(
             search_qdrant, query_vector, fetch_k, target_collections, match_threshold
         )
-    retrieval_debug["timings_ms"]["vector_search"] = _tock(_vector_start)
-    retrieval_debug["counts"]["vector_merged_hits"] = len(results)
     raw_semantic_results = list(results)
-    _log_docs("VECTOR", raw_semantic_results, limit=10)
-    logger.info(
-        "RAG VECTOR: ms=%d fetch_k=%d threshold=%.2f orig=%s rewrite=%s merged=%d top=%s",
-        retrieval_debug["timings_ms"]["vector_search"],
-        fetch_k,
-        match_threshold,
-        retrieval_debug["counts"].get("vector_original_hits", 0),
-        retrieval_debug["counts"].get("vector_rewrite_hits", 0),
-        len(results),
-        [_short_doc(r) for r in results[:5]],
-    )
 
     # LOW CONFIDENCE: якщо найкращий сирий score слабкий — не зупиняємось, не обрізаємо
     # Letting BM25 + title boost run fully — вони можуть витягнути релевантні документи
@@ -4471,14 +4140,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         target_collections = list(dict.fromkeys(
             target_collections + [c for c in _lc_extra if c in plan_collections]
         ))
-        retrieval_debug["flags"]["low_confidence"] = True
-        retrieval_debug["collections"]["target_after_low_confidence"] = list(target_collections)
         logger.info("LOW CONFIDENCE: target_collections expanded → %s", target_collections)
     elif not results:
-        retrieval_debug["flags"]["no_vector_hits"] = True
         logger.info("VECTOR: no hits above threshold %.2f → trying keyword/title fallback", match_threshold)
-    else:
-        retrieval_debug["flags"]["low_confidence"] = False
 
     # Diagnostic: log all found docs per collection
     _diag: dict[str, list] = {}
@@ -4527,12 +4191,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] * factor, 1.0)
 
     results.sort(key=lambda x: x["similarity"], reverse=True)
-    retrieval_debug["top_candidates"] = [_short_doc(r) for r in results[:8]]
-    _log_docs("BOOSTED", results, limit=10)
-    logger.info("RAG BOOSTED TOP: %s", retrieval_debug["top_candidates"])
 
     # Dedup: max 2 chunks per law_id globally so one doc can't eat all slots
-    _before_dedup = len(results)
     _seen_lid: dict[str, int] = {}
     _deduped: list = []
     for r in results:
@@ -4541,8 +4201,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _deduped.append(r)
             _seen_lid[lid] = _seen_lid.get(lid, 0) + 1
     results = _deduped
-    retrieval_debug["counts"]["after_dedup"] = len(results)
-    retrieval_debug["counts"]["dedup_dropped"] = max(0, _before_dedup - len(results))
 
     # Diversity: кожна колекція отримує гарантовані слоти; court collections обмежені
     _MAX_COURT = max(2, body.max_docs // 4)  # cap for laws_supreme і laws_positions
@@ -4577,7 +4235,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     )
     results = pos_taken + sup_taken + guaranteed + filler[:max(0, remaining)]
     results.sort(key=lambda x: x["similarity"], reverse=True)
-    retrieval_debug["counts"]["after_diversity"] = len(results)
 
     # Діагностичний лог — видно в journalctl
     _col_counts = {}
@@ -4596,7 +4253,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # Document-set expansion: first select several relevant documents, then fetch
     # only the best sibling chunks inside each law_id. This avoids both extremes:
     # one-document tunnel vision and sending entire large laws to the model.
-    _doc_expansion_start = _tick()
     try:
         from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law, get_all_law_chunks
         _expanded_keys = {
@@ -4632,14 +4288,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         _expanded_added = 0
         _expansion_vector = rw_vector or query_vector
-        _seed_default_by_pref = {"short": 3, "standard": 4, "detailed": 6, "full": 8}
-        _seed_default = min(
-            _seed_default_by_pref.get(retrieval_response_pref, 4),
-            max(2, body.max_docs // 2),
-        )
-        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", _seed_default))
-        _per_doc_default = 2 if retrieval_response_pref == "short" else 3
-        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", _per_doc_default))
+        _seed_limit = int(settings_cache.get_float("doc_expansion_max_docs", min(8, max(4, body.max_docs // 2))))
+        _per_doc_limit = int(settings_cache.get_float("doc_expansion_chunks_per_doc", 3))
         _seed_docs = sorted(
             _seed_candidates.items(),
             key=lambda item: (
@@ -4656,7 +4306,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
             _seed_score = _seed_info["similarity"]
-            if retrieval_response_pref != "short" and _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE:
+            if _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE:
                 # Топ-1 закон з високою впевненістю → ВСІ чанки по порядку (включно з таблицями)
                 _doc_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
                 logger.info("FULL LAW: %s/%s score=%.3f → %d chunks", _col, _lid, _seed_score, len(_doc_chunks))
@@ -4715,12 +4365,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 len(_seed_docs),
                 [f"{col}:{lid}:s={info['score']:.3f}:ov={info['overlap']}:a={info['authority']:.2f}" for (col, lid), info in _seed_docs[:8]],
             )
-        retrieval_debug["timings_ms"]["doc_expansion"] = _tock(_doc_expansion_start)
-        retrieval_debug["counts"]["doc_expansion_seed_docs"] = len(_seed_docs)
-        retrieval_debug["counts"]["doc_expansion_added"] = _expanded_added
     except Exception as _de_err:
-        retrieval_debug["timings_ms"]["doc_expansion"] = _tock(_doc_expansion_start)
-        retrieval_debug["flags"]["doc_expansion_failed"] = True
         logger.warning("Doc expansion error: %s", _de_err)
 
     # Keyword search: завжди паралельно з vector — знаходить документи з поганим embedding
@@ -4729,15 +4374,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in results
     }
-    _keyword_start = _tick()
     try:
         from qdrant_storage import search_qdrant_text
-        _hint_terms_text = " ".join(
-            (retrieval_hints.get("must_terms") or [])
-            + (retrieval_hints.get("article_hints") or [])
-            + (retrieval_hints.get("likely_act_titles") or [])
-        )
-        _kw_query = f"{search_question} {rewritten_query or ''} {_hint_terms_text}".strip()
+        _kw_query = f"{search_question} {rewritten_query or ''}".strip()
         _kw_results = (
             search_qdrant_text(_kw_query, target_collections, limit=15)
             if settings_cache.get_bool("lexical_fallback_enabled", True)
@@ -4786,20 +4425,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _kw_added += 1
         if _kw_added:
             results.sort(key=lambda x: x["similarity"], reverse=True)
-        retrieval_debug["timings_ms"]["keyword_search"] = _tock(_keyword_start)
-        retrieval_debug["counts"]["keyword_raw_hits"] = len(_kw_results)
-        retrieval_debug["counts"]["keyword_added"] = _kw_added
-        logger.info(
-            "RAG KEYWORD: ms=%d raw=%d added=%d terms=%s top_added=%s",
-            retrieval_debug["timings_ms"]["keyword_search"],
-            len(_kw_results),
-            _kw_added,
-            sorted(list(_kw_stems))[:12],
-            [_short_doc(r) for r in results if r.get("_keyword_match")][:5],
-        )
+            logger.info("Keyword: додано %d нових результатів", _kw_added)
     except Exception as _kw_err:
-        retrieval_debug["timings_ms"]["keyword_search"] = _tock(_keyword_start)
-        retrieval_debug["flags"]["keyword_failed"] = True
         logger.warning("Keyword search error: %s", _kw_err)
 
     # Title-based metadata boost: знаходить документи по заголовку (source поле)
@@ -4813,35 +4440,17 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "правда", "справді", "взнати", "дізнатись", "дізнатися", "пояснити",
         "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
         "надай", "надайте", "інформацію", "інфо", "покажи", "покажіть",
-        "закон", "закону", "закони", "україни", "україна", "постанова",
-        "постанови", "кабінету", "міністрів", "порядок", "порядку",
     }
-    confirmed_title_hits: list[dict] = []
-    _title_start = _tick()
     try:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
-        _hint_titles = retrieval_hints.get("likely_act_titles") or []
-        _hint_terms = (retrieval_hints.get("must_terms") or []) + (retrieval_hints.get("article_hints") or [])
-        _search_terms_text = f"{search_question} {rewritten_query or ''} {' '.join(_hint_terms)}".strip()
+        _search_terms_text = f"{search_question} {rewritten_query or ''}".strip()
         _q_words = [_strip_punct(w) for w in _search_terms_text.split() if len(w) > 4]
         _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
-        _hint_title_words: list[str] = []
-        for _title in _hint_titles[:4]:
-            for _w in _title.split():
-                _clean = _strip_punct(_w)
-                if len(_clean) > 4 and _clean.lower() not in _TITLE_STOPWORDS:
-                    _hint_title_words.append(_clean)
-        _hint_term_words = [
-            _strip_punct(w)
-            for term in _hint_terms[:8]
-            for w in str(term).split()
-            if len(_strip_punct(w)) > 4 and _strip_punct(w).lower() not in _TITLE_STOPWORDS
-        ]
-        _raw_kws = list(dict.fromkeys(_hint_title_words[:6] + _hint_term_words[:4] + _q_words[:3] + _hyde_words))[:12]
+        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
@@ -4849,60 +4458,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 lm for w in _raw_kws
                 if (lm := _ua_lemma(w)) and lm.lower() not in _TITLE_STOPWORDS
             ]
-        ))
-        _title_kw_limit = int(settings_cache.get_float("title_boost_max_keywords", 8))
-        _title_kw_limit = max(3, min(_title_kw_limit, 14))
-        _title_kws = _title_kws[:_title_kw_limit]
+        ))[:14]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
-        if _hint_titles and settings_cache.get_bool("retrieval_hints_enabled", True):
-            _hint_title_results: list[dict] = []
-            _title_pages = int(settings_cache.get_float("title_boost_max_pages", 2))
-            _title_docs = int(settings_cache.get_float("title_boost_max_docs_per_collection", 12))
-            for _hint_title in _hint_titles[:4]:
-                _hint_title_results.extend(
-                    search_qdrant_by_title(
-                        [_hint_title],
-                        target_collections,
-                        chunks_per_doc=2,
-                        max_pages_per_keyword=_title_pages,
-                        max_docs_per_collection=_title_docs,
-                    )
-                )
-            _hint_added = 0
-            for r in _hint_title_results[:12]:
-                _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
-                if _key in _existing_ids:
-                    continue
-                r["similarity"] = max(r.get("similarity", 0.0), 0.76)
-                r["_retrieval_hint_match"] = True
-                results.append(r)
-                _existing_ids.add(_key)
-                _hint_added += 1
-                meta = r.get("out_metadata") or {}
-                hit = {
-                    "law_id": meta.get("law_id", ""),
-                    "title": (meta.get("source") or meta.get("title") or "")[:180],
-                    "collection": r.get("_collection", ""),
-                }
-                if hit not in confirmed_title_hits:
-                    confirmed_title_hits.append(hit)
-            if _hint_added:
-                results.sort(key=lambda x: x["similarity"], reverse=True)
-                logger.info("RETRIEVAL HINT TITLE: додано %d чанків", _hint_added)
-            retrieval_debug["counts"]["hint_title_raw_hits"] = len(_hint_title_results)
-            retrieval_debug["counts"]["hint_title_added"] = _hint_added
         if _title_kws:
-            _title_pages = int(settings_cache.get_float("title_boost_max_pages", 2))
-            _title_docs = int(settings_cache.get_float("title_boost_max_docs_per_collection", 12))
-            _title_results = search_qdrant_by_title(
-                _title_kws,
-                target_collections,
-                chunks_per_doc=2,
-                max_pages_per_keyword=_title_pages,
-                max_docs_per_collection=_title_docs,
-            )
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
@@ -4926,24 +4487,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             if _title_added:
                 results.sort(key=lambda x: x["similarity"], reverse=True)
                 logger.info("TITLE BOOST: додано %d чанків", _title_added)
-            retrieval_debug["counts"]["title_raw_hits"] = len(_title_results)
-            retrieval_debug["counts"]["title_added"] = _title_added
-        else:
-            retrieval_debug["counts"]["title_raw_hits"] = 0
-            retrieval_debug["counts"]["title_added"] = 0
-        retrieval_debug["timings_ms"]["title_search"] = _tock(_title_start)
-        logger.info(
-            "RAG TITLE: ms=%d kws=%s hint_titles=%s title_added=%s hint_added=%s confirmed=%s",
-            retrieval_debug["timings_ms"]["title_search"],
-            _title_kws,
-            _hint_titles,
-            retrieval_debug["counts"].get("title_added", 0),
-            retrieval_debug["counts"].get("hint_title_added", 0),
-            confirmed_title_hits[:5],
-        )
     except Exception as _tb_err:
-        retrieval_debug["timings_ms"]["title_search"] = _tock(_title_start)
-        retrieval_debug["flags"]["title_search_failed"] = True
         logger.warning("Title boost error: %s", _tb_err)
 
     # Unified pre-sort: title_match chunks отримують бонус якщо вони підтверджені семантикою
@@ -4955,8 +4499,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     _answerability_query = f"{search_question} {rewritten_query or ''}".strip()
-    _pre_rerank_count = len(results)
-    _pretrim_start = _tick()
     if len(results) > body.max_docs * 2:
         results = _rerank_by_answerability(
             results,
@@ -4964,9 +4506,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             max(body.max_docs * 2, body.max_docs),
             keep_weak=low_confidence,
         )
-    retrieval_debug["timings_ms"]["answerability_pretrim"] = _tock(_pretrim_start)
-    retrieval_debug["counts"]["before_answerability_pretrim"] = _pre_rerank_count
-    retrieval_debug["counts"]["after_answerability_pretrim"] = len(results)
 
     # Protected slots: keep the strongest chunk from several expanded documents so
     # reranker cannot collapse a multi-document answer back to one law_id.
@@ -5043,8 +4582,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # available behind a setting, but it is slower and can pick topically similar
     # fragments that do not answer the exact question.
     _llm_reranker_enabled = settings_cache.get_bool("llm_reranker_enabled", False)
-    _rerank_start = _tick()
-    _rerank_mode = "llm" if len(results) > body.max_docs and _llm_reranker_enabled else "deterministic"
     if len(results) > body.max_docs and _llm_reranker_enabled:
         try:
             import asyncio as _aio
@@ -5171,12 +4708,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             body.max_docs,
             keep_weak=low_confidence,
         )
-    retrieval_debug["timings_ms"]["final_rerank"] = _tock(_rerank_start)
-    retrieval_debug["flags"]["rerank_mode"] = _rerank_mode
-    retrieval_debug["counts"]["after_final_rerank"] = len(results)
 
     response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
-    _squeeze_start = _tick()
     results = _squeeze_context_results(
         results,
         _answerability_query,
@@ -5184,8 +4717,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_length_pref,
         keep_weak=low_confidence,
     )
-    retrieval_debug["timings_ms"]["context_squeeze"] = _tock(_squeeze_start)
-    retrieval_debug["counts"]["after_context_squeeze"] = len(results)
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
     # Drop documents with similarity below threshold (configurable via admin panel).
@@ -5199,16 +4730,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if len(results) < _before:
             logger.info("min_retrieval_score=%.2f (low_conf=%s): dropped %d irrelevant chunks",
                         _ret_threshold, low_confidence, _before - len(results))
-    retrieval_debug["counts"]["after_min_retrieval_filter"] = len(results)
-    retrieval_debug["flags"]["min_retrieval_threshold"] = round(float(_ret_threshold), 3)
-    retrieval_debug["top_final"] = [_short_doc(r) for r in results[:12]]
-    _log_docs("FINAL", results, limit=12)
-    logger.info(
-        "RAG FINAL TOP: timings=%s counts=%s top=%s",
-        retrieval_debug["timings_ms"],
-        retrieval_debug["counts"],
-        retrieval_debug["top_final"],
-    )
 
     # Fast path: if retrieval found no usable legal context, do not spend a full
     # LLM call. Normal weak-but-present context still goes through Gemini so the
@@ -5230,7 +4751,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "processing_time_ms": int((time.time() - start_time) * 1000),
                 "tokens_used": 0,
                 "category": "Загальне",
-                "retrieval_debug": retrieval_debug,
                 **_CLF_FALLBACK,
             },
         }}
@@ -5408,58 +4928,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if body.context_summary and body.context_summary.strip():
             summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:4000]}\n\n"
 
-        _answer_needles = (
-            "вимог", "вимоги", "умов", "умови", "критер", "хто може", "які саме",
-            "порядок", "процедур", "требован", "услов", "критер", "кто может",
-            "каких", "какие", "порядок", "процедур",
-        )
-        needs_structured_conditions = any(
-            needle in question.lower() or needle in search_question.lower()
-            for needle in _answer_needles
-        )
-        retrieval_debug["flags"]["needs_structured_conditions_answer"] = needs_structured_conditions
-        answer_type_hint = ""
-        if isinstance(retrieval_hints, dict):
-            answer_type_hint = str(retrieval_hints.get("answer_type") or "").strip()
-        length_rules = {
-            "short": (
-                "Режим відповіді: коротко, але змістовно. "
-                "Якщо в контексті є умови, критерії, порядок або винятки, дай 3-6 конкретних пунктів з citations. "
-                "Не обмежуйся загальною фразою."
-            ),
-            "standard": (
-                "Режим відповіді: стандартно. Дай прямий висновок, ключові умови/критерії, порядок дій "
-                "і важливі застереження з citations."
-            ),
-            "detailed": (
-                "Режим відповіді: детально. Структуруй за нормами, підзаконними актами, процедурою, ризиками "
-                "і практичними кроками з citations."
-            ),
-            "full": (
-                "Режим відповіді: повний аналіз. Розкрий правову рамку, критерії, процедуру, винятки, ризики "
-                "і практичний алгоритм з citations."
-            ),
-        }
-        answer_contract_block = (
-            "Інструкція до цієї відповіді:\n"
-            f"- {length_rules[response_length_pref]}\n"
-            "- Якщо питання питає 'які вимоги/умови/критерії', обов'язково дай окремий перелік вимог/умов.\n"
-            "- Якщо джерела містять кілька рівнів регулювання, розділи: закон/кодекс, КМУ/міністерства, судова практика.\n"
-            "- Кожне юридичне твердження прив'язуй до реального номера citation, наприклад [1] або [2]. Не використовуй буквальний маркер [N].\n"
-            f"- Тип відповіді за retrieval hints: {answer_type_hint or 'не визначено'}.\n\n"
-        )
-        if needs_structured_conditions:
-            answer_contract_block += (
-                "Обов'язковий формат для цього питання:\n"
-                "1. Прямий висновок: чи є інформація в джерелах.\n"
-                "2. Хто може підпадати під правило / для кого застосовується.\n"
-                "3. Основні вимоги або критерії окремими пунктами.\n"
-                "4. Який орган/процедура згадується у джерелах.\n"
-                "5. Важливе застереження, якщо воно є в контексті.\n"
-                "Навіть у short-режимі дай не менше 4 змістовних пунктів, якщо контекст це дозволяє.\n"
-                "Не відповідай лише однією загальною фразою.\n\n"
-            )
-
         # Build conversation history block — last 3 turns (6 messages) only
         # Older turns are already covered by context_summary
         history_block = ""
@@ -5481,13 +4949,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"{personal_block}"
             f"{summary_block}"
             f"{history_block}"
-            f"{answer_contract_block}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
-            f"---\nПитання: {question}\n\n"
-            "Фінальна перевірка перед відповіддю: якщо відповідь вийшла коротшою за потрібний формат, "
-            "розшир її за рахунок умов, критеріїв, процедури та застережень, які є в контексті. "
-            "Не додавай інформацію поза контекстом."
+            f"---\nПитання: {question}"
         )
 
         clf_prompt = (
@@ -5529,9 +4993,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "main_gen_cfg": _main_gen_cfg, "llm_timeout": llm_timeout,
         "start_time": start_time, "max_output_tokens": max_output_tokens,
         "query_rewritten": rewritten_query,
-        "retrieval_hints": retrieval_hints,
-        "confirmed_title_hits": confirmed_title_hits,
-        "retrieval_debug": retrieval_debug,
     }
 
 
@@ -6102,7 +5563,6 @@ async def ask(body: AskRequest):
 
     answer = await _complete_answer_if_needed(pipe, answer, finish_reason)
     answer = _strip_answer_done_marker(answer)
-    answer = await _repair_answer_quality_if_needed(pipe, answer)
 
     try:
         classification = _json.loads(clf_response.text)
@@ -6131,9 +5591,6 @@ async def ask(body: AskRequest):
             "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
             "n_docs": len(pipe["results"]),
             "query_rewritten": pipe.get("query_rewritten"),
-            "retrieval_hints": pipe.get("retrieval_hints"),
-            "confirmed_title_hits": pipe.get("confirmed_title_hits"),
-            "retrieval_debug": pipe.get("retrieval_debug"),
             **classification,
         },
     }
@@ -6344,15 +5801,6 @@ async def ask_stream(body: AskRequest):
                 cont_finish_reason = None
 
         full_answer = _strip_answer_done_marker(completed_answer)
-        if _answer_quality_repair_reasons(pipe, full_answer):
-            yield _sse("status", {
-                "request_id": request_id,
-                "step": "answer_quality_repair",
-                "message": "Уточнюю структуру відповіді...",
-            })
-        repaired_answer = await _repair_answer_quality_if_needed(pipe, full_answer)
-        if repaired_answer != full_answer:
-            full_answer = repaired_answer
 
         try:
             clf_response = await clf_task
@@ -6383,9 +5831,6 @@ async def ask_stream(body: AskRequest):
                 "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
                 "n_docs": len(pipe["results"]),
                 "query_rewritten": pipe.get("query_rewritten"),
-                "retrieval_hints": pipe.get("retrieval_hints"),
-                "confirmed_title_hits": pipe.get("confirmed_title_hits"),
-                "retrieval_debug": pipe.get("retrieval_debug"),
                 **classification,
             },
         }

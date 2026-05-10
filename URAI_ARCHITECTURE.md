@@ -210,52 +210,6 @@ Backend `_ask_pipeline()`:
 
 ## 9. Context building
 
-### Retrieval hints before context
-
-`retrieval_hints_enabled` adds a soft AI planning step before keyword/title
-fallbacks. The step uses the rewrite model and returns a small JSON object with:
-
-- rewritten query fallback;
-- likely legal act titles;
-- must-have legal terms;
-- article or clause hints;
-- source roles such as primary, secondary and background;
-- answer type and confidence.
-
-This layer does not change tariff access. The backend first builds
-`plan_collections` from `filter_sources`, and every hint lookup is intersected
-with those allowed V2 collections by using the same `target_collections`.
-
-Source roles are not bans. Wiki, ZIR, MOD, Supreme Court, legal positions and
-CCU remain searchable when the user's plan allows them. Hints only add soft
-title/keyword candidates and metadata for eval review. The answerability reranker
-still decides which chunks reach the final context.
-
-For diagnostics, `_meta.retrieval_debug` records per-stage timings, hit counts,
-target collections, flags and compact top-source snapshots. Backend logs mirror
-this with `RAG PLAN`, `RAG VECTOR`, `RAG KEYWORD`, `RAG TITLE` and
-`RAG FINAL TOP` entries.
-
-`title_boost_max_keywords` limits broad title-search keyword fanout. This is a
-generic latency/noise control, not a topic-specific rule.
-
-Retrieval budget settings also include `title_boost_max_pages`,
-`title_boost_max_docs_per_collection`, `doc_expansion_max_docs` and
-`doc_expansion_chunks_per_doc`. These control broad search cost and context noise
-without changing tariff source access.
-
-For questions asking about requirements, conditions, criteria, coverage or
-procedure, the prompt adds a generic structure guard so the model returns several
-concrete cited points even when the user preference is `short`.
-
-The backend also validates the generated answer before the final `/ask` response
-or `/ask_stream` citations payload. If the draft contains a literal `[N]`, lacks
-real citation numbers while references exist, or answers a structured question
-with only a generic short paragraph, it runs one repair pass over the same prompt
-and context. This is a generic quality gate, not a law-specific hardcoded rule.
-`retrieval_debug.flags.answer_quality_repaired` and
-`answer_quality_repair_reasons` show whether it fired.
-
 Context buckets:
 
 | Bucket | Collections | Max chunks |
@@ -315,10 +269,10 @@ Completion guard:
 
 | Mode | Token bounds | Word target |
 | --- | ---: | ---: |
-| `short` | 800-1200 | compact, no strict word count |
-| `standard` | 1200-1700 | up to 400 words |
-| `detailed` | 2600-3800 | up to 850 words |
-| `full` | 4200-6500 | up to 1600 words |
+| `short` | 1200-1800 | compact, no strict word count |
+| `standard` | 1800-2600 | up to 400 words |
+| `detailed` | 4200-5600 | up to 850 words |
+| `full` | 6500-9000 | up to 1600 words |
 
 `response_lang_style`:
 

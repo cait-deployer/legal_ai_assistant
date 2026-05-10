@@ -622,13 +622,7 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
     return results
 
 
-def search_qdrant_by_title(
-    keywords: list[str],
-    collections: list,
-    chunks_per_doc: int = 3,
-    max_pages_per_keyword: int = 3,
-    max_docs_per_collection: int = 20,
-) -> list:
+def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
     """
     Multi-field keyword boost: знаходить документи де source АБО content містить
     ключові слова запиту. Docs ranked by total keyword matches across both fields.
@@ -659,9 +653,7 @@ def search_qdrant_by_title(
                 # Пагінація — збираємо всі унікальні law_ids, не обмежуємось 500 чанками
                 offset = None
                 seen_in_kw: set[str] = set()
-                pages = 0
                 while True:
-                    pages += 1
                     pts, next_offset = client.scroll(
                         collection_name=col,
                         scroll_filter=Filter(
@@ -683,11 +675,7 @@ def search_qdrant_by_title(
                             law_match_counts[lid].add(kw.lower())
                             seen_in_kw.add(lid)
                         law_points[lid][str(p.id)] = p
-                    if (
-                        not next_offset
-                        or len(law_match_counts) > 500
-                        or pages >= max(1, max_pages_per_keyword)
-                    ):
+                    if not next_offset or len(law_match_counts) > 500:
                         break
                     offset = next_offset
             except Exception as e:
@@ -703,7 +691,7 @@ def search_qdrant_by_title(
         ]
         ranked_law_ids.sort(key=lambda lid: -len(law_match_counts[lid]))
 
-        for lid in ranked_law_ids[:max(1, max_docs_per_collection)]:
+        for lid in ranked_law_ids[:30]:
             pts_by_id = dict(law_points[lid])
             try:
                 pts, _ = client.scroll(

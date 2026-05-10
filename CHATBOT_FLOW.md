@@ -13,12 +13,12 @@ flowchart TD
     E --> F[FastAPI /ask_stream]
     F --> G[Optional RU to UA translation]
     G --> H[Follow-up resolver for ambiguous short questions]
-    H --> I[Parallel: query embedding + query rewrite + retrieval hints]
+    H --> I[Parallel: query embedding + query rewrite]
     I --> J[Plan sources -> allowed V2 Qdrant collections]
     J --> K[Routing probe across allowed collections]
     K --> L[Vector search: original and rewrite]
     L --> M[Boost, dedup, diversity, document expansion]
-    M --> N[Keyword MatchText + title boost + hint title boost]
+    M --> N[Keyword MatchText + title boost]
     N --> O[Deterministic answerability reranker]
     O --> P[Strict context squeeze + expired-document filter + context buckets]
     P --> Q[Gemini streamed answer + hidden completion marker + parallel classification]
@@ -62,7 +62,7 @@ flowchart TD
 2. Initialize Vertex AI if needed.
 3. Translate Russian-looking questions to Ukrainian for search.
 4. Resolve follow-up questions using recent history.
-5. Run query rewrite, query embedding and optional retrieval hints.
+5. Run query rewrite and query embedding.
 6. Convert plan source features into allowed V2 collections.
 7. Probe allowed collections and route to likely collections.
 8. Run vector search for original and rewritten queries.
@@ -73,7 +73,7 @@ flowchart TD
 13. Apply diversity caps.
 14. Expand promising documents with sibling chunks.
 15. Add keyword MatchText candidates.
-16. Add title MatchText and hint-title candidates with a small cap.
+16. Add title MatchText candidates with a small cap.
 17. Run deterministic answerability rerank.
 18. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
 19. Squeeze final context: keep search wide, but send only the strongest source-strict chunks to Gemini.
@@ -82,85 +82,7 @@ flowchart TD
 22. Generate streamed answer and parallel classification.
 23. Require a hidden answer-done marker from the model.
 24. If the marker is missing or the model hit max tokens, request a short continuation.
-25. Run answer quality repair when the draft is too short for a structured legal question or contains invalid citation markers.
-26. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
-
-## Retrieval Hints
-
-`retrieval_hints_enabled` controls a soft AI planning step that runs in parallel
-with query rewrite. It returns JSON hints, not user-facing legal conclusions:
-
-- `rewritten_query`;
-- `likely_act_titles`;
-- `must_terms`;
-- `article_hints`;
-- `collection_roles`;
-- `answer_type`;
-- `confidence`.
-
-Hints enrich keyword and title search, especially when the user asks casually and
-the relevant Rada or KMU document title is not present in the question.
-
-Hard constraints:
-
-- tariff source gating remains the boundary;
-- searches still run only inside `plan_collections`;
-- hinted collections never unlock sources that the plan did not allow;
-- Wiki, ZIR, MOD, Supreme Court, legal positions and CCU are not banned;
-- source roles are soft priorities, not filters;
-- if a hinted title is not confirmed by Qdrant title search, it is ignored.
-
-The final SSE `_meta` may include `retrieval_hints` and `confirmed_title_hits`
-for debugging and eval review.
-
-`_meta.retrieval_debug` contains detailed diagnostics for quality review:
-
-- `timings_ms`: translation, follow-up, rewrite, hints, vector search, document
-  expansion, keyword search, title search, rerank and context squeeze timings;
-- `counts`: raw hits, added keyword/title/hint chunks, dedup drops and final
-  candidate counts;
-- `collections`: plan-limited and final target collections;
-- `flags`: low-confidence mode, rerank mode, hint status and thresholds;
-- `top_candidates` / `top_final`: compact ranked source snapshots.
-
-Backend logs also emit `RAG PLAN`, `RAG VECTOR`, `RAG BOOSTED TOP`,
-`RAG KEYWORD`, `RAG TITLE` and `RAG FINAL TOP` lines. For easier reading in
-`journalctl`, compact per-source rows use the `RAGDBG` prefix, for example
-`RAGDBG VECTOR #01 ...` and `RAGDBG FINAL #01 ...`. These logs are diagnostic
-only and do not add hardcoded source or document exceptions.
-
-`title_boost_max_keywords` caps broad title-keyword fanout. Exact title probes
-from retrieval hints still run separately, but generic title keywords should stay
-small enough to avoid slow noisy Qdrant scrolls.
-
-Budget settings for latency control:
-
-- `title_boost_max_keywords`;
-- `title_boost_max_pages`;
-- `title_boost_max_docs_per_collection`;
-- `doc_expansion_max_docs`;
-- `doc_expansion_chunks_per_doc`.
-
-These are generic caps. They should be tuned by eval metrics and logs, not by
-hardcoded topic exceptions.
-
-Answer generation also has a generic structure guard: when the question asks for
-conditions, requirements, criteria, who is covered, or procedure, even `short`
-answers must include several concrete cited points instead of a single generic
-sentence. This is query-shape based, not topic-specific.
-
-After generation, `_repair_answer_quality_if_needed()` checks the actual answer.
-It triggers one repair pass only for generic quality failures:
-
-- literal `[N]` instead of real citations;
-- no real citation numbers while citations exist;
-- structured question answered with too few words, too few cited points or no
-  visible structure.
-
-The repair uses the already-built prompt and context. It does not run new search,
-does not unlock extra collections and does not contain topic-specific source
-exceptions. Logs include `ANSWER QUALITY REPAIR` with reasons, before/after
-character counts, elapsed time and any remaining quality warnings.
+25. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
 
 ## V2 Collections
 
@@ -232,10 +154,10 @@ questions that need a normative answer.
 
 | Mode | Token bounds | Target |
 | --- | ---: | --- |
-| `short` | 800-1200 | compact answer |
-| `standard` | 1200-1700 | up to 400 words |
-| `detailed` | 2600-3800 | up to 850 words |
-| `full` | 4200-6500 | up to 1600 words |
+| `short` | 1200-1800 | compact answer |
+| `standard` | 1800-2600 | up to 400 words |
+| `detailed` | 4200-5600 | up to 850 words |
+| `full` | 6500-9000 | up to 1600 words |
 
 `response_lang_style`:
 
@@ -253,8 +175,6 @@ Server behavior:
 - if the streamed answer includes the marker, the stream buffer removes it before the user sees it;
 - if Gemini reports `MAX_TOKENS`, or the visible text ends in an obviously dangling fragment,
   `_complete_answer_if_needed()` asks for a short continuation;
-- if the final answer is structurally weak or contains `[N]`,
-  `_repair_answer_quality_if_needed()` rewrites it once using the same context;
 - continuation can add only the marker when the answer was already complete;
 - the marker is stripped before `/ask`, `/ask_stream` citations payload and saved assistant text.
 

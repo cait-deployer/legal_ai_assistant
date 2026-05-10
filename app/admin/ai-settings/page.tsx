@@ -23,12 +23,6 @@ type Settings = {
   min_relevance_score: number
   raw_gate_threshold: number
   rada_source_boost: number
-  retrieval_hints_enabled: boolean
-  title_boost_max_keywords: number
-  title_boost_max_pages: number
-  title_boost_max_docs_per_collection: number
-  doc_expansion_max_docs: number
-  doc_expansion_chunks_per_doc: number
   max_output_tokens: number
   review_first_message_count: number
   review_repeat_message_count: number
@@ -99,12 +93,6 @@ const DEFAULTS: Settings = {
   min_relevance_score: 0.35,
   raw_gate_threshold: 0.42,
   rada_source_boost: 1.15,
-  retrieval_hints_enabled: true,
-  title_boost_max_keywords: 8,
-  title_boost_max_pages: 2,
-  title_boost_max_docs_per_collection: 12,
-  doc_expansion_max_docs: 4,
-  doc_expansion_chunks_per_doc: 2,
   max_output_tokens: 3000,
   review_first_message_count: 1,
   review_repeat_message_count: 5,
@@ -232,27 +220,6 @@ function NumberInput({ value, onChange, min, max, step = 1 }: { value: number; o
         <button type="button" onClick={() => onChange(clamp(value + step))} className="w-8 h-8 rounded-lg border border-[#C9A84C]/15 text-[#C9A84C]/70 hover:bg-[#C9A84C]/10 transition-colors">+</button>
       </div>
     </div>
-  )
-}
-
-function BooleanInput({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      className={`h-9 w-16 rounded-full border transition-colors ${
-        value
-          ? "bg-[#C9A84C]/25 border-[#C9A84C]/60"
-          : "bg-[#0A0E1A]/80 border-[#C9A84C]/15"
-      }`}
-      aria-pressed={value}
-    >
-      <span
-        className={`block h-7 w-7 rounded-full bg-[#E0E6ED] transition-transform ${
-          value ? "translate-x-7" : "translate-x-1"
-        }`}
-      />
-    </button>
   )
 }
 
@@ -617,58 +584,6 @@ export default function AiSettingsPage() {
             >
               <SliderInput value={settings.rada_source_boost} onChange={v => set("rada_source_boost", v)} min={1.0} max={1.5} step={0.01} />
             </Field>
-            <Field
-              label="AI-підказки для пошуку (retrieval_hints_enabled)"
-              hint="Додає назви актів і ключові терміни до title/keyword пошуку в межах дозволених тарифом джерел."
-              restart="cache"
-              tooltip="Окремий короткий AI-крок формує гіпотези для пошуку: можливі назви законів, постанов, порядків, статті та ключові терміни. Це не відкриває закриті тарифом колекції і не забороняє Wiki, ZIR, MOD або судову практику."
-            >
-              <BooleanInput value={settings.retrieval_hints_enabled} onChange={v => set("retrieval_hints_enabled", v)} />
-            </Field>
-            <Field
-              label="Максимум title-keywords (title_boost_max_keywords)"
-              hint="Обмежує ширину пошуку по назвах документів. Рекомендовано: 6-8."
-              restart="cache"
-              tooltip="Менше значення пришвидшує title boost і зменшує шум. Більше значення може знайти рідкісні назви, але довше сканує Qdrant title index."
-            >
-              <NumberInput value={settings.title_boost_max_keywords} onChange={v => set("title_boost_max_keywords", v)} min={3} max={14} />
-            </Field>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field
-                label="Сторінок title-scroll (title_boost_max_pages)"
-                hint="Скільки сторінок Qdrant scroll читати на keyword. Рекомендовано: 1-2."
-                restart="cache"
-                tooltip="Захищає пошук від довгого сканування по дуже загальних словах у назвах документів."
-              >
-                <NumberInput value={settings.title_boost_max_pages} onChange={v => set("title_boost_max_pages", v)} min={1} max={5} />
-              </Field>
-              <Field
-                label="Документів title на колекцію"
-                hint="Скільки знайдених документів розгортати в chunks. Рекомендовано: 8-12."
-                restart="cache"
-                tooltip="Менше значення зменшує шум і час пошуку. Більше може знадобитись для дуже розмитих запитів."
-              >
-                <NumberInput value={settings.title_boost_max_docs_per_collection} onChange={v => set("title_boost_max_docs_per_collection", v)} min={4} max={30} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field
-                label="Документів для розширення"
-                hint="Скільки top-документів розгортати в сусідні chunks. Рекомендовано: 3-4."
-                restart="cache"
-                tooltip="Менше значення пришвидшує retrieval і зменшує ризик, що контекст заповнять сусідні, але не головні документи."
-              >
-                <NumberInput value={settings.doc_expansion_max_docs} onChange={v => set("doc_expansion_max_docs", v)} min={1} max={8} />
-              </Field>
-              <Field
-                label="Chunks на документ"
-                hint="Скільки chunks брати при розширенні документа. Рекомендовано: 2."
-                restart="cache"
-                tooltip="Більше chunks корисно для довгих таблиць і повного аналізу, але збільшує час і шум у контексті."
-              >
-                <NumberInput value={settings.doc_expansion_chunks_per_doc} onChange={v => set("doc_expansion_chunks_per_doc", v)} min={1} max={5} />
-              </Field>
-            </div>
             <Field
               label="Поріг розширення пошуку (raw_gate_threshold)"
               hint="Якщо найкращий результат нижче — пошук розширюється на всі колекції. Рекомендовано: 0.38–0.45"

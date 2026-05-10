@@ -82,14 +82,14 @@ Every admin page must stay accurate. When you add/change backend functionality, 
 - Proxies to backend `/ask_stream` as `new Response(res.body, ...)` — raw stream passthrough.
 
 ### 3. Backend pipeline (`backend/server.py` → `_ask_pipeline()`)
-1. **Query rewrite + retrieval hints** — detects Russian, translates to Ukrainian; resolves follow-ups from history; rewrites to formal legal terminology via flash model; optionally builds soft JSON hints (`retrieval_hints_enabled`) with likely act titles and must terms.
+1. **Query rewrite** — detects Russian, translates to Ukrainian; resolves follow-ups from history; rewrites to formal legal terminology via flash model.
 2. **Parallel embedding** — embeds both original and rewritten query.
-3. **Collection routing** — tariff source mapping builds allowed V2 collections; hints never unlock collections outside the plan.
+3. **Collection routing** — `_classify_and_route()` narrows to 2–3 most relevant collections from `filter_sources`.
 4. **Multi-query retrieval** — searches both query vectors; merges by max similarity per `law_id`; fetches `fetch_k = max_docs × 5` candidates.
 5. **Boosting** — `rada_boost=1.15`, `supreme_penalty=0.88`, `zir_boost=1.3` (tax queries), `_DOC_TYPE_SCORE` (Codes > Laws > Resolutions > Orders).
 6. **Deduplication** — max 2 chunks/law globally; guaranteed slots per collection; court results capped at `max_docs/4`.
 7. **Document expansion** — top seed (score ≥0.75) gets all chunks (up to 20); others get 3 best chunks via vector + keyword per doc.
-8. **Keyword fallback** — parallel lexical search fills gaps from vector search; retrieval hints can add act titles, article hints and must terms to keyword/title search.
+8. **Keyword fallback** — parallel lexical search fills gaps from vector search.
 9. **LLM generation** — Gemini model with context (last 6 messages + `context_summary` + retrieved docs + user profile). Classification model runs in parallel.
 10. **Citation extraction** — `_citations_used_in_answer()` returns only refs cited as `[N]` in answer text.
 
@@ -137,7 +137,6 @@ Early-answer path skips `message` events and emits `citations` directly.
 - V1 collections (`rada_finance`, `laws_kmu`, etc.) are no longer used in any live code path — all init/search/stats use V2 only
 - `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini (full JSON response)
 - `/ask_stream` endpoint: same pipeline via `_ask_pipeline()` helper → SSE streaming. Events: `data: {"token":"..."}` per chunk, `event: citations\ndata: {...}` at end (full answer + references + _meta). Early-answer path also uses `event: citations`.
-- Retrieval hints: `retrieval_hints_enabled` runs a small JSON planning step with the rewrite model. It can add likely act titles and must terms to keyword/title search, but every lookup still uses tariff-limited `target_collections`. It does not ban Wiki/ZIR/MOD/Supreme/positions/CCU; source roles are soft hints only.
 - Response style preferences: `response_length_pref` (short/standard/detailed/full) and `response_lang_style` (legal/plain) stored in `profiles` table. Gated by plan tier — downgraded silently in Next.js route. Word limits: short=200, standard=400, detailed=900, full=2000.
 - Next.js SSE proxy: `app/api/ask/stream/route.ts` — same auth + plan gating as `/api/ask`, proxies stream from backend via `new Response(res.body, ...)`. Chat page reads stream with `ReadableStream` / `getReader()`, appends tokens live, finalizes on `event: citations`.
 - Auto-sync scheduler: APScheduler `daily_sync` cron job at `schedule_hour` UTC. Per-source flags: `schedule_enabled` (Rada legacy — deprecated, `_do_rada` is a no-op stub), `schedule_{source}_enabled` for V2 sources. `schedule_hour` key (int, stored as value_text). UI: `/admin/sync` → ScheduleWidget. Endpoints: `GET /admin/sync/status`, `PATCH /admin/sync/settings`.
