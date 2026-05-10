@@ -73,6 +73,7 @@ type Message = {
     references?: Citation[];
     templates?: Template[];
     feedback?: { is_positive: boolean } | null;
+    rewritten_query?: string;
 };
 
 function stripCompletionArtifacts(text: string) {
@@ -594,6 +595,7 @@ function ChatPage() {
                                 setIsContinuing(false);
                                 finalPayload = parsed as unknown as FinalPayload;
                                 const answer = stripCompletionArtifacts(finalPayload.answer || accText);
+                                const rq = (finalPayload!._meta?.query_rewritten as string | undefined) || undefined;
                                 if (firstToken) {
                                     // early_answer path: no tokens were streamed
                                     firstToken = false;
@@ -603,6 +605,7 @@ function ChatPage() {
                                         id: STREAMING_ID, role: 'ai', text: answer,
                                         references: finalPayload!.references ?? [],
                                         templates: finalPayload!.templates ?? [],
+                                        rewritten_query: rq,
                                     }]);
                                 } else {
                                     flushTypewriter();
@@ -610,6 +613,7 @@ function ChatPage() {
                                         ...m, text: answer,
                                         references: finalPayload!.references ?? [],
                                         templates: finalPayload!.templates ?? [],
+                                        rewritten_query: rq,
                                     } : m));
                                 }
                             } else if (currentEvent === 'status') {
@@ -777,6 +781,11 @@ function ChatPage() {
                                                     }`}>
                                                     {msg.role === 'ai' ? (
                                                         <div className="space-y-4">
+                                                            {msg.rewritten_query && (
+                                                                <p className="text-[11px] text-[#C9A84C]/50 italic border-l-2 border-[#C9A84C]/20 pl-2">
+                                                                    Пошук за: «{msg.rewritten_query}»
+                                                                </p>
+                                                            )}
                                                             <MarkdownText text={msg.text} refs={msg.references ?? []} onCitationOpen={setActiveCitation} />
                                                             {typeof msg.id === 'number' && msg.id < 0 && isContinuing && (
                                                                 <div className="flex items-center gap-2 pt-1">
