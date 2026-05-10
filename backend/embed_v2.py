@@ -13,7 +13,7 @@ _client_lock = threading.Lock()
 
 EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIMS  = 3072
-SLEEP_SEC   = 0.1
+SLEEP_SEC   = 0.35  # ~170 req/min — well below 3000/min quota, avoids burst 429
 
 
 def _cfg(key: str) -> str:
@@ -53,6 +53,7 @@ def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[
     from google.genai.types import EmbedContentConfig
     client = _get_client()
     cfg    = EmbedContentConfig(output_dimensionality=EMBED_DIMS, task_type=task)
+    total = len(texts)
     result = []
     for i, text in enumerate(texts):
         hard_fails = 0
@@ -66,13 +67,15 @@ def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[
                 if _is_rate_limit(ex):
                     rate_waits += 1
                     wait = min(60 * rate_waits, 300)  # 60s, 120s, 180s … cap at 5min
-                    print(f"[embed_v2] 429 rate limit on chunk #{i}, waiting {wait}s (attempt {rate_waits})…", flush=True)
+                    print(f"[embed_v2] 429 rate limit on chunk #{i}/{total}, waiting {wait}s (attempt {rate_waits})…", flush=True)
                     time.sleep(wait)
                 else:
                     hard_fails += 1
                     if hard_fails >= 3:
                         raise RuntimeError(f"embed failed after 3 attempts for chunk #{i}: {ex}") from ex
                     time.sleep(2 ** hard_fails)
+        if total > 100 and (i + 1) % 50 == 0:
+            print(f"[embed_v2] {i + 1}/{total} chunks embedded…", flush=True)
         time.sleep(SLEEP_SEC)
     return result
 
