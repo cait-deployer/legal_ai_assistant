@@ -49,20 +49,20 @@ def _check_disk(law_id: str) -> bool:
 
 
 def _check_qdrant(law_id: str) -> int:
+    """Returns total chunk count across all rada collections."""
     from qdrant_client import QdrantClient
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
     from qdrant_storage import RADA_V2_COLLECTIONS
     client = QdrantClient("localhost", port=6333)
     total = 0
     for col in RADA_V2_COLLECTIONS:
         try:
-            r = client.scroll(
+            result = client.count(
                 col,
-                scroll_filter={"must": [{"key": "law_id", "match": {"value": law_id}}]},
-                limit=1,
-                with_payload=False,
-                with_vectors=False,
+                count_filter=Filter(must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]),
+                exact=True,
             )
-            total += len(r[0])
+            total += result.count
         except Exception:
             pass
     return total
@@ -138,12 +138,11 @@ def _index_law(law_id: str) -> bool:
     return ok
 
 
-def run(check_only: bool = False, single_id: str | None = None):
+def run(check_only: bool = False, single_id: str | None = None, reindex: bool = False):
     laws = CRITICAL_LAWS
     if single_id:
         laws = [(lid, cat, name) for lid, cat, name in CRITICAL_LAWS if lid == single_id]
         if not laws:
-            # allow ad-hoc: fetch_missing_laws.py --id X --category h3 --name "..."
             print(f"  ⚠️  {single_id} не в CRITICAL_LAWS, але перевіряємо")
             laws = [(single_id, "h3", single_id)]
 
@@ -155,7 +154,7 @@ def run(check_only: bool = False, single_id: str | None = None):
     missing_qdrant: list[tuple[str, str, str]] = []
 
     for law_id, category, name in laws:
-        on_disk  = _check_disk(law_id)
+        on_disk   = _check_disk(law_id)
         in_qdrant = _check_qdrant(law_id)
         status = []
         if not on_disk:
@@ -166,8 +165,7 @@ def run(check_only: bool = False, single_id: str | None = None):
             missing_qdrant.append((law_id, category, name))
 
         icon = "✅" if not status else "❌"
-        chunks_str = f"({in_qdrant} chunks)" if in_qdrant > 0 else ""
-        print(f"  {icon} {law_id:15s} {name[:45]:<45} {' | '.join(status)} {chunks_str}")
+        print(f"  {icon} {law_id:15s} {name[:45]:<45} {f'({in_qdrant} chunks)':>12}  {' | '.join(status)}")
 
     print(f"\n  Відсутніх на диску:  {len(missing_disk)}")
     print(f"  Відсутніх у Qdrant: {len(missing_qdrant)}")
@@ -175,25 +173,33 @@ def run(check_only: bool = False, single_id: str | None = None):
     if check_only:
         return
 
-    # Download missing from disk
-    for law_id, category, name in missing_disk:
-        print(f"\n{'─'*50}")
-        print(f"  ⬇️  {law_id} — {name}")
-        ok = _download_law(law_id, category, name)
-        if not ok:
-            print(f"  ⏭️  Пропускаємо індексацію {law_id}")
-            continue
-        _index_law(law_id)
-        time.sleep(1)
+    to_index: list[tuple[str, str, str]] = []
 
-    # Index laws in Qdrant that are on disk but not indexed
-    disk_only = [
-        (lid, cat, nm) for lid, cat, nm in missing_qdrant
-        if (lid, cat, nm) not in missing_disk  # already handled above
-    ]
-    for law_id, category, name in disk_only:
+    if reindex:
+        # Force re-index all laws (download only if missing from disk)
+        for law_id, category, name in laws:
+            if not _check_disk(law_id):
+                print(f"\n{'─'*50}")
+                print(f"  ⬇️  {law_id} — {name}")
+                if not _download_law(law_id, category, name):
+                    continue
+            to_index.append((law_id, category, name))
+    else:
+        # Download missing from disk then index
+        for law_id, category, name in missing_disk:
+            print(f"\n{'─'*50}")
+            print(f"  ⬇️  {law_id} — {name}")
+            if _download_law(law_id, category, name):
+                to_index.append((law_id, category, name))
+
+        # Laws on disk but not in Qdrant
+        for law_id, category, name in missing_qdrant:
+            if (law_id, category, name) not in missing_disk:
+                to_index.append((law_id, category, name))
+
+    for law_id, category, name in to_index:
         print(f"\n{'─'*50}")
-        print(f"  📥 {law_id} — {name} (є на диску, індексуємо)")
+        print(f"  📥 {law_id} — {name}")
         _index_law(law_id)
         time.sleep(1)
 
@@ -203,7 +209,8 @@ def run(check_only: bool = False, single_id: str | None = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check",    action="store_true", help="check only, no download")
-    parser.add_argument("--id",       default=None,        help="process single law_id")
+    parser.add_argument("--check",   action="store_true", help="check only, no download")
+    parser.add_argument("--reindex", action="store_true", help="force re-index all (even if already present)")
+    parser.add_argument("--id",      default=None,        help="process single law_id")
     args = parser.parse_args()
-    run(check_only=args.check, single_id=args.id)
+    run(check_only=args.check, single_id=args.id, reindex=args.reindex)
