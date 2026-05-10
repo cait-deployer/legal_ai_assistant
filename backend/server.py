@@ -4051,10 +4051,65 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 timeout=15.0,
             )
 
-        # Embed оригінального запиту + rewrite паралельно
-        query_vector, rewritten_query = await _asyncio.gather(
+        async def _extract_act_hints(q: str) -> list[str]:
+            """Витягує назви нормативних актів з запиту для посилення title-пошуку.
+            Повертає список назв або порожній список при будь-якій помилці/невпевненості."""
+            if not settings_cache.get_bool("retrieval_hints_enabled", False):
+                return []
+            try:
+                import json as _json
+                _hints_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
+                _hm = GenerativeModel(
+                    _hints_model_name,
+                    system_instruction=(
+                        "Ти — юридична пошукова система. Твоє завдання: з запиту користувача "
+                        "визначити назви конкретних нормативних актів України, які ТОЧНО потрібні для відповіді. "
+                        "Правило: виводь ТІЛЬКИ ті акти, в існуванні яких ти на 100% впевнений. "
+                        "Якщо не впевнений — виводь порожній масив. "
+                        "НЕ вигадуй назви. НЕ додавай акти, які лише можуть бути пов'язані. "
+                        "Формат відповіді — ТІЛЬКИ валідний JSON: {\"act_titles\": [\"...\", \"...\"]} "
+                        "Максимум 3 акти. Без пояснень."
+                    ),
+                )
+                try:
+                    from vertexai.generative_models import ThinkingConfig as _HTC
+                    _h_cfg = GenerationConfig(
+                        temperature=0.0, max_output_tokens=200,
+                        thinking_config=_HTC(thinking_budget=0),
+                    )
+                except Exception:
+                    _h_cfg = GenerationConfig(temperature=0.0, max_output_tokens=200)
+                _h_resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        _hm.generate_content,
+                        f"Запит: {q}\n\nJSON:",
+                        generation_config=_h_cfg,
+                    ),
+                    timeout=5.0,
+                )
+                _h_raw = (_h_resp.text or "").strip()
+                # Очищаємо markdown-обгортку якщо є
+                if _h_raw.startswith("```"):
+                    _h_raw = _h_raw.split("```")[1]
+                    if _h_raw.startswith("json"):
+                        _h_raw = _h_raw[4:]
+                _h_raw = _h_raw.strip()
+                _parsed = _json.loads(_h_raw)
+                titles = _parsed.get("act_titles", [])
+                if isinstance(titles, list):
+                    valid = [t for t in titles if isinstance(t, str) and 5 < len(t) < 200]
+                    if valid:
+                        logger.info("ACT HINTS: %s", valid)
+                    return valid
+            except Exception as _he:
+                logger.info("ACT HINTS failed: %s", _he)
+            return []
+
+        # Embed оригінального запиту + rewrite + act hints паралельно
+        query_vector, rewritten_query, _act_hints = await _asyncio.gather(
             _embed_query_with_timeout(search_question),
             _rewrite_query(search_question),
+            _extract_act_hints(search_question),
         )
         hypothetical_text = rewritten_query  # alias для title boost keywords
         logger.info("QUERY: %s", search_question[:200])
@@ -4376,7 +4431,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     }
     try:
         from qdrant_storage import search_qdrant_text
-        _kw_query = f"{search_question} {rewritten_query or ''}".strip()
+        _act_hints_text = " ".join(_act_hints) if _act_hints else ""
+        _kw_query = f"{search_question} {rewritten_query or ''} {_act_hints_text}".strip()
         _kw_results = (
             search_qdrant_text(_kw_query, target_collections, limit=15)
             if settings_cache.get_bool("lexical_fallback_enabled", True)
@@ -4450,7 +4506,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
         _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
         _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
-        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words))[:10]
+        # Додаємо слова з act_hints (назви актів від LLM) — збагачуємо title search
+        _hints_words = []
+        for _ht in _act_hints:
+            _hints_words += [_strip_punct(w) for w in _ht.split() if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
+        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words + _hints_words[:6]))[:14]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
@@ -4458,7 +4518,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 lm for w in _raw_kws
                 if (lm := _ua_lemma(w)) and lm.lower() not in _TITLE_STOPWORDS
             ]
-        ))[:14]
+        ))[:18]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
@@ -4902,6 +4962,32 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         # Behavioral answer rules come from app_settings.system_prompt (admin AI prompt).
         # Keep backend prompt assembly technical-only: profile, history, retrieved context and question.
 
+        # Response style/length/features instruction block
+        _WORD_LIMITS = {
+            "short":    "Відповідь коротка — до 120 слів. Лише ключовий висновок і 2-3 практичних кроки.",
+            "standard": "Відповідь збалансована — 350-500 слів: короткий висновок, кроки, деталі та джерела.",
+            "detailed": "Відповідь детальна — 800-1200 слів. Повний аналіз з усіма нюансами та виключеннями.",
+            "full":     "Відповідь повна — 1500-2000 слів. Глибокий правовий розбір із судовою практикою.",
+        }
+        _LANG_STYLES = {
+            "plain": "Мова відповіді: розмовна, без юридичного жаргону. Поясни як людині без юридичної освіти.",
+            "legal": "Мова відповіді: офіційна юридична термінологія.",
+        }
+        _FEATURE_HINTS = {
+            "response_detailed":   "Включай всі деталі, нюанси та виключення з контексту.",
+            "vs_position":         "Якщо є, порівняй позицію закону з судовою практикою.",
+            "response_steps":      "Структуруй відповідь як покроковий план дій.",
+        }
+        _response_lang_style = body.response_lang_style if body.response_lang_style in {"legal", "plain"} else "legal"
+        _style_parts = [
+            _WORD_LIMITS[response_length_pref],
+            _LANG_STYLES[_response_lang_style],
+        ]
+        for _feat in (body.response_features or []):
+            if _feat in _FEATURE_HINTS:
+                _style_parts.append(_FEATURE_HINTS[_feat])
+        style_block = "Інструкція щодо відповіді:\n" + "\n".join(f"- {p}" for p in _style_parts) + "\n\n"
+
         # Build user profile block if available
         profile_block = ""
         if body.user_profile:
@@ -4945,6 +5031,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 history_block = "Останні повідомлення діалогу:\n" + "\n".join(history_lines) + "\n\n"
 
         prompt = (
+            f"{style_block}"
             f"{profile_block}"
             f"{personal_block}"
             f"{summary_block}"
