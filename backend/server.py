@@ -4245,6 +4245,22 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if factor != 1.0:
             r["similarity"] = min(r["similarity"] * factor, 1.0)
 
+    # Age penalty: documents adopted before 2011 (pre-Tax Code era) get a 0.80 penalty.
+    # Prevents obsolete pre-reform legislation (e.g. 1998 simplified-tax decree) from
+    # ranking above current norms. Court decisions (rada_court_v2) before 2010 get 0.75.
+    for r in results:
+        _meta = r["out_metadata"]
+        _col  = r.get("collection", "")
+        _date_str = _meta.get("rada_adopted_date") or _meta.get("date_adopted") or _meta.get("date") or ""
+        if _date_str and len(_date_str) >= 4:
+            try:
+                _year = int(str(_date_str)[:4])
+                if _year < 2011:
+                    _age_factor = 0.75 if _col == "rada_court_v2" else 0.80
+                    r["similarity"] = r["similarity"] * _age_factor
+            except (ValueError, TypeError):
+                pass
+
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Dedup: max 2 chunks per law_id globally so one doc can't eat all slots
