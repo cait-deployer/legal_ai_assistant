@@ -3787,7 +3787,7 @@ def _answer_looks_incomplete(answer: str) -> bool:
         return True
     if re.search(r"[,;:–—(\[]\s*$", text):
         return True
-    return True
+    return False
 
 
 def _build_answer_continuation_prompt(completed: str) -> str:
