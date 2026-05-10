@@ -4088,12 +4088,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     timeout=5.0,
                 )
                 _h_raw = (_h_resp.text or "").strip()
-                # Очищаємо markdown-обгортку якщо є
-                if _h_raw.startswith("```"):
-                    _h_raw = _h_raw.split("```")[1]
-                    if _h_raw.startswith("json"):
-                        _h_raw = _h_raw[4:]
-                _h_raw = _h_raw.strip()
+                # Витягуємо JSON будь-якого вигляду: ```json ... ```, або просто {...}
+                import re as _re
+                _json_match = _re.search(r'\{.*\}', _h_raw, _re.DOTALL)
+                if not _json_match:
+                    return []
+                _h_raw = _json_match.group(0).strip()
                 _parsed = _json.loads(_h_raw)
                 titles = _parsed.get("act_titles", [])
                 if isinstance(titles, list):
@@ -4258,7 +4258,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     results = _deduped
 
     # Diversity: кожна колекція отримує гарантовані слоти; court collections обмежені
-    _MAX_COURT = max(2, body.max_docs // 4)  # cap for laws_supreme і laws_positions
+    # rada_court_v2 cap: якщо є ZIR або KMU (практичні джерела) — лімітуємо до 1,
+    # бо судові рішення часто обговорюють скасовані норми і плутають LLM.
+    _has_practical = any(
+        r.get("_collection") in ("laws_zir_v2", "laws_kmu_v2")
+        for r in results
+    )
+    _MAX_COURT = max(2, body.max_docs // 4)
+    _MAX_RADA_COURT = 1 if _has_practical else max(2, body.max_docs // 4)
     _max_pos = max(1, body.max_docs // 4)    # strict cap for laws_positions
 
     # Групуємо результати по колекціях
@@ -4269,8 +4276,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     _pos_col = _by_col.pop("laws_positions_v2", [])
     _sup_col = _by_col.pop("laws_supreme_v2", [])
-    pos_taken = _pos_col[:_max_pos]
-    sup_taken = _sup_col[:_MAX_COURT]
+    _court_col = _by_col.pop("rada_court_v2", [])
+    pos_taken   = _pos_col[:_max_pos]
+    sup_taken   = _sup_col[:_MAX_COURT]
+    court_taken = _court_col[:_MAX_RADA_COURT]
 
     _n_cols = len(_by_col) or 1
     # Скільки слотів гарантовано кожній колекції (мін 2, лишаємо ~1/4 для overflow)
@@ -4283,12 +4292,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         guaranteed.extend(docs[:_guaranteed_each])
         overflow.extend(docs[_guaranteed_each:_per_col_cap])
 
-    remaining = body.max_docs - len(pos_taken) - len(sup_taken) - len(guaranteed)
+    remaining = body.max_docs - len(pos_taken) - len(sup_taken) - len(court_taken) - len(guaranteed)
     filler = sorted(
-        overflow + _pos_col[_max_pos:] + _sup_col[_MAX_COURT:],
+        overflow + _pos_col[_max_pos:] + _sup_col[_MAX_COURT:] + _court_col[_MAX_RADA_COURT:],
         key=lambda x: x["similarity"], reverse=True,
     )
-    results = pos_taken + sup_taken + guaranteed + filler[:max(0, remaining)]
+    results = pos_taken + sup_taken + court_taken + guaranteed + filler[:max(0, remaining)]
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Діагностичний лог — видно в journalctl
