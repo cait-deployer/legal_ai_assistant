@@ -82,7 +82,8 @@ flowchart TD
 22. Generate streamed answer and parallel classification.
 23. Require a hidden answer-done marker from the model.
 24. If the marker is missing or the model hit max tokens, request a short continuation.
-25. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
+25. Run answer quality repair when the draft is too short for a structured legal question or contains invalid citation markers.
+26. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
 
 ## Retrieval Hints
 
@@ -147,6 +148,19 @@ Answer generation also has a generic structure guard: when the question asks for
 conditions, requirements, criteria, who is covered, or procedure, even `short`
 answers must include several concrete cited points instead of a single generic
 sentence. This is query-shape based, not topic-specific.
+
+After generation, `_repair_answer_quality_if_needed()` checks the actual answer.
+It triggers one repair pass only for generic quality failures:
+
+- literal `[N]` instead of real citations;
+- no real citation numbers while citations exist;
+- structured question answered with too few words, too few cited points or no
+  visible structure.
+
+The repair uses the already-built prompt and context. It does not run new search,
+does not unlock extra collections and does not contain topic-specific source
+exceptions. Logs include `ANSWER QUALITY REPAIR` with reasons, before/after
+character counts, elapsed time and any remaining quality warnings.
 
 ## V2 Collections
 
@@ -218,10 +232,10 @@ questions that need a normative answer.
 
 | Mode | Token bounds | Target |
 | --- | ---: | --- |
-| `short` | 1200-1800 | compact answer |
-| `standard` | 1800-2600 | up to 400 words |
-| `detailed` | 4200-5600 | up to 850 words |
-| `full` | 6500-9000 | up to 1600 words |
+| `short` | 800-1200 | compact answer |
+| `standard` | 1200-1700 | up to 400 words |
+| `detailed` | 2600-3800 | up to 850 words |
+| `full` | 4200-6500 | up to 1600 words |
 
 `response_lang_style`:
 
@@ -239,6 +253,8 @@ Server behavior:
 - if the streamed answer includes the marker, the stream buffer removes it before the user sees it;
 - if Gemini reports `MAX_TOKENS`, or the visible text ends in an obviously dangling fragment,
   `_complete_answer_if_needed()` asks for a short continuation;
+- if the final answer is structurally weak or contains `[N]`,
+  `_repair_answer_quality_if_needed()` rewrites it once using the same context;
 - continuation can add only the marker when the answer was already complete;
 - the marker is stripped before `/ask`, `/ask_stream` citations payload and saved assistant text.
 

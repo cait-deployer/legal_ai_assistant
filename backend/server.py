@@ -3847,6 +3847,110 @@ async def _complete_answer_if_needed(pipe: dict, answer: str, finish_reason=None
     return completed
 
 
+def _answer_quality_repair_reasons(pipe: dict, answer: str) -> list[str]:
+    text = (answer or "").strip()
+    reasons: list[str] = []
+    flags = (pipe.get("retrieval_debug") or {}).get("flags") or {}
+    needs_structured = bool(flags.get("needs_structured_conditions_answer"))
+
+    if re.search(r"\[[Nn]\]", text):
+        reasons.append("literal_N_citation")
+
+    has_real_citation = bool(re.search(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", text))
+    if pipe.get("citations") and not has_real_citation:
+        reasons.append("missing_real_citations")
+
+    if needs_structured:
+        word_count = len(re.findall(r"\w+", text, flags=re.UNICODE))
+        cited_claims = len(re.findall(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", text))
+        bullet_or_numbered_lines = len(
+            re.findall(r"(?m)^\s*(?:[-*]|\d+\.)\s+\S+", text)
+        )
+        if word_count < 110:
+            reasons.append("too_short_for_structured_question")
+        if cited_claims < 2:
+            reasons.append("too_few_cited_points")
+        if bullet_or_numbered_lines < 3:
+            reasons.append("missing_structured_points")
+
+    return reasons
+
+
+def _build_answer_quality_repair_prompt(pipe: dict, answer: str, reasons: list[str]) -> str:
+    return (
+        "Перепиши фінальну відповідь так, щоб вона була корисною для користувача і відповідала контексту.\n"
+        "Використовуй ТІЛЬКИ наданий нижче контекст і питання з початкового prompt. Не додавай фактів поза контекстом.\n"
+        "Вимоги:\n"
+        "- якщо питання просить умови, критерії, вимоги, порядок або хто може підпадати під правило, дай 4-7 змістовних пунктів;\n"
+        "- кожне юридичне твердження підтверджуй реальними citation-номерами з контексту: [1], [2], [3];\n"
+        "- ніколи не використовуй буквальний маркер [N];\n"
+        "- якщо джерела не дають деталі, прямо скажи, які саме деталі не підтверджені контекстом;\n"
+        "- збережи українську мову відповіді;\n"
+        "- поверни тільки готову відповідь, без службових пояснень.\n\n"
+        f"Причини перегенерації: {', '.join(reasons)}\n\n"
+        "Початковий prompt з контекстом:\n"
+        f"{pipe.get('prompt', '')}\n\n"
+        "Поточна невдала відповідь:\n"
+        f"{answer or ''}"
+    )
+
+
+async def _repair_answer_quality_if_needed(pipe: dict, answer: str) -> str:
+    reasons = _answer_quality_repair_reasons(pipe, answer)
+    debug = pipe.get("retrieval_debug")
+    if isinstance(debug, dict):
+        debug.setdefault("flags", {})["answer_quality_repair_reasons"] = reasons
+
+    if not reasons:
+        if isinstance(debug, dict):
+            debug.setdefault("flags", {})["answer_quality_repaired"] = False
+        return answer
+
+    import asyncio as _asyncio
+    from vertexai.generative_models import GenerationConfig
+
+    started = time.time()
+    try:
+        repair_tokens = min(max(int(pipe.get("max_output_tokens") or 1200), 1600), 2600)
+        cfg = GenerationConfig(temperature=0.0, max_output_tokens=repair_tokens)
+        repaired_resp = await _asyncio.wait_for(
+            _asyncio.to_thread(
+                pipe["main_model"].generate_content,
+                _build_answer_quality_repair_prompt(pipe, answer, reasons),
+                generation_config=cfg,
+            ),
+            timeout=min(float(pipe.get("llm_timeout") or 90.0), 45.0),
+        )
+        repaired = _strip_answer_done_marker((repaired_resp.text or "").strip())
+        repaired_reasons = _answer_quality_repair_reasons(pipe, repaired)
+        if repaired and "literal_N_citation" not in repaired_reasons:
+            logger.info(
+                "ANSWER QUALITY REPAIR: reasons=%s chars_before=%d chars_after=%d ms=%d remaining=%s",
+                reasons,
+                len(answer or ""),
+                len(repaired),
+                int((time.time() - started) * 1000),
+                repaired_reasons,
+            )
+            if isinstance(debug, dict):
+                debug.setdefault("flags", {})["answer_quality_repaired"] = True
+                debug.setdefault("timings_ms", {})["answer_quality_repair"] = int((time.time() - started) * 1000)
+                debug.setdefault("flags", {})["answer_quality_repair_remaining"] = repaired_reasons
+            return repaired
+        logger.warning(
+            "ANSWER QUALITY REPAIR kept original: reasons=%s repaired_reasons=%s chars_after=%d",
+            reasons,
+            repaired_reasons,
+            len(repaired or ""),
+        )
+    except Exception as e:
+        logger.warning("ANSWER QUALITY REPAIR failed: %s", e)
+
+    if isinstance(debug, dict):
+        debug.setdefault("flags", {})["answer_quality_repaired"] = False
+    return answer
+
+
 async def _ask_pipeline(body: AskRequest) -> dict:
     """Retrieval → rerank → context → prompt building. Повертає dict для /ask і /ask_stream."""
     import asyncio as _asyncio
@@ -5998,6 +6102,7 @@ async def ask(body: AskRequest):
 
     answer = await _complete_answer_if_needed(pipe, answer, finish_reason)
     answer = _strip_answer_done_marker(answer)
+    answer = await _repair_answer_quality_if_needed(pipe, answer)
 
     try:
         classification = _json.loads(clf_response.text)
@@ -6239,6 +6344,15 @@ async def ask_stream(body: AskRequest):
                 cont_finish_reason = None
 
         full_answer = _strip_answer_done_marker(completed_answer)
+        if _answer_quality_repair_reasons(pipe, full_answer):
+            yield _sse("status", {
+                "request_id": request_id,
+                "step": "answer_quality_repair",
+                "message": "Уточнюю структуру відповіді...",
+            })
+        repaired_answer = await _repair_answer_quality_if_needed(pipe, full_answer)
+        if repaired_answer != full_answer:
+            full_answer = repaired_answer
 
         try:
             clf_response = await clf_task

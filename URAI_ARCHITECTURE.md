@@ -248,6 +248,14 @@ For questions asking about requirements, conditions, criteria, coverage or
 procedure, the prompt adds a generic structure guard so the model returns several
 concrete cited points even when the user preference is `short`.
 
+The backend also validates the generated answer before the final `/ask` response
+or `/ask_stream` citations payload. If the draft contains a literal `[N]`, lacks
+real citation numbers while references exist, or answers a structured question
+with only a generic short paragraph, it runs one repair pass over the same prompt
+and context. This is a generic quality gate, not a law-specific hardcoded rule.
+`retrieval_debug.flags.answer_quality_repaired` and
+`answer_quality_repair_reasons` show whether it fired.
+
 Context buckets:
 
 | Bucket | Collections | Max chunks |
@@ -307,10 +315,10 @@ Completion guard:
 
 | Mode | Token bounds | Word target |
 | --- | ---: | ---: |
-| `short` | 1200-1800 | compact, no strict word count |
-| `standard` | 1800-2600 | up to 400 words |
-| `detailed` | 4200-5600 | up to 850 words |
-| `full` | 6500-9000 | up to 1600 words |
+| `short` | 800-1200 | compact, no strict word count |
+| `standard` | 1200-1700 | up to 400 words |
+| `detailed` | 2600-3800 | up to 850 words |
+| `full` | 4200-6500 | up to 1600 words |
 
 `response_lang_style`:
 
