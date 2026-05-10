@@ -43,6 +43,11 @@ def _get_client():
         return _client
 
 
+def _is_rate_limit(ex: Exception) -> bool:
+    msg = str(ex).upper()
+    return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "QUOTA" in msg
+
+
 def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
     """Ембедить список текстів. Sequential — batch=1 на Vertex AI."""
     from google.genai.types import EmbedContentConfig
@@ -50,16 +55,24 @@ def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[
     cfg    = EmbedContentConfig(output_dimensionality=EMBED_DIMS, task_type=task)
     result = []
     for i, text in enumerate(texts):
-        for attempt in range(3):
+        hard_fails = 0
+        rate_waits = 0
+        while True:
             try:
                 resp = client.models.embed_content(model=EMBED_MODEL, contents=text, config=cfg)
                 result.append(list(resp.embeddings[0].values))
                 break
             except Exception as ex:
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
+                if _is_rate_limit(ex):
+                    rate_waits += 1
+                    wait = min(60 * rate_waits, 300)  # 60s, 120s, 180s … cap at 5min
+                    print(f"[embed_v2] 429 rate limit on chunk #{i}, waiting {wait}s (attempt {rate_waits})…", flush=True)
+                    time.sleep(wait)
                 else:
-                    raise RuntimeError(f"embed failed after 3 attempts for chunk #{i}: {ex}") from ex
+                    hard_fails += 1
+                    if hard_fails >= 3:
+                        raise RuntimeError(f"embed failed after 3 attempts for chunk #{i}: {ex}") from ex
+                    time.sleep(2 ** hard_fails)
         time.sleep(SLEEP_SEC)
     return result
 
