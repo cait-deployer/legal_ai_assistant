@@ -123,7 +123,10 @@ for debugging and eval review.
 - `top_candidates` / `top_final`: compact ranked source snapshots.
 
 Backend logs also emit `RAG PLAN`, `RAG VECTOR`, `RAG BOOSTED TOP`,
-`RAG KEYWORD`, `RAG TITLE` and `RAG FINAL TOP` lines.
+`RAG KEYWORD`, `RAG TITLE` and `RAG FINAL TOP` lines. For easier reading in
+`journalctl`, compact per-source rows use the `RAGDBG` prefix, for example
+`RAGDBG VECTOR #01 ...` and `RAGDBG FINAL #01 ...`. These logs are diagnostic
+only and do not add hardcoded source or document exceptions.
 
 ## V2 Collections
 

@@ -3883,6 +3883,21 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "doc_expansion": bool(r.get("_doc_expansion")),
         }
 
+    def _log_docs(label: str, docs: list[dict], limit: int = 8) -> None:
+        for idx, item in enumerate(docs[:limit], start=1):
+            meta = item.get("out_metadata") or {}
+            logger.info(
+                "RAGDBG %s #%02d col=%s law_id=%s chunk=%s score=%.3f hint=%s title=%s",
+                label,
+                idx,
+                item.get("_collection", ""),
+                meta.get("law_id", ""),
+                meta.get("chunk_index", 0),
+                float(item.get("similarity", 0.0) or 0.0),
+                bool(item.get("_retrieval_hint_match") or item.get("_title_match") or item.get("_keyword_match")),
+                (meta.get("source") or meta.get("title") or "")[:220],
+            )
+
     # 1. Ініціалізація + embed query + HyDE гіпотетична відповідь (паралельно)
     try:
         import embed_v2 as _embed_v2
@@ -4321,6 +4336,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     retrieval_debug["timings_ms"]["vector_search"] = _tock(_vector_start)
     retrieval_debug["counts"]["vector_merged_hits"] = len(results)
     raw_semantic_results = list(results)
+    _log_docs("VECTOR", raw_semantic_results, limit=10)
     logger.info(
         "RAG VECTOR: ms=%d fetch_k=%d threshold=%.2f orig=%s rewrite=%s merged=%d top=%s",
         retrieval_debug["timings_ms"]["vector_search"],
@@ -4402,6 +4418,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     results.sort(key=lambda x: x["similarity"], reverse=True)
     retrieval_debug["top_candidates"] = [_short_doc(r) for r in results[:8]]
+    _log_docs("BOOSTED", results, limit=10)
     logger.info("RAG BOOSTED TOP: %s", retrieval_debug["top_candidates"])
 
     # Dedup: max 2 chunks per law_id globally so one doc can't eat all slots
@@ -5048,6 +5065,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     retrieval_debug["counts"]["after_min_retrieval_filter"] = len(results)
     retrieval_debug["flags"]["min_retrieval_threshold"] = round(float(_ret_threshold), 3)
     retrieval_debug["top_final"] = [_short_doc(r) for r in results[:12]]
+    _log_docs("FINAL", results, limit=12)
     logger.info(
         "RAG FINAL TOP: timings=%s counts=%s top=%s",
         retrieval_debug["timings_ms"],
