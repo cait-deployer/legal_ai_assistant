@@ -142,9 +142,11 @@ The deterministic reranker is the main precision/speed fix. It scores each chunk
 
 - semantic similarity;
 - query-term coverage in title and content;
+- directness: whether the chunk content covers several specific terms from the user question, not just broad topical words;
 - content coverage, not just title match;
 - source authority;
 - normative markers such as law/order/procedure/obligation language;
+- legal recency based on law metadata dates, not scrape/index timestamps;
 - text quality, penalizing noisy or mixed-language chunks;
 - source penalties for broad background sources such as wiki and broad Supreme Court PDFs.
 

@@ -3694,6 +3694,24 @@ def _parse_doc_date(value) -> datetime | None:
         return None
 
 
+def _doc_date_from_law_id(value) -> datetime | None:
+    raw = str(value or "")
+    if not raw:
+        return None
+    match = re.search(r"-(\d{4})(?:-|$)", raw)
+    if match:
+        year = int(match.group(1))
+        if 1900 <= year <= datetime.now(timezone.utc).year:
+            return datetime(year, 1, 1, tzinfo=timezone.utc)
+    match = re.search(r"-(\d{2})(?:\D*$|$)", raw)
+    if match:
+        yy = int(match.group(1))
+        year = 2000 + yy if yy <= 35 else 1900 + yy
+        if 1900 <= year <= datetime.now(timezone.utc).year:
+            return datetime(year, 1, 1, tzinfo=timezone.utc)
+    return None
+
+
 def _doc_best_date(result: dict) -> datetime | None:
     meta = result.get("out_metadata", {}) or {}
     for key in (
@@ -3701,13 +3719,27 @@ def _doc_best_date(result: dict) -> datetime | None:
         "effective_date",
         "date_adopted",
         "rada_adopted_date",
-        "scraped_at",
-        "indexed_at",
     ):
         dt = _parse_doc_date(meta.get(key))
-        if dt:
+        if dt and dt <= datetime.now(timezone.utc):
             return dt
-    return None
+    return _doc_date_from_law_id(meta.get("law_id") or meta.get("url") or meta.get("source"))
+
+
+def _aspect_overlap_required(terms: list[str]) -> int:
+    if len(terms) <= 2:
+        return 1
+    return min(3, max(2, len(terms) // 3))
+
+
+def _aspect_overlap_ok(result: dict, terms: list[str]) -> bool:
+    if not terms:
+        return False
+    overlap = _term_overlap_score(result, terms)
+    if overlap < _aspect_overlap_required(terms):
+        return False
+    ans = result.get("_answerability") or _answerability_score(result, " ".join(terms), terms)
+    return float(ans.get("content_coverage", 0.0) or 0.0) >= min(0.45, _aspect_overlap_required(terms) / max(len(terms), 1))
 
 
 def _recency_score(result: dict) -> float:
@@ -3848,6 +3880,39 @@ def _text_quality_score(text: str) -> float:
     return 0.55
 
 
+def _directness_terms(terms: list[str]) -> list[str]:
+    direct_terms: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        clean = (term or "").strip().lower()
+        if not clean or clean in seen or clean in _QUERY_STOPWORDS:
+            continue
+        if clean in _LEGAL_ACRONYMS or any(ch.isdigit() for ch in clean) or len(clean) >= 6:
+            seen.add(clean)
+            direct_terms.append(clean)
+        if len(direct_terms) >= 12:
+            break
+    return direct_terms
+
+
+def _directness_score(content: str, terms: list[str]) -> float:
+    direct_terms = _directness_terms(terms)
+    if not direct_terms:
+        return 0.0
+    hits = sum(1 for term in direct_terms if term in (content or ""))
+    return hits / max(len(direct_terms), 1)
+
+
+def _directness_penalty(content: str, terms: list[str]) -> float:
+    direct_terms = _directness_terms(terms)
+    if len(direct_terms) < 4:
+        return 0.0
+    hits = sum(1 for term in direct_terms if term in (content or ""))
+    if hits >= 2:
+        return 0.0
+    return 0.12 if hits == 1 else 0.20
+
+
 def _answerability_score(result: dict, query_text: str, terms: list[str] | None = None) -> dict:
     """
     Universal deterministic reranker.
@@ -3884,6 +3949,8 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
 
     quality = _text_quality_score(result.get("out_content") or "")
     quality_penalty = (1.0 - quality) * 0.35
+    directness = _directness_score(content, terms)
+    directness_penalty = _directness_penalty(content, terms)
 
     sim = float(result.get("similarity", 0.0) or 0.0)
     score = (
@@ -3894,8 +3961,10 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
         + (_authority_score(result) - 1.0) * 0.10
         + _recency_score(result) * 0.35
         + (0.06 if has_normative else 0.0)
+        + directness * 0.16
         - source_penalty
         - quality_penalty
+        - directness_penalty
     )
 
     result["_answerability"] = {
@@ -3906,6 +3975,8 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
         "quality": round(quality, 3),
         "normative": has_normative,
         "recency": round(_recency_score(result), 3),
+        "directness": round(directness, 3),
+        "directness_penalty": round(directness_penalty, 3),
     }
     return result["_answerability"]
 
@@ -3945,12 +4016,15 @@ def _primary_act_score(result: dict, query_text: str, terms: list[str] | None = 
     content_hits = sum(1 for term in terms if term in content)
     title_density = min(title_hits, 5) * 0.11
     content_density = min(content_hits, 6) * 0.035
+    directness = _directness_score(content, terms)
     score = (
         float(result.get("similarity", 0.0) or 0.0) * 0.42
         + (_authority_score(result) - 1.0) * 0.75
         + title_density
         + content_density
+        + directness * 0.14
         + max(_recency_score(result), 0.0) * 0.45
+        - _directness_penalty(content, terms) * 0.65
     )
     if result.get("_title_match"):
         score += 0.10
@@ -4008,7 +4082,10 @@ def _squeeze_context_results(
     scored: list[tuple[float, dict]] = []
     for r in results:
         ans = r.get("_answerability") or _answerability_score(r, query_text, terms)
-        protected = bool(r.get("_full_law") or r.get("_doc_expansion") or _is_must_have_primary_act(r))
+        protected = bool(
+            r.get("_full_law") or r.get("_doc_expansion")
+            or _is_must_have_primary_act(r) or r.get("_aspect_coverage")
+        )
         if not protected and float(ans.get("coverage", 0.0) or 0.0) < min_cov:
             continue
         scored.append((_strict_context_score(r, query_text, terms), r))
@@ -4037,7 +4114,30 @@ def _squeeze_context_results(
     # щоб не витіснити документи з інших джерел (напр., ПКУ коли всі топи — КМУ).
     regular_col_cap = max(2, target // 2)
 
-    for _score, r in scored:
+    # Aspect-protected docs get first pick — they were selected for distinct query
+    # aspects and must not be crowded out by other high-scoring docs from one collection.
+    _aspect_items = [(s, r) for s, r in scored if r.get("_aspect_coverage")]
+    _regular_items = [(s, r) for s, r in scored if not r.get("_aspect_coverage")]
+
+    for _score, r in _aspect_items:
+        if len(picked) >= target:
+            break
+        col = r.get("_collection", "")
+        doc_key = (col, r["out_metadata"].get("law_id", ""))
+        if per_doc.get(doc_key, 0) >= 3:
+            continue
+        picked.append(r)
+        per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
+        if _is_background_collection(col):
+            background_count += 1
+        elif _is_court_collection(col):
+            court_count += 1
+        else:
+            col_counts[col] = col_counts.get(col, 0) + 1
+
+    for _score, r in _regular_items:
+        if len(picked) >= target:
+            break
         col = r.get("_collection", "")
         if _is_background_collection(col):
             if background_count >= background_cap:
@@ -4060,8 +4160,6 @@ def _squeeze_context_results(
             court_count += 1
         else:
             col_counts[col] = col_counts.get(col, 0) + 1
-        if len(picked) >= target:
-            break
 
     if len(picked) < min(target, 4):
         picked_keys = {
@@ -5179,7 +5277,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             continue
         _aspect_candidates = [
             r for r in results
-            if _term_overlap_score(r, _aspect_terms) > 0 and not _is_background_collection(r.get("_collection", ""))
+            if _aspect_overlap_ok(r, _aspect_terms) and not _is_background_collection(r.get("_collection", ""))
         ]
         if not _aspect_candidates:
             continue
@@ -5376,7 +5474,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     )
                 except Exception:
                     pass
-            
+
             _raw_indices = []
             try:
                 import json, re as _re
@@ -5425,12 +5523,31 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             logger.warning("Reranker error: %s", _rr_err)
             results = _rerank_by_answerability(results, _answerability_query, body.max_docs, keep_weak=low_confidence)
     else:
-        results = _rerank_by_answerability(
+        _answ_results = _rerank_by_answerability(
             results,
             _answerability_query,
             body.max_docs,
             keep_weak=low_confidence,
         )
+        # Aspect-protected and must-have docs bypass the answerability reranker —
+        # they were selected precisely because each covers a distinct query aspect,
+        # so they must enter the squeeze even if term overlap is low.
+        _answ_keys = {
+            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            for r in _answ_results
+        }
+        _extra_prot = [
+            r for r in _rr_protected
+            if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            not in _answ_keys
+        ]
+        if _extra_prot:
+            logger.info(
+                "ASPECT INJECT: %d protected docs added before squeeze: %s",
+                len(_extra_prot),
+                [f"{r.get('_collection')}:{r['out_metadata'].get('law_id')}" for r in _extra_prot],
+            )
+        results = _extra_prot + _answ_results
 
     response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
     results = _squeeze_context_results(
