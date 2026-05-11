@@ -4208,6 +4208,47 @@ def _last_user_question(history: list[dict] | None) -> str:
     return ""
 
 
+_HISTORY_EVIDENCE_MARKERS = (
+    "підтвердж", "контекст", "фоп", "тов", "єдиний подат", "спрощен", "цпд",
+    "найман", "ліміт", "дохід", "відповідальн", "управл", "статут", "реєстрац",
+    "компенсац", "відстроч", "штраф", "строк", "право", "обов",
+)
+
+
+def _history_evidence_summary(history: list[dict] | None, *, limit_chars: int = 1400) -> dict:
+    if not history:
+        return {"text": "", "terms": []}
+    snippets: list[str] = []
+    seen: set[str] = set()
+    assistant_turns = [
+        (turn.get("content") or "").strip()
+        for turn in history[-8:]
+        if turn.get("role") == "assistant" and (turn.get("content") or "").strip()
+    ]
+    for content in assistant_turns[-3:]:
+        for raw_line in re.split(r"[\n\r]+", content):
+            line = re.sub(r"^\s*[-*•\d.)\s]+", "", raw_line).strip()
+            if not line or len(line) < 35:
+                continue
+            lower = line.lower()
+            if "[" not in line or "]" not in line:
+                continue
+            if not any(marker in lower for marker in _HISTORY_EVIDENCE_MARKERS):
+                continue
+            line = re.sub(r"\s+", " ", line)
+            key = line[:180].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            snippets.append(line[:320])
+            if len(" ".join(snippets)) >= limit_chars:
+                break
+        if len(" ".join(snippets)) >= limit_chars:
+            break
+    text = "\n".join(f"- {s}" for s in snippets)[:limit_chars]
+    return {"text": text, "terms": _query_terms(" ".join(snippets), limit=28) if snippets else []}
+
+
 def _looks_like_followup(text: str) -> bool:
     q = (text or "").strip().lower()
     if not q:
@@ -5400,9 +5441,24 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _question_before_followup = search_question
         search_question = await _resolve_followup(search_question)
         _previous_user_question = _last_user_question(body.history)
+        _history_evidence = _history_evidence_summary(body.history)
+        _history_evidence_text = _history_evidence.get("text", "")
+        _history_evidence_terms = _history_evidence.get("terms", [])
+        _q_for_followup = _question_before_followup.lower()
+        _looks_like_recommendation_followup = any(
+            marker in _q_for_followup
+            for marker in ("рекомендац", "краще", "обрати", "вибрати", "выбрать", "лучше", "порівня", "сравн")
+        )
         if _previous_user_question and _looks_like_followup(_question_before_followup):
             search_question = f"{search_question}\nКонтекст попереднього питання: {_previous_user_question}"
             logger.info("FOLLOWUP CONTEXT MERGE: %s", search_question[:220])
+        if _history_evidence_text and (_looks_like_followup(_question_before_followup) or _looks_like_recommendation_followup):
+            search_question = (
+                f"{search_question}\n"
+                f"Попередньо підтверджені факти для повторного пошуку, не джерело права:\n"
+                f"{_history_evidence_text[:900]}"
+            )
+            logger.info("FOLLOWUP EVIDENCE CARRY: terms=%s text=%s", _history_evidence_terms[:10], _history_evidence_text[:240])
 
         async def _embed_query_with_timeout(text: str):
             return await _asyncio.wait_for(
@@ -5553,6 +5609,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _evidence_must_terms.extend(_sq.get("must_find", []))
             _evidence_collections.extend(_sq.get("target_collections", []))
             _evidence_sources.extend(_sq.get("source_preferences", []))
+        if _history_evidence_text and (_looks_like_followup(_question_before_followup) or _looks_like_recommendation_followup):
+            _evidence_questions.append(_history_evidence_text[:700])
+            _evidence_must_terms.extend(_history_evidence_terms[:14])
         _semantic_cols, _semantic_sources = _semantic_collection_hints(search_question, _query_plan)
         _evidence_collections.extend(_semantic_cols)
         _evidence_sources.extend(_semantic_sources)
@@ -5594,6 +5653,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_queries,
             _act_hints,
             limit=32,
+        )
+        _search_lower_for_mode = search_question.lower()
+        _is_comparison_query = bool((_query_plan or {}).get("should_compare")) or any(
+            marker in _search_lower_for_mode
+            for marker in ("порівня", "сравн", "краще", "лучше", "обрати", "вибрати", "выбрать", "рекомендац")
         )
         hypothetical_text = " ".join([
             rewritten_query or "",
@@ -6396,10 +6460,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     _answerability_query = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
     logger.info("ANSWERABILITY QUERY: %r terms=%s", _answerability_query[:260], _query_terms(_answerability_query, limit=18)[:12])
     if len(results) > body.max_docs * 2:
+        _rerank_keep = max(body.max_docs * (3 if _is_comparison_query else 2), body.max_docs)
         results = _rerank_by_answerability(
             results,
             _answerability_query,
-            max(body.max_docs * 2, body.max_docs),
+            _rerank_keep,
             keep_weak=low_confidence,
         )
 
@@ -6435,7 +6500,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _best["_aspect_coverage"] = _aspect
         _aspect_protected.append(_best)
         _aspect_seen_docs.add(_doc_key)
-        if len(_aspect_protected) >= max(2, min(4, body.max_docs // 3)):
+        _aspect_target = max(2, min(6 if _is_comparison_query else 4, body.max_docs // (2 if _is_comparison_query else 3)))
+        if len(_aspect_protected) >= _aspect_target:
             break
     if _aspect_protected:
         logger.info(
@@ -7095,6 +7161,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if body.context_summary and body.context_summary.strip():
             summary_block = f"Резюме попереднього діалогу:\n{body.context_summary.strip()[:4000]}\n\n"
 
+        history_evidence_block = ""
+        if _history_evidence_text:
+            history_evidence_block = (
+                "Компактна пам'ять попередньо підтверджених фактів діалогу "
+                "(це не самостійне джерело права; юридичні твердження все одно підтверджуй поточними джерелами):\n"
+                f"{_history_evidence_text[:1400]}\n\n"
+            )
+
         # Build conversation history block — last 3 turns (6 messages) only
         # Older turns are already covered by context_summary
         history_block = ""
@@ -7118,6 +7192,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"{profile_block}"
             f"{personal_block}"
             f"{summary_block}"
+            f"{history_evidence_block}"
             f"{history_block}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
