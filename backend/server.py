@@ -3737,12 +3737,8 @@ def _recency_score(result: dict) -> float:
             score = -0.16 if age_years >= 10 else -0.08
         elif col in {"laws_zir_v2", "laws_wiki_v2"}:
             score = -0.10 if age_years >= 7 else -0.04
-        elif is_primary and not is_code_or_law and age_years >= 10:
-            # Old secondary rada docs (court practice letters, old resolutions/interpretations)
-            # that are not Кодекс/Закон must be penalised like court collections.
-            score = -0.22 if age_years >= 15 else -0.14
         elif age_years >= 10:
-            score = -0.08
+            score = -0.05
     return score - _stale_temporal_penalty(result)
 
 
@@ -3919,7 +3915,10 @@ def _is_background_collection(col: str) -> bool:
 
 
 def _is_court_collection(col: str) -> bool:
-    return col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2")
+    # rada_court_v2 holds h22/h30/h1 documents (суд, судова практика, ГПК).
+    # Active codes in it have a recent rada_last_edition → positive recency branch.
+    # Old court-practice letters have no last_edition → fall to court penalty here.
+    return col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2", "rada_court_v2")
 
 
 def _is_primary_normative_act(result: dict) -> bool:
