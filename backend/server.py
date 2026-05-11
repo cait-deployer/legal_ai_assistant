@@ -4521,9 +4521,10 @@ def _squeeze_context_results(
     positions_cap = 2
     # Supreme + CCU + rada_court — судова практика і рішення КСУ.
     court_cap = max(1, min(2, target // 4))
-    # Будь-яка одна regular-колекція займає не більше 1/3 слотів —
-    # захист від того, що КМУ або одна rada_* колекція витіснить всі інші джерела.
-    regular_col_cap = max(2, target // 3)
+    # Будь-яка одна regular-колекція займає не більше половини слотів.
+    # target//3 виявилось занадто жорстким: вузькотематичні запити (напр. КУпАП)
+    # потребують 4-5 чанків з однієї колекції — при cap=2 squeeze видає out=4 замість target=8.
+    regular_col_cap = max(2, target // 2)
 
     # Aspect-protected docs get first pick — they were selected for distinct query
     # aspects and must not be crowded out by other high-scoring docs from one collection.
