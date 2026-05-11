@@ -1625,7 +1625,6 @@ function FixTruncatedTab() {
         const progress  = src?.resume_progress
         const totalDisk = src?.total_on_disk ?? 0
         const logs      = src?.live_logs ?? []
-        const logsOpen  = expandedLogs[id] || running
         const pct       = progress && progress.total > 0
           ? Math.round((progress.done / progress.total) * 100) : 0
 
