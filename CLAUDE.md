@@ -168,7 +168,7 @@ Early-answer path skips `message` events and emits `citations` directly.
 - `_recency_score()`: вік документа з `_doc_best_date()` (пріоритет: `rada_last_edition` → `effective_date` → `rada_adopted_date` → рік з `law_id`). Бакети penalty для KMU/Rada (не кодекси): `age>=20y → -0.18`, `age>=15y → -0.10`, `age>=10y → -0.05`.
 - `_strict_context_score()`: recency weight = **0.40** (не підвищувати — при 0.80 нові але нерелевантні документи витісняють старі але валідні закони).
 - `temperature` default = **0.20** (Supabase `app_settings.temperature`). При 0.1 модель копіює фрагменти замість синтезу. Якщо є явне значення в Supabase — воно має пріоритет.
-- `_squeeze_context_results()`: `laws_wiki_v2` і `laws_zir_v2` мають **окремі** caps. `wiki_cap=1` (фоновий контент). `zir_cap=2` (офіційна позиція ДПС — авторитетне джерело, не фон). Не об'єднувати їх назад в один `background_cap`.
+- `_squeeze_context_results()`: кожна категорія джерел має **окремий** cap. `wiki_cap=1` (фоновий контент). `zir_cap=2` (офіційна позиція ДПС). `positions_cap=2` (правові позиції ВС — 12 800 Q&A). `court_cap=max(1,min(2,target//4))` (supreme + CCU + rada_court). `regular_col_cap=max(2,target//2)` (Rada collections + KMU + MOD). Не об'єднувати назад — кожне джерело має свою природу і cap.
 
 ## Rules: when making changes
 - **Architecture changes** → update the Architecture section in this file

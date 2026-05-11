@@ -1,4 +1,4 @@
-﻿﻿"""
+"""
 server.py — FastAPI бекенд для URAI (уп Assistant).
 
 Запуск:  cd /home/devops/app/backend && uvicorn server:app --host 0.0.0.0 --port 8000
@@ -4511,11 +4511,15 @@ def _squeeze_context_results(
     col_counts: dict[str, int] = {}
     wiki_count = 0
     zir_count = 0
+    positions_count = 0
     court_count = 0
     wiki_cap = 1
-    # ZIR — офіційна позиція ДПС (авторитетне джерело), не просто фоновий контент.
-    # Дозволяємо 2 документи, щоб покрити питання + уточнення/виняток.
+    # ZIR — офіційна позиція ДПС (Q&A формат, авторитетне джерело).
     zir_cap = 2
+    # Positions — правові позиції ВС (12 800 Q&A по категоріях справ, авторитетне джерело).
+    # Окремий cap бо positions і supreme/CCU — принципово різні джерела і не повинні витісняти одне одного.
+    positions_cap = 2
+    # Supreme + CCU + rada_court — судова практика і рішення КСУ.
     court_cap = max(1, min(2, target // 4))
     # Будь-яка одна колекція може зайняти не більше половини слотів,
     # щоб не витіснити документи з інших джерел (напр., ПКУ коли всі топи — КМУ).
@@ -4531,9 +4535,24 @@ def _squeeze_context_results(
             return "zir"
         if col == "laws_wiki_v2":
             return "wiki"
-        if _is_court_collection(col):
+        if col == "laws_positions_v2":
+            return "positions"
+        if _is_court_collection(col):  # supreme, CCU, rada_court
             return "court"
         return "regular"
+
+    def _inc_bucket(bucket: str, col: str) -> None:
+        nonlocal wiki_count, zir_count, positions_count, court_count
+        if bucket == "zir":
+            zir_count += 1
+        elif bucket == "wiki":
+            wiki_count += 1
+        elif bucket == "positions":
+            positions_count += 1
+        elif bucket == "court":
+            court_count += 1
+        else:
+            col_counts[col] = col_counts.get(col, 0) + 1
 
     for _score, r in _aspect_items:
         if len(picked) >= target:
@@ -4544,47 +4563,30 @@ def _squeeze_context_results(
             continue
         picked.append(r)
         per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
-        bucket = _col_bucket(col)
-        if bucket == "zir":
-            zir_count += 1
-        elif bucket == "wiki":
-            wiki_count += 1
-        elif bucket == "court":
-            court_count += 1
-        else:
-            col_counts[col] = col_counts.get(col, 0) + 1
+        _inc_bucket(_col_bucket(col), col)
 
     for _score, r in _regular_items:
         if len(picked) >= target:
             break
         col = r.get("_collection", "")
         bucket = _col_bucket(col)
-        if bucket == "zir":
-            if zir_count >= zir_cap:
-                continue
-        elif bucket == "wiki":
-            if wiki_count >= wiki_cap:
-                continue
-        elif bucket == "court":
-            if court_count >= court_cap:
-                continue
-        else:
-            if col_counts.get(col, 0) >= regular_col_cap:
-                continue
+        if bucket == "zir" and zir_count >= zir_cap:
+            continue
+        if bucket == "wiki" and wiki_count >= wiki_cap:
+            continue
+        if bucket == "positions" and positions_count >= positions_cap:
+            continue
+        if bucket == "court" and court_count >= court_cap:
+            continue
+        if bucket == "regular" and col_counts.get(col, 0) >= regular_col_cap:
+            continue
         doc_key = (col, r["out_metadata"].get("law_id", ""))
         doc_cap = 3 if _is_must_have_primary_act(r) else (2 if r.get("_full_law") else 1)
         if per_doc.get(doc_key, 0) >= doc_cap:
             continue
         picked.append(r)
         per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
-        if bucket == "zir":
-            zir_count += 1
-        elif bucket == "wiki":
-            wiki_count += 1
-        elif bucket == "court":
-            court_count += 1
-        else:
-            col_counts[col] = col_counts.get(col, 0) + 1
+        _inc_bucket(bucket, col)
 
     if len(picked) < min(target, 4):
         picked_keys = {
