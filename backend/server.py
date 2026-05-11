@@ -3496,6 +3496,8 @@ def _empty_query_plan(question: str) -> dict:
         "should_compare": False,
         "needs_clarification": False,
         "clarification_questions": [],
+        "article_hint": None,
+        "article_confidence": 0.0,
     }
 
 
@@ -3891,6 +3893,9 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
         base.get("clarification_questions", []),
         limit=3,
     )
+    # article_hint comes only from AI plan (not deterministic), take extra's value
+    merged["article_hint"] = extra.get("article_hint") or base.get("article_hint")
+    merged["article_confidence"] = float(extra.get("article_confidence") or base.get("article_confidence") or 0.0)
     if merged["legal_terms"] and (not merged["search_query"] or merged["search_query"] == question[:350]):
         merged["search_query"] = " ".join(_merge_unique_strings(_query_terms(question, limit=12), merged["legal_terms"], merged["aspects"], limit=28))[:350]
     return merged
@@ -3919,6 +3924,15 @@ def _normalize_query_plan(raw_plan, question: str) -> dict:
     plan["clarification_questions"] = _clean_plan_list(raw_plan.get("clarification_questions"), limit=3, min_len=8, max_len=180)
     plan["should_compare"] = bool(raw_plan.get("should_compare"))
     plan["needs_clarification"] = bool(raw_plan.get("needs_clarification"))
+    _raw_hint = raw_plan.get("article_hint")
+    if isinstance(_raw_hint, dict):
+        _hint_law = str(_raw_hint.get("law_id") or "").strip()
+        _hint_art = str(_raw_hint.get("article") or "").strip()
+        if _hint_law and _hint_art:
+            plan["article_hint"] = {"law_id": _hint_law, "article": _hint_art}
+    _raw_conf = raw_plan.get("article_confidence")
+    if isinstance(_raw_conf, (int, float)):
+        plan["article_confidence"] = max(0.0, min(1.0, float(_raw_conf)))
     return plan
 
 
@@ -5031,7 +5045,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "target_collections:string[] — точні Qdrant v2 колекції, де варто шукати. "
                         "Не пиши просто rada. Для Ради обери конкретні rada_*_v2 за картою h-категорій. "
                         f"{_RADA_COLLECTION_GUIDE}\n"
-                        "should_compare:boolean, needs_clarification:boolean, clarification_questions:string[]. "
+                        "should_compare:boolean, needs_clarification:boolean, clarification_questions:string[].\n"
+                        "article_hint:{law_id:string,article:string} — ТІЛЬКИ якщо питання однозначно стосується конкретної статті "
+                        "відомого кодексу або закону (наприклад, ст.122 КУпАП → {law_id:'8073-10',article:'122'}). "
+                        "Залиш null якщо невпевнений, питання охоплює кілька статей, або закон невідомий.\n"
+                        "article_confidence:float — впевненість від 0.0 до 1.0 що article_hint правильний. "
+                        "Ставь 0.9+ тільки якщо ти майже певний у конкретній статті.\n"
                         "Не заповнюй поля для галочки: якщо сигналу немає, лишай список порожнім. "
                         "Якщо місця мало, пріоритет: target_collections, title_must_terms, title_exclude_terms, title_queries."
                     ),
@@ -5056,7 +5075,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     "У title_queries постав фрази, які найімовірніше є в назвах законів, кодексів, постанов або порядків. "
                     "У title_must_terms/title_nice_terms/title_exclude_terms дай короткі title-слова для точного пошуку та відсікання чужої теми. "
                     "У target_collections постав точні v2-колекції, а не broad source. "
-                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[]}'
+                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[],"article_hint":null,"article_confidence":0.0}'
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -5465,6 +5484,44 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 # потрібний ст.122 міг не потрапити взагалі. Тепер завантажуємо всю
                 # колекцію закону (~500 чанків) і вибираємо найрелевантніші.
                 _all_fl_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
+
+                # Article hint: if planner identified a specific article with high confidence,
+                # filter chunks to that article only (prevents ст.116 boats etc. from competing).
+                _ah = (_query_plan or {}).get("article_hint")
+                _ah_conf = float((_query_plan or {}).get("article_confidence") or 0.0)
+                _article_filtered = False
+                if (
+                    _ah
+                    and isinstance(_ah, dict)
+                    and _ah.get("law_id") == _lid
+                    and _ah_conf >= 0.85
+                ):
+                    _target_article = str(_ah["article"]).strip()
+                    _art_re = re.compile(r"Стаття\s+([\d\-]+)", re.IGNORECASE)
+                    # Build article→chunks map by scanning in chunk_index order
+                    _art_map: dict[str, list] = {}
+                    _active_art: str | None = None
+                    for _fc in sorted(_all_fl_chunks, key=lambda c: c["out_metadata"].get("chunk_index", 0)):
+                        _fc_text = _fc.get("out_content") or ""
+                        _m = _art_re.search(_fc_text)
+                        if _m:
+                            _active_art = _m.group(1)
+                        if _active_art is not None:
+                            _art_map.setdefault(_active_art, []).append(_fc)
+                    _hint_chunks = _art_map.get(_target_article, [])
+                    if len(_hint_chunks) >= 2:
+                        _all_fl_chunks = _hint_chunks
+                        _article_filtered = True
+                        logger.info(
+                            "FULL LAW ARTICLE HINT: %s/%s article=%s conf=%.2f → %d chunks (filtered from %d)",
+                            _col, _lid, _target_article, _ah_conf, len(_hint_chunks), len(_art_map) and sum(len(v) for v in _art_map.values()),
+                        )
+                    else:
+                        logger.info(
+                            "FULL LAW ARTICLE HINT fallback: %s/%s article=%s → only %d chunks found, using full expansion",
+                            _col, _lid, _target_article, len(_hint_chunks),
+                        )
+
                 _all_fl_chunks.sort(
                     key=lambda c: (
                         -_term_overlap_score(c, _doc_terms),
@@ -5472,8 +5529,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     )
                 )
                 logger.info(
-                    "FULL LAW: %s/%s score=%.3f → %d total, selecting top-%d by term overlap",
-                    _col, _lid, _seed_score, len(_all_fl_chunks), _FULL_LAW_TOP,
+                    "FULL LAW: %s/%s score=%.3f → %d total%s, selecting top-%d by term overlap",
+                    _col, _lid, _seed_score, len(_all_fl_chunks),
+                    " [article-filtered]" if _article_filtered else "",
+                    _FULL_LAW_TOP,
                 )
                 _taken_for_doc = 0
                 for _chunk in _all_fl_chunks:
