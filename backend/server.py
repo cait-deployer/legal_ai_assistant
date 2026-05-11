@@ -4472,38 +4472,34 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     _planner_model_name,
                     system_instruction=(
                         "Ти планувальник пошуку для юридичного RAG. Не відповідай на питання і не встановлюй правові факти. "
-                        "Твоя задача — підготувати безпечні пошукові гіпотези українською мовою. "
-                        "Не вигадуй статті, цифри, строки, висновки або назви неіснуючих актів. "
-                        "primary_act_hints — лише можливі загальновідомі назви актів для пошуку; вони будуть перевірені в базі. "
-                        "Поверни тільки JSON з полями: "
-                        "search_query:string, legal_terms:string[], aspects:string[], primary_act_hints:string[], "
-                        "source_preferences:string[], should_compare:boolean, needs_clarification:boolean, "
-                        "clarification_questions:string[]."
+                        "Твоя задача — підготувати пошукові гіпотези українською мовою для векторного пошуку. "
+                        "Не вигадуй статті, цифри, строки або назви неіснуючих актів. "
+                        "Поверни тільки JSON з чотирма полями:\n"
+                        "search_query:string — перефразований запит юридичними термінами для embedding.\n"
+                        "aspects:string[] — 2-4 окремі сторони питання для паралельного пошуку (коротко, до 8 слів кожен).\n"
+                        "legal_terms:string[] — ключові юридичні терміни та абревіатури (ФОП, ПДВ, ЄП тощо).\n"
+                        "primary_act_hints:string[] — лише загальновідомі назви актів для пошуку за назвою."
                     ),
                 )
                 try:
                     from vertexai.generative_models import ThinkingConfig as _PlannerThinkingConfig
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=900,
+                        max_output_tokens=1500,
                         response_mime_type="application/json",
                         thinking_config=_PlannerThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=900,
+                        max_output_tokens=1500,
                         response_mime_type="application/json",
                     )
                 _planner_prompt = (
-                    "Питання користувача:\n"
-                    f"{q}\n\n"
-                    "Правила:\n"
-                    "- search_query має містити юридичні терміни для embedding, без розмовних слів.\n"
-                    "- legal_terms мають містити короткі абревіатури, якщо вони важливі: ФОП, ТОВ, ПДВ, ЄП, ЦПД тощо.\n"
-                    "- aspects потрібні для покриття різних сторін питання.\n"
-                    "- clarification_questions став лише якщо без них рекомендація може бути неправильною.\n"
-                    "- Не додавай конкретних норм, ставок, лімітів або висновку про правильний вибір.\n"
+                    f"Питання: {q[:600]}\n\n"
+                    "Поверни JSON з чотирма полями: search_query, aspects, legal_terms, primary_act_hints. "
+                    "aspects — список із 2-4 коротких (до 8 слів) незалежних аспектів питання для окремого векторного пошуку. "
+                    "Не вигадуй конкретних норм, цифр, ставок."
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -4528,7 +4524,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     except Exception:
                         pass
                 _json_match = re.search(r"\{.*\}", _planner_raw.strip(), re.DOTALL)
-                _parsed = _json.loads(_json_match.group(0) if _json_match else _planner_raw)
+                _raw_to_parse = _json_match.group(0) if _json_match else _planner_raw
+                try:
+                    _parsed = _json.loads(_raw_to_parse)
+                except _json.JSONDecodeError:
+                    # JSON обрізаний (hit token limit) — витягуємо search_query з часткового JSON
+                    _sq_match = re.search(r'"search_query"\s*:\s*"([^"]{5,})', _raw_to_parse)
+                    _fallback_q = _sq_match.group(1) if _sq_match else q
+                    _parsed = {"search_query": _fallback_q}
+                    logger.warning("QUERY PLAN: truncated JSON, fallback search_query=%r", _fallback_q[:120])
                 plan = _normalize_query_plan(_parsed, q)
                 logger.info(
                     "QUERY PLAN: search=%r terms=%s aspects=%s acts=%s compare=%s clarify=%s",
