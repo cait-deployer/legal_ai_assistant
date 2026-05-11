@@ -3971,6 +3971,31 @@ def _partial_query_plan(raw: str, question: str) -> dict:
     plan["clarification_questions"] = _partial_json_list_values(raw, "clarification_questions", limit=3, min_len=8, max_len=180)
     plan["should_compare"] = bool(re.search(r'"should_compare"\s*:\s*true', raw or "", re.I))
     plan["needs_clarification"] = bool(re.search(r'"needs_clarification"\s*:\s*true', raw or "", re.I))
+    # article_hint from partial JSON: {"article_hint":{"law_id":"8073-10","article":"122"}}
+    _ah_m = re.search(
+        r'"article_hint"\s*:\s*\{[^}]*"law_id"\s*:\s*"([^"]+)"[^}]*"article"\s*:\s*"([^"]+)"',
+        raw or "",
+    )
+    if not _ah_m:
+        # also try reversed key order
+        _ah_m = re.search(
+            r'"article_hint"\s*:\s*\{[^}]*"article"\s*:\s*"([^"]+)"[^}]*"law_id"\s*:\s*"([^"]+)"',
+            raw or "",
+        )
+        if _ah_m:
+            _ah_art, _ah_law = _ah_m.group(1).strip(), _ah_m.group(2).strip()
+        else:
+            _ah_law = _ah_art = ""
+    else:
+        _ah_law, _ah_art = _ah_m.group(1).strip(), _ah_m.group(2).strip()
+    if _ah_law and _ah_art:
+        plan["article_hint"] = {"law_id": _ah_law, "article": _ah_art}
+    _conf_m = re.search(r'"article_confidence"\s*:\s*([0-9.]+)', raw or "")
+    if _conf_m:
+        try:
+            plan["article_confidence"] = max(0.0, min(1.0, float(_conf_m.group(1))))
+        except ValueError:
+            pass
     return plan
 
 
@@ -5059,14 +5084,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     from vertexai.generative_models import ThinkingConfig as _PlannerThinkingConfig
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=1100,
+                        max_output_tokens=1600,
                         response_mime_type="application/json",
                         thinking_config=_PlannerThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=1100,
+                        max_output_tokens=1600,
                         response_mime_type="application/json",
                     )
                 _planner_prompt = (
