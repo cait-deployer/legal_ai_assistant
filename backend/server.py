@@ -3451,7 +3451,8 @@ _LEGAL_ACRONYMS = {"фоп", "тов", "ооо", "пдв", "єп", "квед", "
 def _query_terms(text: str, limit: int = 24) -> list[str]:
     terms: list[str] = []
     for raw in re.findall(r"[\w'-]+", (text or "").lower()):
-        if (len(raw) < 4 and raw not in _LEGAL_ACRONYMS) or raw in _QUERY_STOPWORDS:
+        has_digit = any(ch.isdigit() for ch in raw)
+        if (len(raw) < 4 and raw not in _LEGAL_ACRONYMS and not has_digit) or raw in _QUERY_STOPWORDS:
             continue
         terms.append(raw)
         lemma = _ua_lemma(raw)
@@ -3498,6 +3499,7 @@ def _empty_query_plan(question: str) -> dict:
         "clarification_questions": [],
         "article_hint": None,
         "article_confidence": 0.0,
+        "evidence_subquestions": [],
     }
 
 
@@ -3698,6 +3700,37 @@ def _clean_plan_collections(value, *, limit: int = 8) -> list[str]:
     return [c for c in cols if c in _VALID_PLANNER_COLLECTIONS]
 
 
+def _clean_evidence_subquestions(value, *, limit: int = 5) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        question = re.sub(r"\s+", " ", str(item.get("question") or "")).strip()
+        if not (8 <= len(question) <= 220):
+            continue
+        sid = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(item.get("id") or "").strip().lower())[:48]
+        if not sid:
+            sid = f"q{len(out) + 1}"
+        key = question.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "id": sid,
+            "question": question,
+            "must_find": _clean_plan_list(item.get("must_find"), limit=6, min_len=3, max_len=80),
+            "avoid_if_only": _clean_plan_list(item.get("avoid_if_only"), limit=5, min_len=3, max_len=80),
+            "target_collections": _clean_plan_collections(item.get("target_collections"), limit=5),
+            "source_preferences": _clean_plan_list(item.get("source_preferences"), limit=4, min_len=3, max_len=20),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _merge_unique_strings(*groups: list[str], limit: int) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -3752,6 +3785,16 @@ def _plan_log_summary(plan: dict) -> dict:
         "acts": (plan.get("primary_act_hints") or [])[:4],
         "sources": (plan.get("source_preferences") or [])[:5],
         "collections": (plan.get("target_collections") or [])[:8],
+        "subq": [
+            {
+                "id": sq.get("id"),
+                "q": (sq.get("question") or "")[:80],
+                "must": (sq.get("must_find") or [])[:4],
+                "cols": (sq.get("target_collections") or [])[:4],
+            }
+            for sq in (plan.get("evidence_subquestions") or [])[:5]
+            if isinstance(sq, dict)
+        ],
     }
 
 
@@ -3830,6 +3873,18 @@ def _deterministic_query_plan(question: str) -> dict:
         plan["title_exclude_terms"] = title_exclude_terms
         plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
         plan["search_query"] = " ".join(plan["legal_terms"])[:350] or question[:350]
+    if plan.get("aspects") and not plan.get("evidence_subquestions"):
+        plan["evidence_subquestions"] = [
+            {
+                "id": f"aspect_{idx + 1}",
+                "question": f"{question[:180]} {aspect}"[:220],
+                "must_find": _query_terms(aspect, limit=6),
+                "avoid_if_only": [],
+                "target_collections": plan.get("target_collections", [])[:5],
+                "source_preferences": plan.get("source_preferences", [])[:4],
+            }
+            for idx, aspect in enumerate(plan.get("aspects", [])[:5])
+        ]
     return plan
 
 
@@ -3886,6 +3941,17 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
         ),
         limit=8,
     )
+    _subquestions: list[dict] = []
+    _seen_subq: set[str] = set()
+    for _sq in _clean_evidence_subquestions(extra.get("evidence_subquestions"), limit=5) + _clean_evidence_subquestions(base.get("evidence_subquestions"), limit=5):
+        _sq_key = (_sq.get("question") or "").lower()
+        if not _sq_key or _sq_key in _seen_subq:
+            continue
+        _seen_subq.add(_sq_key)
+        _subquestions.append(_sq)
+        if len(_subquestions) >= 5:
+            break
+    merged["evidence_subquestions"] = _subquestions
     merged["should_compare"] = bool(base.get("should_compare") or extra.get("should_compare"))
     merged["needs_clarification"] = bool(base.get("needs_clarification") or extra.get("needs_clarification"))
     merged["clarification_questions"] = _merge_unique_strings(
@@ -3922,6 +3988,7 @@ def _normalize_query_plan(raw_plan, question: str) -> dict:
     plan["source_preferences"] = _clean_plan_list(raw_plan.get("source_preferences"), limit=6, min_len=4)
     plan["target_collections"] = _clean_plan_collections(raw_plan.get("target_collections"), limit=8)
     plan["clarification_questions"] = _clean_plan_list(raw_plan.get("clarification_questions"), limit=3, min_len=8, max_len=180)
+    plan["evidence_subquestions"] = _clean_evidence_subquestions(raw_plan.get("evidence_subquestions"), limit=5)
     plan["should_compare"] = bool(raw_plan.get("should_compare"))
     plan["needs_clarification"] = bool(raw_plan.get("needs_clarification"))
     _raw_hint = raw_plan.get("article_hint")
@@ -5077,13 +5144,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Залиш null якщо невпевнений, питання охоплює кілька статей, або закон невідомий.\n"
                         "article_confidence:float — впевненість від 0.0 до 1.0 що article_hint правильний. "
                         "Ставь 0.9+ тільки якщо ти майже певний у конкретній статті.\n"
+                        "evidence_subquestions: 1-5 компактних доказових блоків. Кожен блок: id, question, must_find, avoid_if_only, target_collections, source_preferences. "
+                        "Так розкладай складні питання на незалежні пошуки навіть без слів-маркерів на кшталт 'які'. Не відповідай у цьому полі, тільки описуй потрібні докази.\n"
                         "Не заповнюй поля для галочки: якщо сигналу немає, лишай список порожнім. "
                         "Якщо місця мало, пріоритет: target_collections, title_must_terms, title_exclude_terms, title_queries."
                     ),
                 )
                 _planner_cfg = GenerationConfig(
                     temperature=0.0,
-                    max_output_tokens=1600,
+                    max_output_tokens=2200,
                     response_mime_type="application/json",
                 )
                 _planner_prompt = (
@@ -5092,7 +5161,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     "У title_queries постав фрази, які найімовірніше є в назвах законів, кодексів, постанов або порядків. "
                     "У title_must_terms/title_nice_terms/title_exclude_terms дай короткі title-слова для точного пошуку та відсікання чужої теми. "
                     "У target_collections постав точні v2-колекції, а не broad source. "
-                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[],"article_hint":null,"article_confidence":0.0}'
+                    "Також створи evidence_subquestions для кожного незалежного механізму, умови або типу джерела, який треба довести перед відповіддю. "
+                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"evidence_subquestions":[{"id":"","question":"","must_find":[],"avoid_if_only":[],"target_collections":[],"source_preferences":[]}],"should_compare":false,"needs_clarification":false,"clarification_questions":[],"article_hint":null,"article_confidence":0.0}'
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -5100,7 +5170,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         _planner_prompt,
                         generation_config=_planner_cfg,
                     ),
-                    timeout=8.0,
+                    timeout=12.0,
                 )
                 try:
                     _planner_raw = _planner_resp.text or ""
@@ -5159,35 +5229,68 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _title_must_terms = _query_plan.get("title_must_terms", []) if _query_plan else []
         _title_nice_terms = _query_plan.get("title_nice_terms", []) if _query_plan else []
         _title_exclude_terms = _query_plan.get("title_exclude_terms", []) if _query_plan else []
+        _evidence_subquestions = _clean_evidence_subquestions(
+            _query_plan.get("evidence_subquestions", []) if _query_plan else [],
+            limit=5,
+        )
+        _evidence_questions: list[str] = []
+        _evidence_must_terms: list[str] = []
+        _evidence_collections: list[str] = []
+        _evidence_sources: list[str] = []
+        for _sq in _evidence_subquestions:
+            _evidence_questions.append(_sq.get("question", ""))
+            _evidence_must_terms.extend(_sq.get("must_find", []))
+            _evidence_collections.extend(_sq.get("target_collections", []))
+            _evidence_sources.extend(_sq.get("source_preferences", []))
         _source_preferences = [
             str(s).strip().lower()
-            for s in (_query_plan.get("source_preferences", []) if _query_plan else [])
+            for s in _merge_unique_strings(
+                (_query_plan.get("source_preferences", []) if _query_plan else []),
+                _evidence_sources,
+                limit=8,
+            )
             if str(s).strip()
         ]
         _target_collection_hints = _clean_plan_collections(
-            _query_plan.get("target_collections", []) if _query_plan else [],
+            _merge_unique_strings(
+                (_query_plan.get("target_collections", []) if _query_plan else []),
+                _evidence_collections,
+                limit=10,
+            ),
             limit=8,
         )
         _planner_terms = _clean_plan_list(
             (_query_plan.get("legal_terms", []) if _query_plan else [])
-            + (_query_plan.get("aspects", []) if _query_plan else []),
-            limit=22,
+            + (_query_plan.get("aspects", []) if _query_plan else [])
+            + _evidence_questions
+            + _evidence_must_terms,
+            limit=32,
             min_len=2,
         )
         _scoring_terms = _merge_unique_strings(
             (_query_plan.get("aspects", []) if _query_plan else []),
             (_query_plan.get("legal_terms", []) if _query_plan else []),
+            _evidence_questions,
+            _evidence_must_terms,
             _title_queries,
             _act_hints,
-            limit=22,
+            limit=32,
         )
         hypothetical_text = " ".join([
             rewritten_query or "",
             " ".join(_scoring_terms),
         ]).strip()
         logger.info(
-            "QUERY PLAN USED: scoring_terms=%s title_queries=%s title_must=%s title_nice=%s title_exclude=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
+            "QUERY PLAN USED: scoring_terms=%s evidence_subq=%s title_queries=%s title_must=%s title_nice=%s title_exclude=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
             _scoring_terms[:10],
+            [
+                {
+                    "id": _sq.get("id", ""),
+                    "question": _sq.get("question", "")[:120],
+                    "must": (_sq.get("must_find") or [])[:5],
+                }
+                for _sq in _evidence_subquestions
+            ],
             _title_queries[:6],
             _title_must_terms[:5],
             _title_nice_terms[:6],
@@ -5261,7 +5364,17 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
 
     rw_vector = None
-    _aspects = (_query_plan.get("aspects", []) if _query_plan else [])[:4]
+    _evidence_aspect_texts = []
+    for _sq in _evidence_subquestions:
+        _evidence_aspect_texts.append(" ".join([
+            _sq.get("question", ""),
+            " ".join(_sq.get("must_find", [])[:8]),
+        ]).strip())
+    _aspects = _merge_unique_strings(
+        (_query_plan.get("aspects", []) if _query_plan else []),
+        _evidence_aspect_texts,
+        limit=6,
+    )
     try:
         if rewritten_query and _aspects:
             # Паралельно: embed rewrite + embed всіх аспектів + search оригінал
@@ -5956,7 +6069,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     _aspect_protected: list[dict] = []
     _aspect_seen_docs: set[tuple[str, str]] = set()
-    _plan_aspects = _query_plan.get("aspects", []) if _query_plan else []
+    _plan_aspects = _merge_unique_strings(
+        (_query_plan.get("aspects", []) if _query_plan else []),
+        _evidence_aspect_texts,
+        limit=8,
+    )
     for _aspect in _plan_aspects[:6]:
         _aspect_terms = _query_terms(_aspect, limit=8)
         if not _aspect_terms:
