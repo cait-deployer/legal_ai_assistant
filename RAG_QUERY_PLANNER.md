@@ -40,6 +40,7 @@ The planner returns a normalized dict with these fields:
   "title_queries": ["string"],
   "primary_act_hints": ["string"],
   "source_preferences": ["string"],
+  "target_collections": ["string"],
   "should_compare": false,
   "needs_clarification": false,
   "clarification_questions": ["string"]
@@ -116,6 +117,31 @@ If the planner suggests an act title, that title is only a search hint. The titl
 - Used as a small source-family prior, not as a hard filter.
 - Supported broad hints include `rada`, `kmu`, `zir`, `court`, `wiki` and `mod`.
 
+`target_collections`
+
+- Used as exact V2 Qdrant collection hints for the first retrieval pass.
+- This is how the planner avoids saying only `rada` when the real choice is a
+  narrower Rada collection such as `rada_finance_v2`, `rada_labor_v2` or
+  `rada_industry_v2`.
+- Values are validated against the production whitelist. Unknown collection
+  names are discarded.
+- Low-confidence retrieval still expands back to the allowed plan collections,
+  so a bad hint should not permanently hide useful documents.
+- For Rada categories the planner sees the h-code map:
+  - `h2`, `h3`, `h26`, `h23` -> `rada_finance_v2`;
+  - `h4` -> `rada_state_v2`;
+  - `h27` -> `rada_personnel_v2`;
+  - `h22`, `h30`, `h1` -> `rada_court_v2`;
+  - `h11` -> `rada_intl_v2`;
+  - `h19`, `h20` -> `rada_labor_v2`;
+  - `h5`, `h16`, `h13` -> `rada_civil_v2`;
+  - `h25` -> `rada_criminal_v2`;
+  - `h8`, `h10`, `h31` -> `rada_admin_v2`;
+  - `h6`, `h21` -> `rada_housing_v2`;
+  - `h9`, `h18` -> `rada_land_v2`;
+  - `h7`, `h17`, `h15` -> `rada_industry_v2`;
+  - `h12`, `h14`, `h24`, `h28`, `h29`, `h32` -> `rada_other_v2`.
+
 ## Dynamic Primary-Act Discovery
 
 The backend does not pin hardcoded law ids.
@@ -162,6 +188,8 @@ This is important because many Ukrainian legal queries depend on short abbreviat
 Expected logs after this change:
 
 - `QUERY PLAN: ...`
+- `QUERY PLAN USED: ... target_collections=[...]`
+- `COLLECTION SCOPE: hints=[...] prefs=[...] target=[...]`
 - `PRIMARY ACT DISCOVERY: ...`
 - `ASPECT COVERAGE: ...` when aspects produce protected candidates.
 - `FINAL RESULTS: ...`

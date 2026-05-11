@@ -281,6 +281,7 @@ function ChatPage() {
     const reviewTrigger = useReviewTrigger();
 
     const scrollRef = useRef<HTMLDivElement>(null);
+    const autoScrollRef = useRef(true);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const sessionStartRef = useRef<number>(Date.now());
     const newChatInProgressRef = useRef(false);
@@ -362,9 +363,30 @@ function ChatPage() {
             .catch(() => { });
     }, []);
 
+    const isNearBottom = useCallback((el: HTMLDivElement) => {
+        return el.scrollHeight - el.scrollTop - el.clientHeight <= 120;
+    }, []);
+
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTo({ top: el.scrollHeight, behavior });
+    }, []);
+
+    const handleChatScroll = useCallback(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        autoScrollRef.current = isNearBottom(el);
+    }, [isNearBottom]);
+
     useEffect(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }, [messages, isLoading, loadingStatus]);
+        if (autoScrollRef.current) scrollToBottom('auto');
+    }, [messages, isLoading, loadingStatus, scrollToBottom]);
+
+    useEffect(() => {
+        autoScrollRef.current = true;
+        requestAnimationFrame(() => scrollToBottom('auto'));
+    }, [currentChatId, scrollToBottom]);
 
     useEffect(() => {
         if (!isLoading) { setLoadingPhase(0); return; }
@@ -421,6 +443,7 @@ function ChatPage() {
         setMessages([]);
         setIsFirstMessage(true);
         setInput('');
+        autoScrollRef.current = true;
         setCurrentChatId(null);
         router.push('/chat');
     };
@@ -479,6 +502,7 @@ function ChatPage() {
         if (!text.trim() || isLoading || limitExceeded) return;
         const questionText = text.trim();
         setInput('');
+        autoScrollRef.current = true;
         setLoadingStatus('Готую запит...');
 
         setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: questionText }]);
@@ -738,7 +762,7 @@ function ChatPage() {
                 </header>
 
                 {/* Chat Area */}
-                <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-8 scroll-smooth">
+                <div ref={scrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-8 scroll-smooth">
                     <div className="max-w-5xl mx-auto">
                         {historyLoading ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 pt-20">

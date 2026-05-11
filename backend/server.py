@@ -3489,6 +3489,7 @@ def _empty_query_plan(question: str) -> dict:
         "title_queries": [],
         "primary_act_hints": [],
         "source_preferences": [],
+        "target_collections": [],
         "should_compare": False,
         "needs_clarification": False,
         "clarification_questions": [],
@@ -3566,6 +3567,88 @@ _QUERY_TITLE_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...
 )
 
 
+_VALID_PLANNER_COLLECTIONS: set[str] = {
+    "rada_finance_v2",
+    "rada_state_v2",
+    "rada_personnel_v2",
+    "rada_court_v2",
+    "rada_intl_v2",
+    "rada_labor_v2",
+    "rada_civil_v2",
+    "rada_criminal_v2",
+    "rada_admin_v2",
+    "rada_housing_v2",
+    "rada_land_v2",
+    "rada_industry_v2",
+    "rada_other_v2",
+    "laws_supreme_v2",
+    "laws_wiki_v2",
+    "laws_ccu_v2",
+    "laws_positions_v2",
+    "laws_kmu_v2",
+    "laws_mod_v2",
+    "laws_zir_v2",
+}
+
+
+_RADA_COLLECTION_GUIDE = (
+    "Rada category-to-collection map: "
+    "h2 banks/finance/budget, h3 accounting/tax/audit/statistics, h26 securities, h23 customs/ZED -> rada_finance_v2; "
+    "h4 state/public order/citizenship -> rada_state_v2; "
+    "h27 personnel/awards -> rada_personnel_v2; "
+    "h22 courts/prosecution/justice, h30 court practice, h1 commercial procedure -> rada_court_v2; "
+    "h11 international relations -> rada_intl_v2; "
+    "h19 labor/employment, h20 social security/insurance -> rada_labor_v2; "
+    "h5 civil/civil procedure, h16 health/family/youth/sport/tourism, h13 notary/advocacy -> rada_civil_v2; "
+    "h25 criminal/criminal procedure/enforcement -> rada_criminal_v2; "
+    "h8 administrative liability, h10 licensing/certification/patents/metrology, h31 economic regulation principles -> rada_admin_v2; "
+    "h6 housing/utility, h21 construction/architecture -> rada_housing_v2; "
+    "h9 natural resources/land/environment, h18 agriculture/agro -> rada_land_v2; "
+    "h7 transport/communications/information, h17 industry/energy, h15 enterprises/business/investment -> rada_industry_v2; "
+    "h12 science/education/culture, h14 defense/security/armed forces, h24 trade/food service/consumer services, "
+    "h28 regional law, h29 draft/amendment acts, h32 nuclear/Chornobyl -> rada_other_v2. "
+    "Other sources: KMU resolutions/orders -> laws_kmu_v2; tax Q&A -> laws_zir_v2; MOD orders -> laws_mod_v2; "
+    "Supreme Court reviews -> laws_supreme_v2; legal positions -> laws_positions_v2; CCU -> laws_ccu_v2; wiki background -> laws_wiki_v2."
+)
+
+
+_QUERY_COLLECTION_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("податков", "єдиний податок", "пдв", "пдфо", "прибуток", "фоп", "пільг", "льгот"),
+        ("rada_finance_v2", "laws_zir_v2"),
+    ),
+    (
+        ("компенсац", "відшкодуван", "витрат", "державна підтримка", "підтримк", "порядок використання коштів"),
+        ("laws_kmu_v2", "rada_finance_v2", "rada_industry_v2"),
+    ),
+    (
+        ("критично", "важлив", "бронюван", "бронь", "мобілізац", "особливий період"),
+        ("laws_kmu_v2", "rada_industry_v2", "rada_labor_v2"),
+    ),
+    (
+        ("харч", "продукт", "корм", "фітосанітар", "ветеринар", "безпечності"),
+        ("laws_kmu_v2", "rada_other_v2", "rada_industry_v2", "rada_land_v2"),
+    ),
+    (
+        ("тов", "ооо", "обмеженою відповідальністю", "учасники товариства", "статутний капітал"),
+        ("rada_industry_v2", "rada_civil_v2", "rada_admin_v2"),
+    ),
+    (
+        ("працівник", "найман", "трудов", "кзпп", "цпд", "договір підряду"),
+        ("rada_labor_v2", "rada_civil_v2"),
+    ),
+    (
+        ("штраф", "адмін", "адміністративн", "купап", "відповідальність"),
+        ("rada_admin_v2", "rada_court_v2"),
+    ),
+)
+
+
+def _clean_plan_collections(value, *, limit: int = 8) -> list[str]:
+    cols = _clean_plan_list(value, limit=limit, min_len=6, max_len=40)
+    return [c for c in cols if c in _VALID_PLANNER_COLLECTIONS]
+
+
 def _merge_unique_strings(*groups: list[str], limit: int) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -3604,7 +3687,7 @@ def _scoring_query_text(
 
 def _plan_log_summary(plan: dict) -> dict:
     plan = plan or {}
-    usable = any(plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "primary_act_hints", "source_preferences"))
+    usable = any(plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "primary_act_hints", "source_preferences", "target_collections"))
     return {
         "usable": usable,
         "search": (plan.get("search_query") or "")[:120],
@@ -3613,6 +3696,7 @@ def _plan_log_summary(plan: dict) -> dict:
         "titles": (plan.get("title_queries") or [])[:5],
         "acts": (plan.get("primary_act_hints") or [])[:4],
         "sources": (plan.get("source_preferences") or [])[:5],
+        "collections": (plan.get("target_collections") or [])[:8],
     }
 
 
@@ -3621,6 +3705,7 @@ def _deterministic_query_plan(question: str) -> dict:
     q = (question or "").lower()
     legal_terms: list[str] = []
     aspects: list[str] = []
+    target_collections: list[str] = []
     for triggers, terms, rule_aspects in _QUERY_ALIAS_RULES:
         if any(trigger in q for trigger in triggers):
             legal_terms.extend(terms)
@@ -3632,6 +3717,9 @@ def _deterministic_query_plan(question: str) -> dict:
             title_queries.extend(titles)
             source_preferences.extend(sources)
             aspects.extend(rule_aspects)
+    for triggers, collections in _QUERY_COLLECTION_RULES:
+        if any(trigger in q for trigger in triggers):
+            target_collections.extend(collections)
 
     compare_markers = (" чи ", " або ", " vs ", " versus ", "краще", "лучше", "обрати", "выбрать", "порівня", "сравн")
     should_compare = any(marker in f" {q} " for marker in compare_markers)
@@ -3640,11 +3728,13 @@ def _deterministic_query_plan(question: str) -> dict:
 
     legal_terms = _merge_unique_strings(legal_terms, limit=18)
     aspects = _merge_unique_strings(aspects, limit=8)
+    target_collections = _merge_unique_strings(target_collections, limit=8)
     if legal_terms:
         plan["legal_terms"] = legal_terms
         plan["aspects"] = aspects
         plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
         plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
+        plan["target_collections"] = target_collections
         plan["search_query"] = " ".join(_merge_unique_strings(_query_terms(question, limit=12), legal_terms, aspects, limit=28))[:350]
         plan["should_compare"] = should_compare
         plan["needs_clarification"] = should_compare
@@ -3657,9 +3747,14 @@ def _deterministic_query_plan(question: str) -> dict:
     elif title_queries:
         plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
         plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
+        plan["target_collections"] = target_collections
         plan["aspects"] = aspects
         plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
         plan["search_query"] = " ".join(_merge_unique_strings(plan["legal_terms"], plan["aspects"], limit=24))[:350]
+    elif target_collections:
+        plan["target_collections"] = target_collections
+        plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
+        plan["search_query"] = " ".join(plan["legal_terms"])[:350] or question[:350]
     return plan
 
 
@@ -3693,6 +3788,14 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
         base.get("source_preferences", []),
         limit=6,
     )
+    merged["target_collections"] = _clean_plan_collections(
+        _merge_unique_strings(
+            extra.get("target_collections", []),
+            base.get("target_collections", []),
+            limit=8,
+        ),
+        limit=8,
+    )
     merged["should_compare"] = bool(base.get("should_compare") or extra.get("should_compare"))
     merged["needs_clarification"] = bool(base.get("needs_clarification") or extra.get("needs_clarification"))
     merged["clarification_questions"] = _merge_unique_strings(
@@ -3721,6 +3824,7 @@ def _normalize_query_plan(raw_plan, question: str) -> dict:
     plan["title_queries"] = _clean_plan_list(raw_plan.get("title_queries"), limit=8, min_len=5)
     plan["primary_act_hints"] = _clean_plan_list(raw_plan.get("primary_act_hints"), limit=5, min_len=6)
     plan["source_preferences"] = _clean_plan_list(raw_plan.get("source_preferences"), limit=6, min_len=4)
+    plan["target_collections"] = _clean_plan_collections(raw_plan.get("target_collections"), limit=8)
     plan["clarification_questions"] = _clean_plan_list(raw_plan.get("clarification_questions"), limit=3, min_len=8, max_len=180)
     plan["should_compare"] = bool(raw_plan.get("should_compare"))
     plan["needs_clarification"] = bool(raw_plan.get("needs_clarification"))
@@ -3752,6 +3856,10 @@ def _partial_query_plan(raw: str, question: str) -> dict:
     plan["title_queries"] = _partial_json_list_values(raw, "title_queries", limit=8, min_len=5)
     plan["primary_act_hints"] = _partial_json_list_values(raw, "primary_act_hints", limit=5, min_len=6)
     plan["source_preferences"] = _partial_json_list_values(raw, "source_preferences", limit=6, min_len=3)
+    plan["target_collections"] = _clean_plan_collections(
+        _partial_json_list_values(raw, "target_collections", limit=8, min_len=6, max_len=40),
+        limit=8,
+    )
     plan["clarification_questions"] = _partial_json_list_values(raw, "clarification_questions", limit=3, min_len=8, max_len=180)
     plan["should_compare"] = bool(re.search(r'"should_compare"\s*:\s*true', raw or "", re.I))
     plan["needs_clarification"] = bool(re.search(r'"needs_clarification"\s*:\s*true', raw or "", re.I))
@@ -4712,7 +4820,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         async def _plan_query(q: str) -> dict:
             """LLM search planner: hypotheses only, never a legal source."""
             _base_plan = _deterministic_query_plan(q)
-            if any(_base_plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "source_preferences")):
+            if any(_base_plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "source_preferences", "target_collections")):
                 logger.info("QUERY PLAN BASE: %s", _plan_log_summary(_base_plan))
             if not settings_cache.get_bool("query_planner_enabled", True):
                 logger.info("QUERY PLAN FINAL: source=base planner_disabled %s", _plan_log_summary(_base_plan))
@@ -4737,8 +4845,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "primary_act_hints:string[] — тільки загальновідомі назви актів або дуже впізнавані фрагменти назв; "
                         "якщо не впевнений у точній назві, дай фрагмент без номера і дати.\n"
                         "source_preferences:string[] — broad джерела: rada, kmu, zir, court, wiki, mod.\n"
+                        "target_collections:string[] — точні Qdrant v2 колекції, де варто шукати. "
+                        "Не пиши просто rada. Для Ради обери конкретні rada_*_v2 за картою h-категорій. "
+                        f"{_RADA_COLLECTION_GUIDE}\n"
                         "should_compare:boolean, needs_clarification:boolean, clarification_questions:string[]. "
-                        "Якщо місця мало, пріоритет: title_queries, aspects, legal_terms."
+                        "Якщо місця мало, пріоритет: target_collections, title_queries, aspects, legal_terms."
                     ),
                 )
                 try:
@@ -4759,7 +4870,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     f"Питання: {q[:600]}\n\n"
                     "Поверни компактний JSON-план пошуку. Для кожного правового механізму з питання додай окремий aspect. "
                     "У title_queries постав фрази, які найімовірніше є в назвах законів, кодексів, постанов або порядків. "
-                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"primary_act_hints":[],"source_preferences":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[]}'
+                    "У target_collections постав точні v2-колекції, а не broad source. "
+                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[]}'
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -4829,6 +4941,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             for s in (_query_plan.get("source_preferences", []) if _query_plan else [])
             if str(s).strip()
         ]
+        _target_collection_hints = _clean_plan_collections(
+            _query_plan.get("target_collections", []) if _query_plan else [],
+            limit=8,
+        )
         _planner_terms = _clean_plan_list(
             (_query_plan.get("legal_terms", []) if _query_plan else [])
             + (_query_plan.get("aspects", []) if _query_plan else []),
@@ -4847,10 +4963,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             " ".join(_scoring_terms),
         ]).strip()
         logger.info(
-            "QUERY PLAN USED: scoring_terms=%s title_queries=%s source_prefs=%s act_hints=%s scoring_query=%r",
+            "QUERY PLAN USED: scoring_terms=%s title_queries=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
             _scoring_terms[:10],
             _title_queries[:6],
             _source_preferences[:6],
+            _target_collection_hints[:8],
             _act_hints[:5],
             _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)[:240],
         )
@@ -4886,14 +5003,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     else:
         plan_collections = ALL_V2_COLLECTIONS
 
-    # Centroid router вимкнено, але planner/fallback source_preferences дають м'який
+    # Centroid router вимкнено, але planner/fallback collection hints дають м'який
     # scoped search для першого проходу. Якщо сигнал слабкий, low-confidence нижче
     # розширить пошук назад у дозволені тарифом колекції.
+    hinted_collections = [c for c in _target_collection_hints if c in plan_collections]
     preferred_collections = _collections_for_source_preferences(plan_collections, _source_preferences)
-    target_collections = preferred_collections or plan_collections
-    if preferred_collections:
+    if hinted_collections:
+        non_rada_preferred = [c for c in preferred_collections if not c.startswith("rada_")]
+        target_collections = list(dict.fromkeys(hinted_collections + non_rada_preferred))
+    else:
+        target_collections = preferred_collections or plan_collections
+    if hinted_collections or preferred_collections:
         logger.info(
-            "SOURCE SCOPE: prefs=%s target=%s fallback_total=%d",
+            "COLLECTION SCOPE: hints=%s prefs=%s target=%s fallback_total=%d",
+            hinted_collections,
             _source_preferences,
             target_collections,
             len(plan_collections),

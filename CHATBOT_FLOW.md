@@ -64,7 +64,7 @@ flowchart TD
 4. Resolve follow-up questions using recent history.
 5. Run query embedding and the AI query planner in parallel.
 6. Convert plan source features into allowed V2 collections.
-7. Search all allowed V2 collections. The old centroid router is disabled.
+7. Apply planner `target_collections` first, then broad source preferences, then allowed collections as fallback. The old centroid router is disabled.
 8. Run vector search for the original question and, when the planner produced a distinct `search_query`, for that planned search query.
 9. Merge by `(law_id, chunk_index)`.
 10. Apply low-confidence widening when raw score is weak.
@@ -98,6 +98,7 @@ The planner returns:
 - `title_queries`: short title-search phrases that should be tried before conversational words;
 - `primary_act_hints`: possible act titles for title search only;
 - `source_preferences`: broad source-type hints used as a small scoring prior, not a hard filter;
+- `target_collections`: exact V2 collection hints such as `rada_finance_v2`, `rada_industry_v2` or `laws_kmu_v2`;
 - `should_compare`;
 - `needs_clarification`;
 - `clarification_questions`.
