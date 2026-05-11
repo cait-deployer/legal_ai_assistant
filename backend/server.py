@@ -4225,6 +4225,25 @@ def _strip_answer_done_marker(answer: str) -> str:
     return stripped.strip()
 
 
+def _deduplicate_answer_lines(answer: str) -> str:
+    """Collapse consecutive duplicate lines — fixes Gemini repetition-loop artifacts."""
+    if not answer:
+        return answer
+    lines = answer.split("\n")
+    if len(lines) < 3:
+        return answer
+    result: list[str] = []
+    prev_stripped: str | None = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped and stripped == prev_stripped:
+            continue
+        result.append(line)
+        if stripped:
+            prev_stripped = stripped
+    return "\n".join(result)
+
+
 def _answer_looks_incomplete(answer: str) -> bool:
     text = (answer or "").strip()
     if len(text) < 20:
@@ -4522,7 +4541,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 )
                 return plan
             except Exception as _planner_err:
-                logger.info("QUERY PLAN failed: %s", _planner_err)
+                logger.warning("QUERY PLAN failed: %s | raw=%r", _planner_err, (_planner_raw or "")[:300])
                 return _empty_query_plan(q)
 
         # Embed original query + build search plan in parallel.
@@ -6281,7 +6300,7 @@ async def ask(body: AskRequest):
         pass
 
     answer = await _complete_answer_if_needed(pipe, answer, finish_reason)
-    answer = _strip_answer_done_marker(answer)
+    answer = _deduplicate_answer_lines(_strip_answer_done_marker(answer))
 
     try:
         classification = _json.loads(clf_response.text)
@@ -6520,7 +6539,7 @@ async def ask_stream(body: AskRequest):
             except Exception:
                 cont_finish_reason = None
 
-        full_answer = _strip_answer_done_marker(completed_answer)
+        full_answer = _deduplicate_answer_lines(_strip_answer_done_marker(completed_answer))
 
         try:
             clf_response = await clf_task
