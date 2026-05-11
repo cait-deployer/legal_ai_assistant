@@ -3821,6 +3821,9 @@ def _deterministic_query_plan(question: str) -> dict:
     for triggers, collections in _QUERY_COLLECTION_RULES:
         if any(trigger in q for trigger in triggers):
             target_collections.extend(collections)
+    _semantic_cols, _semantic_prefs = _semantic_collection_hints(question, plan)
+    target_collections.extend(_semantic_cols)
+    source_preferences.extend(_semantic_prefs)
     for triggers, must_terms, nice_terms, exclude_terms in _QUERY_TITLE_CONSTRAINT_RULES:
         if any(trigger in q for trigger in triggers):
             title_must_terms.extend(must_terms)
@@ -3967,6 +3970,30 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
     return merged
 
 
+def _semantic_collection_hints(question: str, plan: dict | None = None) -> tuple[list[str], list[str]]:
+    text = " ".join([
+        question or "",
+        " ".join((plan or {}).get("legal_terms") or []),
+        " ".join((plan or {}).get("aspects") or []),
+        " ".join((plan or {}).get("title_queries") or []),
+    ]).lower()
+    cols: list[str] = []
+    prefs: list[str] = []
+    if any(t in text for t in ("влк", "військово-лікар", "відстроч", "мобілізац", "військовий облік", "тцк", "призов")):
+        cols.extend(["rada_state_v2", "rada_other_v2", "laws_mod_v2", "laws_kmu_v2"])
+        prefs.extend(["rada", "mod", "kmu"])
+    if any(t in text for t in ("сільськогосподарськ", "земельн", "землі", "ділянк")) and any(t in text for t in ("продаж", "відчуж", "набувати", "право власності", "обіг земель")):
+        cols.extend(["rada_land_v2", "rada_state_v2", "laws_kmu_v2"])
+        prefs.extend(["rada", "kmu"])
+    if any(t in text for t in ("впо", "внутрішньо переміщ", "працевлаштуван")) and any(t in text for t in ("компенсац", "роботодав", "витрат")):
+        cols.extend(["laws_kmu_v2", "rada_labor_v2", "rada_finance_v2", "laws_zir_v2"])
+        prefs.extend(["kmu", "rada", "zir"])
+    if any(t in text for t in ("фоп", "тов", "дія сіті", "it", "іт", "айті", "команда")) and any(t in text for t in ("обрати", "вибір", "краще", "рекомендац", "реєстрац")):
+        cols.extend(["rada_finance_v2", "rada_industry_v2", "rada_civil_v2", "laws_zir_v2", "laws_wiki_v2"])
+        prefs.extend(["rada", "zir", "wiki"])
+    return _clean_plan_collections(cols, limit=8), _clean_plan_list(prefs, limit=6, min_len=3, max_len=20)
+
+
 def _normalize_query_plan(raw_plan, question: str) -> dict:
     plan = _empty_query_plan(question)
     if not isinstance(raw_plan, dict):
@@ -4018,6 +4045,30 @@ def _partial_json_list_values(raw: str, key: str, *, limit: int, min_len: int = 
     return _clean_plan_list(values, limit=limit, min_len=min_len, max_len=max_len)
 
 
+def _partial_evidence_subquestions(raw: str, *, limit: int = 5) -> list[dict]:
+    match = re.search(r'"evidence_subquestions"\s*:\s*\[(.*?)(?:\]\s*,\s*"(?:should_compare|needs_clarification)|\]\s*\})', raw or "", re.DOTALL)
+    if not match:
+        return []
+    block = match.group(1)
+    items: list[dict] = []
+    for obj in re.finditer(r"\{(.*?)\}", block, re.DOTALL):
+        chunk = obj.group(1)
+        question = _partial_json_string_value("{" + chunk + "}", "question")
+        if not question:
+            continue
+        items.append({
+            "id": _partial_json_string_value("{" + chunk + "}", "id") or f"q{len(items) + 1}",
+            "question": question,
+            "must_find": _partial_json_list_values("{" + chunk + "}", "must_find", limit=6, min_len=2, max_len=80),
+            "avoid_if_only": _partial_json_list_values("{" + chunk + "}", "avoid_if_only", limit=5, min_len=3, max_len=80),
+            "target_collections": _partial_json_list_values("{" + chunk + "}", "target_collections", limit=5, min_len=6, max_len=40),
+            "source_preferences": _partial_json_list_values("{" + chunk + "}", "source_preferences", limit=4, min_len=3, max_len=20),
+        })
+        if len(items) >= limit:
+            break
+    return _clean_evidence_subquestions(items, limit=limit)
+
+
 def _partial_query_plan(raw: str, question: str) -> dict:
     plan = _empty_query_plan(question)
     search_query = _partial_json_string_value(raw, "search_query")
@@ -4035,6 +4086,7 @@ def _partial_query_plan(raw: str, question: str) -> dict:
         _partial_json_list_values(raw, "target_collections", limit=8, min_len=6, max_len=40),
         limit=8,
     )
+    plan["evidence_subquestions"] = _partial_evidence_subquestions(raw, limit=5)
     plan["clarification_questions"] = _partial_json_list_values(raw, "clarification_questions", limit=3, min_len=8, max_len=180)
     plan["should_compare"] = bool(re.search(r'"should_compare"\s*:\s*true', raw or "", re.I))
     plan["needs_clarification"] = bool(re.search(r'"needs_clarification"\s*:\s*true', raw or "", re.I))
@@ -4339,6 +4391,42 @@ def _directness_penalty(content: str, terms: list[str]) -> float:
     return 0.12 if hits == 1 else 0.20
 
 
+def _result_avoid_topic_penalty(result: dict, avoid_terms: list[str], query_text: str) -> float:
+    cleaned = [
+        term.strip().lower()
+        for term in avoid_terms
+        if isinstance(term, str) and len(term.strip()) >= 3
+    ]
+    if not cleaned:
+        return 0.0
+    query = (query_text or "").lower()
+    meta = result.get("out_metadata", {}) or {}
+    title = f"{meta.get('source') or ''} {meta.get('title') or ''}".lower()
+    content = (result.get("out_content") or "").lower()[:1800]
+    haystack = f"{title} {content}"
+    hits = [term for term in cleaned if term in haystack and term not in query]
+    if not hits:
+        return 0.0
+    title_hits = [term for term in hits if term in title]
+    return min(0.42, 0.14 * len(hits) + (0.08 if title_hits else 0.0))
+
+
+def _apply_avoid_topic_penalties(results: list[dict], avoid_terms: list[str], query_text: str) -> None:
+    if not results or not avoid_terms:
+        return
+    penalized: list[str] = []
+    for r in results:
+        penalty = _result_avoid_topic_penalty(r, avoid_terms, query_text)
+        if penalty <= 0:
+            continue
+        r["_avoid_topic_penalty"] = max(float(r.get("_avoid_topic_penalty") or 0.0), penalty)
+        r["similarity"] = max(0.0, float(r.get("similarity", 0.0) or 0.0) - penalty)
+        meta = r.get("out_metadata", {}) or {}
+        penalized.append(f"{r.get('_collection')}:{meta.get('law_id','?')}:p={penalty:.2f}")
+    if penalized:
+        logger.info("AVOID TOPIC PENALTY: %d chunks penalized by %s: %s", len(penalized), avoid_terms[:8], penalized[:10])
+
+
 _QUERY_DOMAIN_GUARDS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
     (
         "food_vs_energy",
@@ -4448,6 +4536,7 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
         - source_penalty
         - quality_penalty
         - directness_penalty
+        - float(result.get("_avoid_topic_penalty") or 0.0)
     )
 
     result["_answerability"] = {
@@ -4460,6 +4549,7 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
         "recency": round(_recency_score(result), 3),
         "directness": round(directness, 3),
         "directness_penalty": round(directness_penalty, 3),
+        "avoid_topic_penalty": round(float(result.get("_avoid_topic_penalty") or 0.0), 3),
     }
     return result["_answerability"]
 
@@ -4561,6 +4651,7 @@ def _strict_context_score(result: dict, query_text: str, terms: list[str] | None
         score -= 0.04
     if _is_must_have_primary_act(result):
         score += 0.42
+    score -= float(result.get("_avoid_topic_penalty") or 0.0)
     if (result.get("out_metadata") or {}).get("rada_is_dead"):
         score -= 0.40
     return score
@@ -4593,6 +4684,7 @@ def _squeeze_context_results(
         ans = r.get("_answerability") or _answerability_score(r, query_text, terms)
         protected = bool(
             r.get("_full_law") or r.get("_doc_expansion")
+            or r.get("_article_hint") or r.get("_evidence_coverage")
             or _is_must_have_primary_act(r) or r.get("_aspect_coverage")
         )
         if not protected and float(ans.get("coverage", 0.0) or 0.0) < min_cov:
@@ -4632,10 +4724,10 @@ def _squeeze_context_results(
     # потребують 4-5 чанків з однієї колекції — при cap=2 squeeze видає out=4 замість target=8.
     regular_col_cap = max(2, target // 2)
 
-    # Aspect-protected docs get first pick — they were selected for distinct query
-    # aspects and must not be crowded out by other high-scoring docs from one collection.
-    _aspect_items = [(s, r) for s, r in scored if r.get("_aspect_coverage")]
-    _regular_items = [(s, r) for s, r in scored if not r.get("_aspect_coverage")]
+    # Evidence/aspect-protected docs get first pick — they were selected for distinct
+    # query needs and must not be crowded out by other high-scoring docs.
+    _aspect_items = [(s, r) for s, r in scored if r.get("_evidence_coverage") or r.get("_aspect_coverage")]
+    _regular_items = [(s, r) for s, r in scored if not (r.get("_evidence_coverage") or r.get("_aspect_coverage"))]
 
     def _col_bucket(col: str) -> str:
         if col == "laws_zir_v2":
@@ -4688,7 +4780,7 @@ def _squeeze_context_results(
         if bucket == "regular" and col_counts.get(col, 0) >= regular_col_cap:
             continue
         doc_key = (col, r["out_metadata"].get("law_id", ""))
-        doc_cap = 3 if _is_must_have_primary_act(r) else (2 if r.get("_full_law") else 1)
+        doc_cap = 6 if r.get("_article_hint") else (4 if _is_must_have_primary_act(r) else (3 if r.get("_full_law") else 1))
         if per_doc.get(doc_key, 0) >= doc_cap:
             continue
         picked.append(r)
@@ -4738,7 +4830,10 @@ def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int
         # Keep low-coverage chunks only when they are protected structural chunks
         # from a selected document, or when we are in weak-search mode and need
         # Gemini to explain what was found.
-        protected = bool(r.get("_full_law") or r.get("_doc_expansion") or _is_must_have_primary_act(r))
+        protected = bool(
+            r.get("_full_law") or r.get("_doc_expansion") or r.get("_article_hint")
+            or r.get("_evidence_coverage") or _is_must_have_primary_act(r)
+        )
         if not keep_weak and coverage < 0.12 and not protected:
             continue
         scored.append((ans["score"], r))
@@ -4766,7 +4861,7 @@ def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int
                 continue
             wiki_count += 1
         doc_key = (col, r["out_metadata"].get("law_id", ""))
-        doc_cap = 4 if r.get("_full_law") else 2
+        doc_cap = 6 if r.get("_article_hint") else (4 if r.get("_full_law") else 2)
         if per_doc.get(doc_key, 0) >= doc_cap:
             continue
         picked.append(r)
@@ -5146,6 +5241,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Ставь 0.9+ тільки якщо ти майже певний у конкретній статті.\n"
                         "evidence_subquestions: 1-5 компактних доказових блоків. Кожен блок: id, question, must_find, avoid_if_only, target_collections, source_preferences. "
                         "Так розкладай складні питання на незалежні пошуки навіть без слів-маркерів на кшталт 'які'. Не відповідай у цьому полі, тільки описуй потрібні докази.\n"
+                        "avoid_if_only:string[] — суміжні теми, які схожі за словами, але не мають бути основою відповіді без прямого запиту користувача "
+                        "(наприклад: право користування/оренда, якщо питають про право власності; трудові гарантії, якщо питають про ВЛК).\n"
                         "Не заповнюй поля для галочки: якщо сигналу немає, лишай список порожнім. "
                         "Якщо місця мало, пріоритет: target_collections, title_must_terms, title_exclude_terms, title_queries."
                     ),
@@ -5162,6 +5259,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     "У title_must_terms/title_nice_terms/title_exclude_terms дай короткі title-слова для точного пошуку та відсікання чужої теми. "
                     "У target_collections постав точні v2-колекції, а не broad source. "
                     "Також створи evidence_subquestions для кожного незалежного механізму, умови або типу джерела, який треба довести перед відповіддю. "
+                    "Якщо користувач просить 'як отримати', 'умови', 'компенсації', 'пільги' або 'критично важливе', роби окремі evidence_subquestions для кожної з цих частин, якщо вони є у питанні. "
+                    "Якщо формулювання може з'їхати у суміжну тему, заповни avoid_if_only для цієї пастки. "
                     'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"evidence_subquestions":[{"id":"","question":"","must_find":[],"avoid_if_only":[],"target_collections":[],"source_preferences":[]}],"should_compare":false,"needs_clarification":false,"clarification_questions":[],"article_hint":null,"article_confidence":0.0}'
                 )
                 _planner_resp = await _asyncio.wait_for(
@@ -5242,6 +5341,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _evidence_must_terms.extend(_sq.get("must_find", []))
             _evidence_collections.extend(_sq.get("target_collections", []))
             _evidence_sources.extend(_sq.get("source_preferences", []))
+        _semantic_cols, _semantic_sources = _semantic_collection_hints(search_question, _query_plan)
+        _evidence_collections.extend(_semantic_cols)
+        _evidence_sources.extend(_semantic_sources)
+        _avoid_topic_terms = _merge_unique_strings(
+            _title_exclude_terms,
+            *[(_sq.get("avoid_if_only") or []) for _sq in _evidence_subquestions],
+            limit=16,
+        )
         _source_preferences = [
             str(s).strip().lower()
             for s in _merge_unique_strings(
@@ -5639,6 +5746,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                             _art_map.setdefault(_active_art, []).append(_fc)
                     _hint_chunks = _art_map.get(_target_article, [])
                     if len(_hint_chunks) >= 2:
+                        for _hc in _hint_chunks:
+                            _hc["_article_hint"] = True
+                            _hc["_full_article_window"] = True
                         _all_fl_chunks = _hint_chunks
                         _article_filtered = True
                         logger.info(
@@ -5673,8 +5783,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     )
                     if _key in _expanded_keys:
                         continue
+                    _chunk["_full_law"] = True
                     _chunk["_docset_rank"] = _doc_rank
                     _chunk["_docset_overlap"] = _seed_info["overlap"]
+                    if _article_filtered:
+                        _chunk["_article_hint"] = True
+                        _chunk["_full_article_window"] = True
                     results.append(_chunk)
                     _expanded_keys.add(_key)
                     _expanded_added += 1
@@ -6041,6 +6155,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     except Exception as _pa_err:
         logger.warning("Primary act discovery error: %s", _pa_err)
 
+    _apply_avoid_topic_penalties(
+        results,
+        _avoid_topic_terms,
+        _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints),
+    )
+
     _pre_guard_len = len(results)
     results = _apply_domain_relevance_guard(
         results,
@@ -6110,10 +6230,63 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             ],
         )
 
+    _evidence_protected: list[dict] = []
+    _evidence_seen_docs: set[tuple[str, str]] = {
+        (r.get("_collection", ""), r["out_metadata"].get("law_id", ""))
+        for r in _aspect_protected
+    }
+    for _sq in _evidence_subquestions[:5]:
+        _ev_text = " ".join([
+            _sq.get("question", ""),
+            " ".join(_sq.get("must_find", [])),
+        ]).strip()
+        _ev_terms = _query_terms(_ev_text, limit=10)
+        if not _ev_terms:
+            continue
+        _ev_cols = set(_sq.get("target_collections") or [])
+        _ev_avoid = _sq.get("avoid_if_only") or []
+        _ev_candidates = []
+        for r in results:
+            if r.get("_avoid_topic_penalty", 0.0) >= 0.30:
+                continue
+            if _ev_cols and r.get("_collection", "") not in _ev_cols:
+                continue
+            if _result_avoid_topic_penalty(r, _ev_avoid, _answerability_query) >= 0.30:
+                continue
+            if _aspect_overlap_ok(r, _ev_terms):
+                _ev_candidates.append(r)
+        if not _ev_candidates:
+            continue
+        _best_ev = max(
+            _ev_candidates,
+            key=lambda r: (
+                _term_overlap_score(r, _ev_terms),
+                _strict_context_score(r, _ev_text, _ev_terms),
+                _authority_score(r),
+                r.get("similarity", 0.0),
+            ),
+        )
+        _doc_key = (_best_ev.get("_collection", ""), _best_ev["out_metadata"].get("law_id", ""))
+        if _doc_key in _evidence_seen_docs and len(_evidence_protected) >= 2:
+            continue
+        _best_ev["_evidence_coverage"] = _sq.get("id") or _sq.get("question", "")[:40]
+        _evidence_protected.append(_best_ev)
+        _evidence_seen_docs.add(_doc_key)
+        if len(_evidence_protected) >= max(3, min(5, body.max_docs // 2)):
+            break
+    if _evidence_protected:
+        logger.info(
+            "EVIDENCE COVERAGE: %s",
+            [
+                f"{r.get('_collection')}:{r['out_metadata'].get('law_id')}:ev={r.get('_evidence_coverage')}"
+                for r in _evidence_protected
+            ],
+        )
+
     # Protected slots: keep the strongest chunk from several expanded documents so
     # reranker cannot collapse a multi-document answer back to one law_id.
     _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
-    _rr_protected = list(_aspect_protected)
+    _rr_protected = list(_evidence_protected) + list(_aspect_protected)
     _protected_slots_left = max(0, 3 - len(_rr_protected))
     if _protected_slots_left:
         _rr_protected += [
@@ -6190,18 +6363,38 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         for r in _rr_protected
     }
     # Build lookup for fast neighbor access
+    _n_terms = max(len(_docset_terms), 1)
     _fl_by_law_idx = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index", 0)): r
         for r in results
         if r.get("_full_law")
     }
     _fl_added = 0
+    _article_candidates = sorted(
+        [r for r in results if r.get("_article_hint")],
+        key=lambda r: r["out_metadata"].get("chunk_index", 0),
+    )
+    _art_added = 0
+    for _fl in _article_candidates[:12]:
+        _fl_key = (_fl["out_metadata"].get("law_id"), _fl["out_metadata"].get("chunk_index"))
+        if _fl_key in _rr_protected_key_set:
+            continue
+        if not _fl.get("_answerability"):
+            _fl["_answerability"] = {
+                "coverage": max(0.35, _term_overlap_score(_fl, _docset_terms) / _n_terms),
+                "_proxy": True,
+            }
+        _rr_protected.append(_fl)
+        _rr_protected_key_set.add(_fl_key)
+        _art_added += 1
+    if _art_added:
+        logger.info("ARTICLE HINT PROTECTED: %d contiguous article chunks bypassing reranker", _art_added)
+
     _fl_candidates = sorted(
         [r for r in results if r.get("_full_law")],
         key=lambda r: _term_overlap_score(r, _docset_terms),
         reverse=True,
     )
-    _n_terms = max(len(_docset_terms), 1)
     for _fl in _fl_candidates:
         if _fl_added >= 25:
             break
@@ -6425,7 +6618,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         for r in results:
             sim = float(r.get("similarity", 0.0))
             ans = float(r.get("_answerability", {}).get("score", 0.0))
-            protected = bool(r.get("_full_law") or r.get("_doc_expansion") or _is_must_have_primary_act(r) or r.get("_protected_code"))
+            protected = bool(
+                r.get("_full_law") or r.get("_doc_expansion") or r.get("_article_hint")
+                or r.get("_evidence_coverage") or _is_must_have_primary_act(r) or r.get("_protected_code")
+            )
             
             if sim < _ret_threshold:
                 continue
@@ -6632,6 +6828,25 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "- Якщо контекст містить лише програму для іншої галузі, напиши: ця програма не підтверджена як доступна для описаного підприємства; потрібен окремий релевантний акт.\n"
             "- Не розширюй сферу дії пільги, компенсації або статусу за аналогією.\n\n"
         )
+        _q_lower = question.lower()
+        _is_recommendation = any(marker in _q_lower for marker in ("рекомендац", "краще", "обрати", "вибрати", "выбрать", "лучше", "уточни"))
+        _is_direct_fact = any(marker in _q_lower for marker in ("який штраф", "скільки", "розмір", "чи може", "чи потрібно", "чи треба"))
+        answer_mode_block = ""
+        if _is_recommendation:
+            answer_mode_block = (
+                "Режим відповіді: практична рекомендація.\n"
+                "- Дай попередній висновок на основі підтверджених факторів із контексту, а не пиши лише 'немає повної рекомендації'.\n"
+                "- Окремо познач, які фактори підтверджені джерелами, а які треба уточнити.\n"
+                "- Постав 3-5 коротких уточнювальних питань, якщо без них вибір залежить від обставин.\n"
+                "- Не використовуй застарілі тимчасові режими як головну рекомендацію, якщо контекст не підтверджує їх актуальність.\n\n"
+            )
+        elif _is_direct_fact:
+            answer_mode_block = (
+                "Режим відповіді: точна коротка норма.\n"
+                "- Спочатку дай пряму відповідь, якщо контекст містить норму.\n"
+                "- Якщо у фрагменті є сума/строк/умова без початку речення, не відривай її від умови; шукай підтвердження в сусідніх фрагментах контексту.\n"
+                "- Не додавай другорядні джерела як основний висновок, якщо вони не відповідають прямо на питання.\n\n"
+            )
 
         # Build user profile block if available
         profile_block = ""
@@ -6678,6 +6893,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         prompt = (
             f"{style_block}"
             f"{evidence_rules_block}"
+            f"{answer_mode_block}"
             f"{profile_block}"
             f"{personal_block}"
             f"{summary_block}"
