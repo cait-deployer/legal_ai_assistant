@@ -1,4 +1,4 @@
-﻿"""
+﻿﻿"""
 server.py — FastAPI бекенд для URAI (уп Assistant).
 
 Запуск:  cd /home/devops/app/backend && uvicorn server:app --host 0.0.0.0 --port 8000
@@ -4085,6 +4085,10 @@ def _recency_score(result: dict) -> float:
             score = -0.16 if age_years >= 10 else -0.08
         elif col in {"laws_zir_v2", "laws_wiki_v2"}:
             score = -0.10 if age_years >= 7 else -0.04
+        elif age_years >= 20:
+            score = -0.18
+        elif age_years >= 15:
+            score = -0.10
         elif age_years >= 10:
             score = -0.05
     return score - _stale_temporal_penalty(result)
