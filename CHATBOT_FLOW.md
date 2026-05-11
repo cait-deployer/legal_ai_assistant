@@ -13,13 +13,13 @@ flowchart TD
     E --> F[FastAPI /ask_stream]
     F --> G[Optional RU to UA translation]
     G --> H[Follow-up resolver for ambiguous short questions]
-    H --> I[Parallel: query embedding + query rewrite]
+    H --> I[Parallel: query embedding + AI query planner]
     I --> J[Plan sources -> allowed V2 Qdrant collections]
-    J --> K[Routing probe across allowed collections]
-    K --> L[Vector search: original and rewrite]
+    J --> K[Vector search: original and planner search query]
+    K --> L[Merge semantic candidates]
     L --> M[Boost, dedup, diversity, document expansion]
-    M --> N[Keyword MatchText + title boost]
-    N --> O[Deterministic answerability reranker]
+    M --> N[Keyword MatchText + title boost + primary-act discovery]
+    N --> O[Aspect coverage + deterministic answerability reranker]
     O --> P[Strict context squeeze + expired-document filter + context buckets]
     P --> Q[Gemini streamed answer + hidden completion marker + parallel classification]
     Q --> R[Backend strips marker and frontend displays clean tokens]
@@ -62,27 +62,52 @@ flowchart TD
 2. Initialize Vertex AI if needed.
 3. Translate Russian-looking questions to Ukrainian for search.
 4. Resolve follow-up questions using recent history.
-5. Run query rewrite and query embedding.
+5. Run query embedding and the AI query planner in parallel.
 6. Convert plan source features into allowed V2 collections.
-7. Probe allowed collections and route to likely collections.
-8. Run vector search for original and rewritten queries.
+7. Search all allowed V2 collections. The old centroid router is disabled.
+8. Run vector search for the original question and, when the planner produced a distinct `search_query`, for that planned search query.
 9. Merge by `(law_id, chunk_index)`.
 10. Apply low-confidence widening when raw score is weak.
 11. Apply source and document-type scoring.
 12. Deduplicate to max 2 chunks per law id.
 13. Apply diversity caps.
 14. Expand promising documents with sibling chunks.
-15. Add keyword MatchText candidates.
+15. Add keyword MatchText candidates using planner legal terms, aspects and verified act-title hints.
 16. Add title MatchText candidates with a small cap.
-17. Run deterministic answerability rerank.
-18. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
-19. Squeeze final context: keep search wide, but send only the strongest source-strict chunks to Gemini.
-20. Filter cancelled/expired documents.
-21. Build context buckets.
-22. Generate streamed answer and parallel classification.
-23. Require a hidden answer-done marker from the model.
-24. If the marker is missing or the model hit max tokens, request a short continuation.
-25. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
+17. Run dynamic primary-act discovery. This is not id hardcoding: it promotes current laws/codes/procedures already found by search and expands only real Qdrant documents.
+18. Add aspect coverage candidates from the planner so multi-aspect questions do not collapse to one source family.
+19. Run deterministic answerability rerank.
+20. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
+21. Squeeze final context: keep search wide, but send only the strongest source-strict chunks to Gemini.
+22. Filter cancelled/expired documents.
+23. Build context buckets.
+24. Generate streamed answer and parallel classification.
+25. Require a hidden answer-done marker from the model.
+26. If the marker is missing or the model hit max tokens, request a short continuation.
+27. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
+
+## Query Planner
+
+The old pair of `rewrite` + `act_hints` calls has been replaced by one JSON query planner inside `backend/server.py::_ask_pipeline()`.
+
+The planner returns:
+
+- `search_query`: normalized Ukrainian legal search text for embeddings;
+- `legal_terms`: exact legal terms and short acronyms such as `FOP`, `TOV`, `PDV`, `EP`, `CPD` in Ukrainian/Russian spelling when relevant;
+- `aspects`: issue dimensions that should be covered, for example taxation, liability, employees, contractors, corporate structure;
+- `primary_act_hints`: possible act titles for title search only;
+- `source_preferences`: broad source-type hints;
+- `should_compare`;
+- `needs_clarification`;
+- `clarification_questions`.
+
+Planner output is never treated as legal truth. It is only a retrieval plan:
+
+- act hints must resolve to real Qdrant documents before they can influence context;
+- no statute number, date, tax rate, limit or legal conclusion from the planner is used in the final answer;
+- final answers are still based only on retrieved context and citations.
+
+If `app_settings.query_planner_enabled` is absent, the backend defaults it to enabled. When disabled, the planner falls back to the original question as the search query.
 
 ## V2 Collections
 

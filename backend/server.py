@@ -3437,19 +3437,81 @@ _QUERY_STOPWORDS = {
     "щодо", "стосовно", "про", "по", "для", "при", "або", "или", "та", "і",
     "й", "в", "у", "на", "з", "із", "від", "до", "як", "які", "який", "яка",
     "это", "це", "ця", "цей", "вони", "воно", "там", "так", "само", "тому",
+    "мені", "мене", "потрібно", "потрібна", "потрібен", "нужен", "нужна",
+    "рекомендація", "рекомендацию", "краще", "лучше", "обрати", "выбрать",
+    "вибір", "вибору", "критерій", "критерії", "критерии", "діяльність",
+    "діяльності", "особа", "осіб", "человек", "людей", "команда", "команди",
+    "будь", "ласка", "можливо", "может", "уточни", "питання", "вопрос",
 }
+
+_LEGAL_ACRONYMS = {"фоп", "тов", "ооо", "пдв", "єп", "квед", "цпд", "кзпп", "кму", "дпс", "зір"}
 
 
 def _query_terms(text: str, limit: int = 24) -> list[str]:
     terms: list[str] = []
     for raw in re.findall(r"[\w'-]+", (text or "").lower()):
-        if len(raw) < 4 or raw in _QUERY_STOPWORDS:
+        if (len(raw) < 4 and raw not in _LEGAL_ACRONYMS) or raw in _QUERY_STOPWORDS:
             continue
         terms.append(raw)
         lemma = _ua_lemma(raw)
         if lemma and lemma not in _QUERY_STOPWORDS:
             terms.append(lemma)
     return list(dict.fromkeys(terms))[:limit]
+
+
+def _clean_plan_list(value, *, limit: int, min_len: int = 2, max_len: int = 140) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = re.sub(r"\s+", " ", item).strip()
+        if not (min_len <= len(text) <= max_len):
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _empty_query_plan(question: str) -> dict:
+    return {
+        "search_query": question[:350],
+        "legal_terms": [],
+        "aspects": [],
+        "primary_act_hints": [],
+        "source_preferences": [],
+        "should_compare": False,
+        "needs_clarification": False,
+        "clarification_questions": [],
+    }
+
+
+def _normalize_query_plan(raw_plan, question: str) -> dict:
+    plan = _empty_query_plan(question)
+    if not isinstance(raw_plan, dict):
+        return plan
+
+    search_query = raw_plan.get("search_query")
+    if isinstance(search_query, str):
+        search_query = re.sub(r"\s+", " ", search_query).strip()
+        if 8 <= len(search_query) <= 350:
+            plan["search_query"] = search_query
+
+    plan["legal_terms"] = _clean_plan_list(raw_plan.get("legal_terms"), limit=14, min_len=2)
+    plan["aspects"] = _clean_plan_list(raw_plan.get("aspects"), limit=8, min_len=4)
+    plan["primary_act_hints"] = _clean_plan_list(raw_plan.get("primary_act_hints"), limit=5, min_len=6)
+    plan["source_preferences"] = _clean_plan_list(raw_plan.get("source_preferences"), limit=6, min_len=4)
+    plan["clarification_questions"] = _clean_plan_list(raw_plan.get("clarification_questions"), limit=3, min_len=8, max_len=180)
+    plan["should_compare"] = bool(raw_plan.get("should_compare"))
+    plan["needs_clarification"] = bool(raw_plan.get("needs_clarification"))
+    return plan
 
 
 def _last_user_question(history: list[dict] | None) -> str:
@@ -4118,7 +4180,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     if not question:
         raise HTTPException(400, "question is required")
 
-    # 1. Ініціалізація + embed query + HyDE гіпотетична відповідь (паралельно)
+    # 1. Ініціалізація + query planner + embed query.
     try:
         import embed_v2 as _embed_v2
         from vertexai.generative_models import GenerativeModel, GenerationConfig
@@ -4242,136 +4304,110 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             search_question = f"{search_question}\nКонтекст попереднього питання: {_previous_user_question}"
             logger.info("FOLLOWUP CONTEXT MERGE: %s", search_question[:220])
 
-        async def _rewrite_query(q: str) -> str | None:
-            """Переформулює запит у формальний юридичний стиль без вигадування законів."""
-            try:
-                # Для rewrite використовуємо легку flash-модель — думаюча модель виробляє сміття на цій задачі
-                _rw_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
-                _m = GenerativeModel(
-                    _rw_model_name,
-                    system_instruction=(
-                        "Ти перефразовуєш запит користувача у стислий пошуковий запит "
-                        "з офіційною юридичною термінологією українською мовою. "
-                        "Зберігай ВСІ ключові поняття оригіналу — не додавай нових тем чи контексту якого немає в запиті. "
-                        "Якщо запит вже зрозумілий — поверни його майже без змін. "
-                        "Відповідь — ТІЛЬКИ перефразований запит, 5–15 слів, без пояснень, без лапок."
-                    ),
-                )
-                try:
-                    from vertexai.generative_models import ThinkingConfig
-                    _rw_cfg = GenerationConfig(
-                        temperature=0.0,
-                        max_output_tokens=800,
-                        thinking_config=ThinkingConfig(thinking_budget=0),
-                    )
-                except Exception:
-                    _rw_cfg = GenerationConfig(temperature=0.0, max_output_tokens=800)
-                _rewrite_examples = settings_cache.get("rewrite_examples", "")
-                resp = await _asyncio.wait_for(
-                    _asyncio.to_thread(
-                        _m.generate_content,
-                        f"{_rewrite_examples}\n{q} →",
-                        generation_config=_rw_cfg,
-                    ),
-                    timeout=15.0,
-                )
-                # Debug: log all parts to understand model output
-                try:
-                    _dbg = [(getattr(p, "thought", None), getattr(p, "text", "")[:80]) for p in resp.candidates[0].content.parts]
-                    logger.info("REWRITE parts: %s", _dbg)
-                except Exception:
-                    pass
-                # Primary: resp.text (works when thinking disabled)
-                raw = ""
-                try:
-                    raw = resp.text or ""
-                except Exception:
-                    pass
-                if not raw:
-                    # Fallback: concatenate all non-thought parts
-                    try:
-                        raw = " ".join(
-                            getattr(p, "text", "").strip()
-                            for p in resp.candidates[0].content.parts
-                            if not getattr(p, "thought", False) and getattr(p, "text", "")
-                        )
-                    except Exception:
-                        pass
-                text = raw.strip().split("\n")[0].strip()
-                logger.info("REWRITE raw=%r", text)
-                if text and text.lower() != q.lower() and 5 < len(text) < 300 and len(text.split()) >= 4:
-                    logger.info("REWRITE: %s → %s", q[:80], text)
-                    return text
-                return None
-            except Exception as e:
-                logger.info("REWRITE failed: %s", e)
-                return None
-
         async def _embed_query_with_timeout(text: str):
             return await _asyncio.wait_for(
                 _asyncio.to_thread(_embed_v2.embed_query, text),
                 timeout=15.0,
             )
 
-        async def _extract_act_hints(q: str) -> list[str]:
-            """Витягує назви нормативних актів з запиту для посилення title-пошуку.
-            Повертає список назв або порожній список при будь-якій помилці/невпевненості."""
-            if not settings_cache.get_bool("retrieval_hints_enabled", True):
-                return []
+        async def _plan_query(q: str) -> dict:
+            """LLM search planner: hypotheses only, never a legal source."""
+            if not settings_cache.get_bool("query_planner_enabled", True):
+                return _empty_query_plan(q)
             try:
-                import json as _json
-                _hints_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
-                _hm = GenerativeModel(
-                    _hints_model_name,
+                _planner_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
+                _planner = GenerativeModel(
+                    _planner_model_name,
                     system_instruction=(
-                        "Ти — юридична пошукова система. З запиту визнач назви основних нормативних актів України, "
-                        "які необхідні для відповіді. Називай офіційні загальновідомі акти — кодекси, закони, постанови КМУ. "
-                        "НЕ вигадуй назви і номери — лише ті акти, які реально існують і явно стосуються питання. "
-                        "Якщо питання має кілька аспектів, поверни кілька різних актів для цих аспектів. "
-                        "Формат — ТІЛЬКИ JSON: {\"act_titles\": [\"...\", \"...\"]} Максимум 3. Без пояснень."
+                        "Ти планувальник пошуку для юридичного RAG. Не відповідай на питання і не встановлюй правові факти. "
+                        "Твоя задача — підготувати безпечні пошукові гіпотези українською мовою. "
+                        "Не вигадуй статті, цифри, строки, висновки або назви неіснуючих актів. "
+                        "primary_act_hints — лише можливі загальновідомі назви актів для пошуку; вони будуть перевірені в базі. "
+                        "Поверни тільки JSON з полями: "
+                        "search_query:string, legal_terms:string[], aspects:string[], primary_act_hints:string[], "
+                        "source_preferences:string[], should_compare:boolean, needs_clarification:boolean, "
+                        "clarification_questions:string[]."
                     ),
                 )
                 try:
-                    from vertexai.generative_models import ThinkingConfig as _HTC
-                    _h_cfg = GenerationConfig(
-                        temperature=0.0, max_output_tokens=200,
-                        thinking_config=_HTC(thinking_budget=0),
+                    from vertexai.generative_models import ThinkingConfig as _PlannerThinkingConfig
+                    _planner_cfg = GenerationConfig(
+                        temperature=0.0,
+                        max_output_tokens=900,
+                        response_mime_type="application/json",
+                        thinking_config=_PlannerThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
-                    _h_cfg = GenerationConfig(temperature=0.0, max_output_tokens=200)
-                _h_resp = await _asyncio.wait_for(
-                    _asyncio.to_thread(
-                        _hm.generate_content,
-                        f"Запит: {q}\n\nJSON:",
-                        generation_config=_h_cfg,
-                    ),
-                    timeout=5.0,
+                    _planner_cfg = GenerationConfig(
+                        temperature=0.0,
+                        max_output_tokens=900,
+                        response_mime_type="application/json",
+                    )
+                _planner_prompt = (
+                    "Питання користувача:\n"
+                    f"{q}\n\n"
+                    "Правила:\n"
+                    "- search_query має містити юридичні терміни для embedding, без розмовних слів.\n"
+                    "- legal_terms мають містити короткі абревіатури, якщо вони важливі: ФОП, ТОВ, ПДВ, ЄП, ЦПД тощо.\n"
+                    "- aspects потрібні для покриття різних сторін питання.\n"
+                    "- clarification_questions став лише якщо без них рекомендація може бути неправильною.\n"
+                    "- Не додавай конкретних норм, ставок, лімітів або висновку про правильний вибір.\n"
                 )
-                _h_raw = (_h_resp.text or "").strip()
-                # Витягуємо JSON будь-якого вигляду: ```json ... ```, або просто {...}
-                import re as _re
-                _json_match = _re.search(r'\{.*\}', _h_raw, _re.DOTALL)
-                if not _json_match:
-                    return []
-                _h_raw = _json_match.group(0).strip()
-                _parsed = _json.loads(_h_raw)
-                titles = _parsed.get("act_titles", [])
-                if isinstance(titles, list):
-                    valid = [t for t in titles if isinstance(t, str) and 5 < len(t) < 200]
-                    if valid:
-                        logger.info("ACT HINTS: %s", valid)
-                    return valid
-            except Exception as _he:
-                logger.info("ACT HINTS failed: %s", _he)
-            return []
+                _planner_resp = await _asyncio.wait_for(
+                    _asyncio.to_thread(
+                        _planner.generate_content,
+                        _planner_prompt,
+                        generation_config=_planner_cfg,
+                    ),
+                    timeout=8.0,
+                )
+                _planner_raw = ""
+                try:
+                    _planner_raw = _planner_resp.text or ""
+                except Exception:
+                    pass
+                if not _planner_raw:
+                    try:
+                        _planner_raw = " ".join(
+                            getattr(p, "text", "").strip()
+                            for p in _planner_resp.candidates[0].content.parts
+                            if not getattr(p, "thought", False) and getattr(p, "text", "")
+                        )
+                    except Exception:
+                        pass
+                _json_match = re.search(r"\{.*\}", _planner_raw.strip(), re.DOTALL)
+                _parsed = _json.loads(_json_match.group(0) if _json_match else _planner_raw)
+                plan = _normalize_query_plan(_parsed, q)
+                logger.info(
+                    "QUERY PLAN: search=%r terms=%s aspects=%s acts=%s compare=%s clarify=%s",
+                    plan["search_query"][:160],
+                    plan["legal_terms"][:8],
+                    plan["aspects"][:6],
+                    plan["primary_act_hints"][:5],
+                    plan["should_compare"],
+                    plan["needs_clarification"],
+                )
+                return plan
+            except Exception as _planner_err:
+                logger.info("QUERY PLAN failed: %s", _planner_err)
+                return _empty_query_plan(q)
 
-        # Embed оригінального запиту + rewrite + act hints паралельно
-        query_vector, rewritten_query, _act_hints = await _asyncio.gather(
+        # Embed original query + build search plan in parallel.
+        query_vector, _query_plan = await _asyncio.gather(
             _embed_query_with_timeout(search_question),
-            _rewrite_query(search_question),
-            _extract_act_hints(search_question),
+            _plan_query(search_question),
         )
-        hypothetical_text = rewritten_query  # alias для title boost keywords
+        rewritten_query = _query_plan.get("search_query") if _query_plan else None
+        if rewritten_query and rewritten_query.strip().lower() == search_question.strip().lower():
+            rewritten_query = None
+        _act_hints = _query_plan.get("primary_act_hints", []) if _query_plan else []
+        _planner_terms = _clean_plan_list(
+            (_query_plan.get("legal_terms", []) if _query_plan else [])
+            + (_query_plan.get("aspects", []) if _query_plan else []),
+            limit=22,
+            min_len=2,
+        )
+        hypothetical_text = " ".join([rewritten_query or "", " ".join(_planner_terms)]).strip()
         logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
         raise HTTPException(500, f"Embedding/HyDE error: {e}")
@@ -4696,16 +4732,22 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     try:
         from qdrant_storage import search_qdrant_text
         _act_hints_text = " ".join(_act_hints) if _act_hints else ""
-        _kw_query = f"{search_question} {rewritten_query or ''} {_act_hints_text}".strip()
+        _planner_terms_text = " ".join(_planner_terms) if _planner_terms else ""
+        _kw_query = f"{search_question} {rewritten_query or ''} {_planner_terms_text} {_act_hints_text}".strip()
         _kw_results = (
             search_qdrant_text(_kw_query, target_collections, limit=15)
             if settings_cache.get_bool("lexical_fallback_enabled", True)
             else []
         )
-        _kw_query_words = {w.lower() for w in _kw_query.split() if len(w) > 4 or (len(w) >= 2 and w.isupper())}
+        _kw_query_words = {
+            w.lower()
+            for w in _kw_query.split()
+            if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS or (len(w) >= 2 and w.isupper())
+        }
         _kw_stopwords = {
             "надай", "надайте", "інформацію", "інформація", "інфо", "питання",
-            "щодо", "стосовно",
+            "щодо", "стосовно", "мені", "потрібна", "потрібно", "рекомендація",
+            "краще", "обрати", "критерії", "вибору", "діяльності",
         }
         _kw_query_words = {w for w in _kw_query_words if w not in _kw_stopwords}
         # Лематизація через pymorphy замість агресивного [:-2] обрізання
@@ -4760,20 +4802,37 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "правда", "справді", "взнати", "дізнатись", "дізнатися", "пояснити",
         "пояснення", "розмір", "кількість", "інформація", "питати", "запитати",
         "надай", "надайте", "інформацію", "інфо", "покажи", "покажіть",
+        "мені", "рекомендація", "краще", "обрати", "вибір", "вибору",
+        "критерій", "критерії", "діяльність", "діяльності", "особа", "осіб",
     }
     try:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
         _search_terms_text = f"{search_question} {rewritten_query or ''}".strip()
-        _q_words = [_strip_punct(w) for w in _search_terms_text.split() if len(w) > 4]
-        _q_words = [w for w in _q_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
-        _hyde_words = [_strip_punct(w) for w in (hypothetical_text or "").split() if len(w) > 5][:10]
-        _hyde_words = [w for w in _hyde_words if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
+        _q_words = [
+            _strip_punct(w) for w in _search_terms_text.split()
+            if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS
+        ]
+        _q_words = [
+            w for w in _q_words
+            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+        ]
+        _hyde_words = [
+            _strip_punct(w) for w in (hypothetical_text or "").split()
+            if len(w) > 5 or w.lower() in _LEGAL_ACRONYMS
+        ][:16]
+        _hyde_words = [
+            w for w in _hyde_words
+            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+        ]
         # Слова з act_hints (назви актів від LLM) — для title search і пріоритетного буста
         _hints_words = []
         for _ht in _act_hints:
-            _hints_words += [_strip_punct(w) for w in _ht.split() if len(w) > 4 and w.lower() not in _TITLE_STOPWORDS]
+            _hints_words += [
+                _strip_punct(w) for w in _ht.split()
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+            ]
         _hints_words_set = set(w.lower() for w in _hints_words)  # для швидкої перевірки hint-матчу
         _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words + _hints_words[:6]))[:14]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
@@ -4827,7 +4886,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         _primary_query = f"{search_question} {rewritten_query or ''}".strip()
         _primary_terms = _query_terms(
-            f"{search_question} {rewritten_query or ''} {' '.join(_act_hints or [])}",
+            f"{search_question} {rewritten_query or ''} {' '.join(_planner_terms or [])} {' '.join(_act_hints or [])}",
             limit=24,
         )
         _primary_pool = [
@@ -4928,20 +4987,75 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             keep_weak=low_confidence,
         )
 
+    _aspect_protected: list[dict] = []
+    _aspect_seen_docs: set[tuple[str, str]] = set()
+    _plan_aspects = _query_plan.get("aspects", []) if _query_plan else []
+    for _aspect in _plan_aspects[:6]:
+        _aspect_terms = _query_terms(_aspect, limit=8)
+        if not _aspect_terms:
+            continue
+        _aspect_candidates = [
+            r for r in results
+            if _term_overlap_score(r, _aspect_terms) > 0 and not _is_background_collection(r.get("_collection", ""))
+        ]
+        if not _aspect_candidates:
+            continue
+        _best = max(
+            _aspect_candidates,
+            key=lambda r: (
+                _term_overlap_score(r, _aspect_terms),
+                _strict_context_score(r, _answerability_query, _aspect_terms),
+                _authority_score(r),
+                r.get("similarity", 0.0),
+            ),
+        )
+        _doc_key = (_best.get("_collection", ""), _best["out_metadata"].get("law_id", ""))
+        if _doc_key in _aspect_seen_docs:
+            continue
+        _best["_aspect_coverage"] = _aspect
+        _aspect_protected.append(_best)
+        _aspect_seen_docs.add(_doc_key)
+        if len(_aspect_protected) >= max(2, min(4, body.max_docs // 3)):
+            break
+    if _aspect_protected:
+        logger.info(
+            "ASPECT COVERAGE: %s",
+            [
+                f"{r.get('_collection')}:{r['out_metadata'].get('law_id')}:aspect={r.get('_aspect_coverage')}"
+                for r in _aspect_protected
+            ],
+        )
+
     # Protected slots: keep the strongest chunk from several expanded documents so
     # reranker cannot collapse a multi-document answer back to one law_id.
     _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
-    _rr_protected = [
-        r for r in results
-        if (
-            _is_must_have_primary_act(r)
-            or (
-                r.get("_collection") in _protected_colls
-                and (r.get("_title_match") or r.get("_doc_expansion"))
-                and r["out_metadata"].get("law_id") in _seen_laws_in_semantic
+    _rr_protected = list(_aspect_protected)
+    _protected_slots_left = max(0, 3 - len(_rr_protected))
+    if _protected_slots_left:
+        _rr_protected += [
+            r for r in results
+            if (
+                _is_must_have_primary_act(r)
+                or (
+                    r.get("_collection") in _protected_colls
+                    and (r.get("_title_match") or r.get("_doc_expansion"))
+                    and r["out_metadata"].get("law_id") in _seen_laws_in_semantic
+                )
             )
+        ][:_protected_slots_left]
+    _dedup_rr: list[dict] = []
+    _dedup_rr_keys: set[tuple[str, str, object]] = set()
+    for _rp in _rr_protected:
+        _rp_key = (
+            _rp.get("_collection", ""),
+            _rp["out_metadata"].get("law_id", ""),
+            _rp["out_metadata"].get("chunk_index"),
         )
-    ][:3]
+        if _rp_key in _dedup_rr_keys:
+            continue
+        _dedup_rr.append(_rp)
+        _dedup_rr_keys.add(_rp_key)
+    _rr_protected = _dedup_rr
     _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
     _docset_keep: list[dict] = []
     _docset_seen: set[tuple[str, str]] = set()
@@ -5446,6 +5560,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "main_gen_cfg": _main_gen_cfg, "llm_timeout": llm_timeout,
         "start_time": start_time, "max_output_tokens": max_output_tokens,
         "query_rewritten": rewritten_query,
+        "query_plan": _query_plan,
     }
 
 
@@ -6044,6 +6159,7 @@ async def ask(body: AskRequest):
             "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
             "n_docs": len(pipe["results"]),
             "query_rewritten": pipe.get("query_rewritten"),
+            "query_plan": pipe.get("query_plan"),
             **classification,
         },
     }
@@ -6284,6 +6400,7 @@ async def ask_stream(body: AskRequest):
                 "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
                 "n_docs": len(pipe["results"]),
                 "query_rewritten": pipe.get("query_rewritten"),
+                "query_plan": pipe.get("query_plan"),
                 **classification,
             },
         }
