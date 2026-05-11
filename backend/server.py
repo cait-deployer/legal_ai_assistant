@@ -3493,6 +3493,136 @@ def _empty_query_plan(question: str) -> dict:
     }
 
 
+_QUERY_ALIAS_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("фоп", "фізична особа-підприємець", "фізична особа підприємець"),
+        (
+            "фізична особа-підприємець",
+            "фізична особа підприємець",
+            "платник єдиного податку",
+            "спрощена система оподаткування",
+            "наймані працівники",
+            "цивільно-правовий договір",
+        ),
+        ("оподаткування", "найм і підрядники", "ліміти доходу"),
+    ),
+    (
+        ("тов", "ооо", "обмеженою відповідальністю", "ограниченной ответственностью"),
+        (
+            "товариство з обмеженою відповідальністю",
+            "учасники товариства",
+            "статутний капітал",
+            "відповідальність товариства",
+            "виконавчий орган",
+            "корпоративне управління",
+        ),
+        ("відповідальність", "корпоративна структура", "управління товариством"),
+    ),
+    (
+        ("пдв", "ндс"),
+        ("податок на додану вартість", "платник ПДВ", "реєстрація платником ПДВ"),
+        ("ПДВ",),
+    ),
+    (
+        ("цпд", "цивільно-правов", "подряд", "підряд"),
+        ("цивільно-правовий договір", "договір підряду", "трудові відносини"),
+        ("найм і підрядники",),
+    ),
+    (
+        ("it", "іт", "айті", "інформаційні технології"),
+        ("інформаційні технології", "комп'ютерне програмування", "IT-послуги"),
+        ("вид діяльності", "зовнішньоекономічна діяльність"),
+    ),
+)
+
+
+def _merge_unique_strings(*groups: list[str], limit: int) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group or []:
+            text = re.sub(r"\s+", " ", str(item)).strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def _deterministic_query_plan(question: str) -> dict:
+    plan = _empty_query_plan(question)
+    q = (question or "").lower()
+    legal_terms: list[str] = []
+    aspects: list[str] = []
+    for triggers, terms, rule_aspects in _QUERY_ALIAS_RULES:
+        if any(trigger in q for trigger in triggers):
+            legal_terms.extend(terms)
+            aspects.extend(rule_aspects)
+
+    compare_markers = (" чи ", " або ", " vs ", " versus ", "краще", "лучше", "обрати", "выбрать", "порівня", "сравн")
+    should_compare = any(marker in f" {q} " for marker in compare_markers)
+    if should_compare:
+        aspects.extend(("порівняння варіантів", "ризики вибору"))
+
+    legal_terms = _merge_unique_strings(legal_terms, limit=18)
+    aspects = _merge_unique_strings(aspects, limit=8)
+    if legal_terms:
+        plan["legal_terms"] = legal_terms
+        plan["aspects"] = aspects
+        plan["search_query"] = " ".join(_merge_unique_strings(_query_terms(question, limit=12), legal_terms, aspects, limit=28))[:350]
+        plan["should_compare"] = should_compare
+        plan["needs_clarification"] = should_compare
+        if should_compare:
+            plan["clarification_questions"] = [
+                "Команда буде у штаті чи працюватиме з підрядниками?",
+                "Який очікуваний річний оборот?",
+                "Плануються інвестори або частки в бізнесі?",
+            ]
+    return plan
+
+
+def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
+    merged = _empty_query_plan(question)
+    base = base or _empty_query_plan(question)
+    extra = extra or {}
+    merged["search_query"] = extra.get("search_query") or base.get("search_query") or question[:350]
+    merged["legal_terms"] = _merge_unique_strings(
+        base.get("legal_terms", []),
+        extra.get("legal_terms", []),
+        limit=18,
+    )
+    merged["aspects"] = _merge_unique_strings(
+        base.get("aspects", []),
+        extra.get("aspects", []),
+        limit=10,
+    )
+    merged["primary_act_hints"] = _merge_unique_strings(
+        extra.get("primary_act_hints", []),
+        base.get("primary_act_hints", []),
+        limit=5,
+    )
+    merged["source_preferences"] = _merge_unique_strings(
+        extra.get("source_preferences", []),
+        base.get("source_preferences", []),
+        limit=6,
+    )
+    merged["should_compare"] = bool(base.get("should_compare") or extra.get("should_compare"))
+    merged["needs_clarification"] = bool(base.get("needs_clarification") or extra.get("needs_clarification"))
+    merged["clarification_questions"] = _merge_unique_strings(
+        extra.get("clarification_questions", []),
+        base.get("clarification_questions", []),
+        limit=3,
+    )
+    if merged["legal_terms"] and (not merged["search_query"] or merged["search_query"] == question[:350]):
+        merged["search_query"] = " ".join(_merge_unique_strings(_query_terms(question, limit=12), merged["legal_terms"], merged["aspects"], limit=28))[:350]
+    return merged
+
+
 def _normalize_query_plan(raw_plan, question: str) -> dict:
     plan = _empty_query_plan(question)
     if not isinstance(raw_plan, dict):
@@ -3607,8 +3737,12 @@ def _recency_score(result: dict) -> float:
             score = -0.16 if age_years >= 10 else -0.08
         elif col in {"laws_zir_v2", "laws_wiki_v2"}:
             score = -0.10 if age_years >= 7 else -0.04
+        elif is_primary and not is_code_or_law and age_years >= 10:
+            # Old secondary rada docs (court practice letters, old resolutions/interpretations)
+            # that are not Кодекс/Закон must be penalised like court collections.
+            score = -0.22 if age_years >= 15 else -0.14
         elif age_years >= 10:
-            score = -0.05
+            score = -0.08
     return score - _stale_temporal_penalty(result)
 
 
