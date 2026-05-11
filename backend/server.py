@@ -3448,6 +3448,18 @@ _QUERY_STOPWORDS = {
 _LEGAL_ACRONYMS = {"фоп", "тов", "ооо", "пдв", "єп", "квед", "цпд", "кзпп", "кму", "дпс", "зір"}
 
 
+def _looks_like_acronym(token: str) -> bool:
+    token = (token or "").strip("«»\"'()[]{}.,;:!?")
+    letters = [ch for ch in token if ch.isalpha()]
+    if not (2 <= len(letters) <= 8):
+        return False
+    if any("A" <= ch <= "Z" or "А" <= ch <= "Я" or ch in "ІЇЄҐ" for ch in letters) and token.upper() == token:
+        return True
+    compact = "".join(letters).lower()
+    vowels = set("aeiouаеєиіїоуюя")
+    return len(compact) <= 5 and not any(ch in vowels for ch in compact)
+
+
 _UA_NUMBER_FORMS: dict[int, tuple[str, ...]] = {
     0: ("нуль", "нуля"),
     1: ("один", "одного", "одна", "однієї"),
@@ -3527,9 +3539,11 @@ def _number_word_variants(raw: str) -> list[str]:
 
 def _query_terms(text: str, limit: int = 24) -> list[str]:
     terms: list[str] = []
-    for raw in re.findall(r"[\w'-]+", (text or "").lower()):
+    for token in re.findall(r"[\w'-]+", text or ""):
+        raw = token.lower()
         has_digit = any(ch.isdigit() for ch in raw)
-        if (len(raw) < 4 and raw not in _LEGAL_ACRONYMS and not has_digit) or raw in _QUERY_STOPWORDS:
+        is_acronym = raw in _LEGAL_ACRONYMS or _looks_like_acronym(token)
+        if (len(raw) < 4 and not is_acronym and not has_digit) or raw in _QUERY_STOPWORDS:
             continue
         terms.append(raw)
         if has_digit:
@@ -6211,54 +6225,62 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         }
 
         def _is_good_title_kw(w: str) -> bool:
-            lw = (w or "").lower().strip()
+            raw = (w or "").strip()
+            lw = raw.lower()
             if not lw:
                 return False
             if any(ch.isdigit() for ch in lw):
                 return True
             if " " in lw or "-" in lw:
                 return True
-            if lw in _LEGAL_ACRONYMS:
+            if lw in _LEGAL_ACRONYMS or _looks_like_acronym(raw):
                 return True
             return len(lw) >= 6 and lw not in _TITLE_STOPWORDS and lw not in _TITLE_GENERIC_TERMS
 
         def _title_kw_rank(w: str) -> tuple[int, int]:
-            lw = (w or "").lower()
+            raw = w or ""
+            lw = raw.lower()
             return (
-                0 if (any(ch.isdigit() for ch in lw) or " " in lw or "-" in lw or lw in _LEGAL_ACRONYMS) else 1,
+                0 if (any(ch.isdigit() for ch in lw) or " " in lw or "-" in lw or lw in _LEGAL_ACRONYMS or _looks_like_acronym(raw)) else 1,
                 -len(lw),
             )
+
+        def _title_word_parts(text: str) -> list[str]:
+            return [_strip_punct(w) for w in (text or "").split()]
+
+        def _keep_title_word(w: str) -> bool:
+            return bool(w) and (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS or _looks_like_acronym(w)) and _is_good_title_kw(w)
 
         _search_terms_text = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
         _q_words = [
             _strip_punct(w) for w in _search_terms_text.split()
-            if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS
+            if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS or _looks_like_acronym(w)
         ]
         _q_words = [
             w for w in _q_words
-            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
+            if _keep_title_word(w)
         ]
         _hyde_words = [
             _strip_punct(w) for w in (hypothetical_text or "").split()
-            if len(w) > 5 or w.lower() in _LEGAL_ACRONYMS
+            if len(w) > 5 or w.lower() in _LEGAL_ACRONYMS or _looks_like_acronym(w)
         ][:16]
         _hyde_words = [
             w for w in _hyde_words
-            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
+            if _keep_title_word(w)
         ]
         # Слова з act_hints (назви актів від LLM) — для title search і пріоритетного буста
         _hints_words = []
         for _ht in _act_hints:
             _hints_words += [
                 _strip_punct(w) for w in _ht.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
+                if _keep_title_word(_strip_punct(w))
             ]
         _hints_words_set = set(w.lower() for w in _hints_words)  # для швидкої перевірки hint-матчу
         _title_query_words = []
         for _tq in _title_queries:
             _title_query_words += [
                 _strip_punct(w) for w in _tq.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
+                if _keep_title_word(_strip_punct(w))
             ]
             
         _must_phrases = [p.lower().strip() for p in _title_must_terms if p.strip()]
@@ -6266,16 +6288,25 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         for _mt in _title_must_terms:
             _must_words += [
                 _strip_punct(w) for w in _mt.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
+                if _keep_title_word(_strip_punct(w))
             ]
         _nice_words = []
         for _nt in _title_nice_terms:
             _nice_words += [
                 _strip_punct(w) for w in _nt.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
+                if _keep_title_word(_strip_punct(w))
             ]
+        _raw_title_texts = [*_title_queries, *_title_must_terms, *_title_nice_terms, *_act_hints]
+        _generic_companion_words = []
+        _has_specific_title_context = bool(_must_words or _hints_words or _title_query_words or _nice_words or _hyde_words or _q_words)
+        if _has_specific_title_context:
+            for _txt in _raw_title_texts:
+                for _w in _title_word_parts(_txt):
+                    if _w.lower() in _TITLE_GENERIC_TERMS and _w.lower() not in _TITLE_STOPWORDS:
+                        _generic_companion_words.append(_w)
+        _generic_companion_words = list(dict.fromkeys(_generic_companion_words))[:2]
         _exclude_phrases = [p.lower() for p in _title_exclude_terms if p and len(p) >= 4]
-        _raw_kws = list(dict.fromkeys(_must_words[:10] + _hints_words[:8] + _title_query_words[:12] + _nice_words[:8] + _hyde_words + _q_words[:4]))[:22]
+        _raw_kws = list(dict.fromkeys(_must_words[:10] + _hints_words[:8] + _title_query_words[:12] + _nice_words[:8] + _hyde_words + _q_words[:6] + _generic_companion_words))[:22]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
