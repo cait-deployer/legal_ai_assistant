@@ -3598,6 +3598,18 @@ def _scoring_query_text(
     return " ".join(part for part in parts if part).strip()
 
 
+def _plan_log_summary(plan: dict) -> dict:
+    plan = plan or {}
+    return {
+        "search": (plan.get("search_query") or "")[:120],
+        "terms": (plan.get("legal_terms") or [])[:6],
+        "aspects": (plan.get("aspects") or [])[:5],
+        "titles": (plan.get("title_queries") or [])[:5],
+        "acts": (plan.get("primary_act_hints") or [])[:4],
+        "sources": (plan.get("source_preferences") or [])[:5],
+    }
+
+
 def _deterministic_query_plan(question: str) -> dict:
     plan = _empty_query_plan(question)
     q = (question or "").lower()
@@ -4685,8 +4697,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         async def _plan_query(q: str) -> dict:
             """LLM search planner: hypotheses only, never a legal source."""
+            _base_plan = _deterministic_query_plan(q)
+            if any(_base_plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "source_preferences")):
+                logger.info("QUERY PLAN BASE: %s", _plan_log_summary(_base_plan))
             if not settings_cache.get_bool("query_planner_enabled", True):
-                return _empty_query_plan(q)
+                logger.info("QUERY PLAN FINAL: source=base planner_disabled %s", _plan_log_summary(_base_plan))
+                return _base_plan
             try:
                 _planner_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
                 _planner = GenerativeModel(
@@ -4758,31 +4774,28 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 try:
                     _parsed = _json.loads(_raw_to_parse)
                 except _json.JSONDecodeError:
-                    plan = _partial_query_plan(_raw_to_parse, q)
+                    _partial_plan = _partial_query_plan(_raw_to_parse, q)
+                    logger.warning("QUERY PLAN AI PARTIAL: %s", _plan_log_summary(_partial_plan))
+                    plan = _merge_query_plans(_base_plan, _partial_plan, q)
                     logger.warning(
-                        "QUERY PLAN: partial JSON parsed search=%r terms=%s aspects=%s titles=%s",
-                        plan["search_query"][:120],
-                        plan["legal_terms"][:5],
-                        plan["aspects"][:5],
-                        plan["title_queries"][:5],
+                        "QUERY PLAN FINAL: source=partial_merged %s",
+                        _plan_log_summary(plan),
                     )
                     return plan
-                plan = _normalize_query_plan(_parsed, q)
+                _ai_plan = _normalize_query_plan(_parsed, q)
+                logger.info("QUERY PLAN AI: %s", _plan_log_summary(_ai_plan))
+                plan = _merge_query_plans(_base_plan, _ai_plan, q)
                 logger.info(
-                    "QUERY PLAN: search=%r terms=%s aspects=%s titles=%s acts=%s sources=%s compare=%s clarify=%s",
-                    plan["search_query"][:160],
-                    plan["legal_terms"][:8],
-                    plan["aspects"][:6],
-                    plan["title_queries"][:6],
-                    plan["primary_act_hints"][:5],
-                    plan["source_preferences"][:5],
+                    "QUERY PLAN FINAL: source=ai_merged %s compare=%s clarify=%s",
+                    _plan_log_summary(plan),
                     plan["should_compare"],
                     plan["needs_clarification"],
                 )
                 return plan
             except Exception as _planner_err:
                 logger.warning("QUERY PLAN failed: %s | raw=%r", _planner_err, (_planner_raw or "")[:300])
-                return _empty_query_plan(q)
+                logger.info("QUERY PLAN FINAL: source=base_after_error %s", _plan_log_summary(_base_plan))
+                return _base_plan
 
         # Embed original query + build search plan in parallel.
         query_vector, _query_plan = await _asyncio.gather(
@@ -4819,6 +4832,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             rewritten_query or "",
             " ".join(_scoring_terms),
         ]).strip()
+        logger.info(
+            "QUERY PLAN USED: scoring_terms=%s title_queries=%s source_prefs=%s act_hints=%s scoring_query=%r",
+            _scoring_terms[:10],
+            _title_queries[:6],
+            _source_preferences[:6],
+            _act_hints[:5],
+            _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)[:240],
+        )
         logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
         raise HTTPException(500, f"Embedding/HyDE error: {e}")
@@ -5300,6 +5321,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_cap = int(settings_cache.get_float("title_boost_max_chunks", 16))
             _title_results = _title_results[:max(4, min(_title_cap, 24))]
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
+            logger.info(
+                "TITLE BOOST plan: title_queries=%s act_hints=%s raw_kws=%s final_kws=%s",
+                _title_queries[:6],
+                _act_hints[:5],
+                _raw_kws[:12],
+                _title_kws[:12],
+            )
             _title_added = 0
             for r in _title_results:
                 _key = (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
@@ -5425,6 +5453,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
     _answerability_query = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
+    logger.info("ANSWERABILITY QUERY: %r terms=%s", _answerability_query[:260], _query_terms(_answerability_query, limit=18)[:12])
     if len(results) > body.max_docs * 2:
         results = _rerank_by_answerability(
             results,
@@ -5932,6 +5961,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             if _feat in _FEATURE_HINTS:
                 _style_parts.append(_FEATURE_HINTS[_feat])
         style_block = "Інструкція щодо відповіді:\n" + "\n".join(f"- {p}" for p in _style_parts) + "\n\n"
+        evidence_rules_block = (
+            "Правила використання джерел:\n"
+            "- Якщо джерело регулює іншу сферу, інший статус суб'єкта або спеціальний режим, використовуй його тільки як обмеження/виняток, а не як рекомендацію для користувача.\n"
+            "- У блоці практичних кроків не радь подавати заяву, отримувати статус або користуватися програмою, якщо контекст прямо не підтверджує застосовність саме до ситуації користувача.\n"
+            "- Якщо контекст містить лише програму для іншої галузі, напиши: ця програма не підтверджена як доступна для описаного підприємства; потрібен окремий релевантний акт.\n"
+            "- Не розширюй сферу дії пільги, компенсації або статусу за аналогією.\n\n"
+        )
 
         # Build user profile block if available
         profile_block = ""
@@ -5977,6 +6013,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         prompt = (
             f"{style_block}"
+            f"{evidence_rules_block}"
             f"{profile_block}"
             f"{personal_block}"
             f"{summary_block}"
