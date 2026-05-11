@@ -95,8 +95,6 @@ V2_REINDEX_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod
 
 _TAX_KEYWORDS = ("пдв", "ват", "податк", "єдиний податок", "фоп", "пдфо", "акциз",
                  "реєстрац", "платник", "зir", "зір", "дпс", "митн", "збір")
-_TAX_CODE_ID = "2755-17"
-_LLC_LAW_ID = "2275-19"
 
 def _scrape_v2_state_file(source: str) -> Path:
     return BASE_DIR / f"scrape_v2_{source}_state.json"
@@ -3524,7 +3522,7 @@ def _recency_score(result: dict) -> float:
     """Positive for fresh relevant law; negative for stale secondary material."""
     dt = _doc_best_date(result)
     if not dt:
-        return 0.0
+        return -_stale_temporal_penalty(result)
     age_days = max(0, (datetime.now(timezone.utc) - dt).days)
     age_years = age_days / 365.25
     col = result.get("_collection", "")
@@ -3533,21 +3531,85 @@ def _recency_score(result: dict) -> float:
     is_primary = col.startswith("rada_") or col == "laws_kmu_v2"
     is_code_or_law = doc_type in {"Кодекс", "Закон"}
 
+    score = 0.0
     if age_years <= 1:
-        return 0.18 if is_primary else 0.12
-    if age_years <= 3:
-        return 0.12 if is_primary else 0.07
-    if age_years <= 7:
-        return 0.06 if is_primary else 0.02
+        score = 0.18 if is_primary else 0.12
+    elif age_years <= 3:
+        score = 0.12 if is_primary else 0.07
+    elif age_years <= 7:
+        score = 0.06 if is_primary else 0.02
 
     # Old primary codes/laws can still be current if last_edition is missing in old payloads.
-    if is_primary and is_code_or_law and not meta.get("rada_is_dead"):
+    if score == 0.0 and not (is_primary and is_code_or_law and not meta.get("rada_is_dead")):
+        if _is_court_collection(col):
+            score = -0.16 if age_years >= 10 else -0.08
+        elif col in {"laws_zir_v2", "laws_wiki_v2"}:
+            score = -0.10 if age_years >= 7 else -0.04
+        elif age_years >= 10:
+            score = -0.05
+    return score - _stale_temporal_penalty(result)
+
+
+_UA_MONTHS = {
+    "січня": 1, "января": 1,
+    "лютого": 2, "февраля": 2,
+    "березня": 3, "марта": 3,
+    "квітня": 4, "апреля": 4,
+    "травня": 5, "мая": 5,
+    "червня": 6, "июня": 6,
+    "липня": 7, "июля": 7,
+    "серпня": 8, "августа": 8,
+    "вересня": 9, "сентября": 9,
+    "жовтня": 10, "октября": 10,
+    "листопада": 11, "ноября": 11,
+    "грудня": 12, "декабря": 12,
+}
+
+
+def _date_from_ua_phrase(day: str, month_name: str, year: str) -> datetime | None:
+    month = _UA_MONTHS.get(month_name.lower())
+    if not month:
+        return None
+    try:
+        return datetime(int(year), month, int(day), tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _stale_temporal_penalty(result: dict) -> float:
+    """Demote expired temporary fragments; never remove them from retrieval."""
+    text = f"{result.get('out_content') or ''} {(result.get('out_metadata') or {}).get('source') or ''}".lower()
+    if not text:
         return 0.0
-    if _is_court_collection(col):
-        return -0.16 if age_years >= 10 else -0.08
-    if col in {"laws_zir_v2", "laws_wiki_v2"}:
-        return -0.10 if age_years >= 7 else -0.04
-    return -0.05 if age_years >= 10 else 0.0
+
+    now = datetime.now(timezone.utc)
+    penalty = 0.0
+    temporal_markers = (
+        "тимчасово", "на період", "карантин", "воєнного стану",
+        "до припинення", "до скасування", "не пізніше ніж до",
+    )
+    if any(marker in text for marker in temporal_markers):
+        penalty += 0.04
+
+    for match in re.finditer(
+        r"(?:до|не пізніше ніж до)\s+(\d{1,2})\s+([а-яіїєґ]+)\s+(\d{4})\s+року",
+        text,
+    ):
+        dt = _date_from_ua_phrase(match.group(1), match.group(2), match.group(3))
+        if dt and dt < now:
+            penalty += 0.14
+            break
+
+    for match in re.finditer(r"(?:до|по)\s+(\d{1,2})[./](\d{1,2})[./](\d{4})", text):
+        try:
+            dt = datetime(int(match.group(3)), int(match.group(2)), int(match.group(1)), tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if dt < now:
+            penalty += 0.14
+            break
+
+    return min(penalty, 0.24)
 
 
 def _authority_score(result: dict) -> float:
@@ -3664,9 +3726,46 @@ def _is_court_collection(col: str) -> bool:
     return col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2")
 
 
-def _is_must_have_primary_act(result: dict) -> bool:
+def _is_primary_normative_act(result: dict) -> bool:
+    col = result.get("_collection", "")
     meta = result.get("out_metadata", {}) or {}
-    return result.get("_must_have_act") or meta.get("law_id") in {_TAX_CODE_ID, _LLC_LAW_ID}
+    doc_type = meta.get("rada_doc_type") or meta.get("doc_type", "")
+    if meta.get("rada_is_dead"):
+        return False
+    if col.startswith("rada_") and doc_type in {"Кодекс", "Закон"}:
+        return True
+    if col in {"laws_kmu_v2", "laws_mod_v2"} and doc_type in {"Постанова", "Наказ", "Розпорядження"}:
+        return True
+    return False
+
+
+def _primary_act_score(result: dict, query_text: str, terms: list[str] | None = None) -> float:
+    if not _is_primary_normative_act(result):
+        return 0.0
+    terms = terms or _query_terms(query_text, limit=18)
+    meta = result.get("out_metadata", {}) or {}
+    title = f"{meta.get('source') or ''} {meta.get('title') or ''}".lower()
+    content = (result.get("out_content") or "").lower()
+    title_hits = sum(1 for term in terms if term in title)
+    content_hits = sum(1 for term in terms if term in content)
+    title_density = min(title_hits, 5) * 0.11
+    content_density = min(content_hits, 6) * 0.035
+    score = (
+        float(result.get("similarity", 0.0) or 0.0) * 0.42
+        + (_authority_score(result) - 1.0) * 0.75
+        + title_density
+        + content_density
+        + max(_recency_score(result), 0.0) * 0.45
+    )
+    if result.get("_title_match"):
+        score += 0.10
+    if result.get("_doc_expansion"):
+        score += 0.04
+    return score
+
+
+def _is_must_have_primary_act(result: dict) -> bool:
+    return bool(result.get("_primary_act_candidate") or result.get("_primary_act_expansion"))
 
 
 def _strict_context_score(result: dict, query_text: str, terms: list[str] | None = None) -> float:
@@ -4228,9 +4327,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Ти — юридична пошукова система. З запиту визнач назви основних нормативних актів України, "
                         "які необхідні для відповіді. Називай офіційні загальновідомі акти — кодекси, закони, постанови КМУ. "
                         "НЕ вигадуй назви і номери — лише ті акти, які реально існують і явно стосуються питання. "
-                        "Приклади: 'ФОП єдиний податок' → Податковий кодекс України; "
-                        "'трудовий договір звільнення' → Кодекс законів про працю України; "
-                        "'реєстрація ТОВ' → Закон України про товариства з обмеженою та додатковою відповідальністю. "
+                        "Якщо питання має кілька аспектів, поверни кілька різних актів для цих аспектів. "
                         "Формат — ТІЛЬКИ JSON: {\"act_titles\": [\"...\", \"...\"]} Максимум 3. Без пояснень."
                     ),
                 )
@@ -4652,82 +4749,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     except Exception as _kw_err:
         logger.warning("Keyword search error: %s", _kw_err)
 
-    # Must-have primary acts for business/tax form questions. Semantic search often
-    # finds the Tax Code, but generic recommendation wording can let weaker sources
-    # win later. Pin the primary acts before reranking so the answer can compare
-    # FOP/ТОВ against actual law, not old court fragments.
-    try:
-        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
-
-        _mh_text = f"{search_question} {rewritten_query or ''} {' '.join(_act_hints or [])}".lower()
-        _must_docs: list[tuple[str, str, list[str]]] = []
-        if any(k in _mh_text for k in ("фоп", "єдиний подат", "един", "спрощен", "упрощен", "податк", "налог")):
-            _must_docs.append((
-                "rada_finance_v2",
-                _TAX_CODE_ID,
-                [
-                    "спрощена система оподаткування",
-                    "єдиний податок",
-                    "платники єдиного податку",
-                    "фізична особа-підприємець",
-                    "третя група",
-                    "кількість осіб",
-                    "обсяг доходу",
-                ],
-            ))
-        if any(k in _mh_text for k in ("тов", "ооо", "обмеженою відповідальністю", "ограниченной ответственностью")):
-            _must_docs.append((
-                "rada_industry_v2",
-                _LLC_LAW_ID,
-                [
-                    "товариство з обмеженою відповідальністю",
-                    "статутний капітал",
-                    "учасники товариства",
-                    "виконавчий орган",
-                    "відповідальність",
-                ],
-            ))
-
-        _mh_existing = {
-            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"), r.get("_collection"))
-            for r in results
-        }
-        _mh_added = 0
-        _mh_vector = rw_vector or query_vector
-        for _col, _lid, _terms in _must_docs:
-            _mh_chunks = search_law_chunks_by_terms(_col, _lid, _terms, top_k=4)
-            _mh_chunks += search_qdrant_in_law(_col, _lid, _mh_vector, top_k=2, threshold=0.0)
-            _mh_chunks.sort(
-                key=lambda c: (
-                    _term_overlap_score(c, _query_terms(" ".join(_terms), limit=18)),
-                    c.get("similarity", 0.0),
-                ),
-                reverse=True,
-            )
-            _taken = 0
-            for _chunk in _mh_chunks:
-                if _taken >= 4:
-                    break
-                _key = (
-                    _chunk["out_metadata"].get("law_id"),
-                    _chunk["out_metadata"].get("chunk_index"),
-                    _chunk.get("_collection"),
-                )
-                if _key in _mh_existing:
-                    continue
-                _chunk["_must_have_act"] = True
-                _chunk["_doc_expansion"] = True
-                _chunk["similarity"] = max(float(_chunk.get("similarity", 0.0) or 0.0), 0.88)
-                results.append(_chunk)
-                _mh_existing.add(_key)
-                _mh_added += 1
-                _taken += 1
-        if _mh_added:
-            results.sort(key=lambda x: x["similarity"], reverse=True)
-            logger.info("MUST-HAVE ACTS: added %d primary-law chunks for docs=%s", _mh_added, [(c, l) for c, l, _ in _must_docs])
-    except Exception as _mh_err:
-        logger.warning("Must-have act injection error: %s", _mh_err)
-
     # Title-based metadata boost: знаходить документи по заголовку (source поле)
     # Стоп-слова: розмовні та функціональні слова які НЕ є юридичними термінами
     _TITLE_STOPWORDS = {
@@ -4797,6 +4818,98 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 logger.info("TITLE BOOST: додано %d чанків", _title_added)
     except Exception as _tb_err:
         logger.warning("Title boost error: %s", _tb_err)
+
+    # Dynamic primary-act discovery. This is intentionally not tied to specific law
+    # ids: for any legal domain, keep the strongest current laws/codes/procedures
+    # represented before secondary explanations, ZIR, courts or wiki.
+    try:
+        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
+
+        _primary_query = f"{search_question} {rewritten_query or ''}".strip()
+        _primary_terms = _query_terms(
+            f"{search_question} {rewritten_query or ''} {' '.join(_act_hints or [])}",
+            limit=24,
+        )
+        _primary_pool = [
+            r for r in results
+            if _primary_act_score(r, _primary_query, _primary_terms) >= 0.58
+        ]
+        _primary_by_doc: dict[tuple[str, str], dict] = {}
+        for _cand in _primary_pool:
+            _doc_key = (_cand.get("_collection", ""), _cand["out_metadata"].get("law_id", ""))
+            if not _doc_key[0] or not _doc_key[1]:
+                continue
+            _score = _primary_act_score(_cand, _primary_query, _primary_terms)
+            _prev = _primary_by_doc.get(_doc_key)
+            if not _prev or _score > _prev["_primary_score"]:
+                _cand["_primary_score"] = round(_score, 4)
+                _primary_by_doc[_doc_key] = _cand
+
+        _primary_docs = sorted(
+            _primary_by_doc.values(),
+            key=lambda r: (
+                r.get("_primary_score", 0.0),
+                _term_overlap_score(r, _primary_terms),
+                r.get("similarity", 0.0),
+            ),
+            reverse=True,
+        )[: max(2, min(6, body.max_docs // 2))]
+
+        _primary_existing = {
+            (r.get("_collection"), r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
+            for r in results
+        }
+        _primary_added = 0
+        _primary_vector = rw_vector or query_vector
+        for _doc in _primary_docs:
+            _doc["_primary_act_candidate"] = True
+            _doc["similarity"] = max(float(_doc.get("similarity", 0.0) or 0.0), 0.82)
+            _col = _doc.get("_collection", "")
+            _lid = _doc["out_metadata"].get("law_id", "")
+            if not _col or not _lid:
+                continue
+            _doc_chunks = search_law_chunks_by_terms(_col, _lid, _primary_terms, top_k=4)
+            _doc_chunks += search_qdrant_in_law(_col, _lid, _primary_vector, top_k=2, threshold=0.0)
+            _doc_chunks.sort(
+                key=lambda c: (
+                    _term_overlap_score(c, _primary_terms),
+                    _primary_act_score(c, _primary_query, _primary_terms),
+                    c.get("similarity", 0.0),
+                ),
+                reverse=True,
+            )
+            _taken = 0
+            for _chunk in _doc_chunks:
+                if _taken >= 3:
+                    break
+                _key = (
+                    _chunk.get("_collection"),
+                    _chunk["out_metadata"].get("law_id"),
+                    _chunk["out_metadata"].get("chunk_index"),
+                )
+                if _key in _primary_existing:
+                    continue
+                _chunk["_primary_act_expansion"] = True
+                _chunk["_doc_expansion"] = True
+                _chunk["similarity"] = max(float(_chunk.get("similarity", 0.0) or 0.0), 0.80)
+                results.append(_chunk)
+                _primary_existing.add(_key)
+                _primary_added += 1
+                _taken += 1
+
+        if _primary_docs or _primary_added:
+            results.sort(key=lambda x: x["similarity"], reverse=True)
+            logger.info(
+                "PRIMARY ACT DISCOVERY: docs=%s added=%d terms=%s",
+                [
+                    f"{r.get('_collection')}:{r['out_metadata'].get('law_id')}:p={r.get('_primary_score')}"
+                    for r in _primary_docs
+                ],
+                _primary_added,
+                _primary_terms[:12],
+            )
+    except Exception as _pa_err:
+        logger.warning("Primary act discovery error: %s", _pa_err)
 
     # Unified pre-sort: title_match chunks отримують бонус якщо вони підтверджені семантикою
     # Мета: реранкер бачить найбільш різноманітних кандидатів, а не просто топ-40 за вектором

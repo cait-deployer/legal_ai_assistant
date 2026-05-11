@@ -121,7 +121,8 @@ def _build_payload(
     title = meta.get("title", "")
     prefix = SOURCE_PREFIX.get(source, "")
     law_url = meta.get("law_url") or meta.get("rada_url") or meta.get("pdf_url") or meta.get("url") or ""
-    return {
+    payload = dict(meta)
+    payload.update({
         "source": f"{prefix}{title}",
         "source_id": source,
         "law_id": meta["law_id"],
@@ -153,7 +154,8 @@ def _build_payload(
         "full_text_bytes": full_text_bytes,
         "content_sha256": content_hash,
         "content": chunk_text,
-    }
+    })
+    return payload
 
 
 def _process_law_full(
