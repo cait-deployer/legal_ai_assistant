@@ -2002,9 +2002,9 @@ def _do_fix_truncated(session_id: str, source: str):
     log  = _make_reindex_log_cb(slot)
     try:
         log(f"Repair session {session_id[:8]} started for {source}", "info")
-        from reindex_truncated import run_fix_truncated
+        from reindex_truncated import run_fix_truncated, WORKERS as _FIX_WORKERS
         _fix_truncated_stop[source].clear()
-        run_fix_truncated(source, log_callback=log, stop_event=_fix_truncated_stop[source], resume=True)
+        run_fix_truncated(source, log_callback=log, stop_event=_fix_truncated_stop[source], resume=True, workers=_FIX_WORKERS)
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:

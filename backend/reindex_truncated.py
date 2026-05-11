@@ -15,12 +15,14 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 RAW_BASE = Path(os.environ.get("LAWS_RAW_DIR", "/root/laws_raw"))
 HEARTBEAT_SEC = 20
+WORKERS = 2  # parallel document processing; embed_v2 is thread-safe
 
 OLD_TRUNCATE = {
     "rada": 8_000,
@@ -271,6 +273,7 @@ def run_fix_truncated(
     log_callback=None,
     stop_event: threading.Event | None = None,
     resume: bool = True,
+    workers: int = WORKERS,
 ):
     """Main entry point used by the admin API."""
     log = log_callback or (lambda m, lv="info": print(f"[{lv}] {m}", flush=True))
@@ -281,7 +284,7 @@ def run_fix_truncated(
 
     files = _get_truncated_files(source)
     threshold_kb = OLD_TRUNCATE[source] // 1024
-    log(f"Source: {source} | files above old {threshold_kb} KB limit: {len(files):,}", "info")
+    log(f"Source: {source} | files above old {threshold_kb} KB limit: {len(files):,} | workers={workers}", "info")
 
     state = _load_state(source) if resume else _normalize_state({"done": [], "failed": []})
     state["total"] = len(files)
@@ -298,58 +301,88 @@ def run_fix_truncated(
     processed = 0
     failed = 0
     t0 = time.time()
+    _state_lock = threading.Lock()
 
-    for law_id, meta_path in todo:
+    def _do_one(law_id: str, meta_path: Path, idx: int) -> tuple[bool, str]:
         if stop_event is not None and stop_event.is_set():
-            log("Stopped. Progress was saved.", "warning")
-            _save_state(source, state)
-            return
-
+            raise InterruptedError("stopped before start")
         size_kb = (RAW_BASE / source / f"{law_id}.txt").stat().st_size // 1024
-        idx = len(done_set) + processed + failed + 1
         log(f"[{idx:,}/{len(files):,}] {law_id} ({size_kb:,} KB)", "info")
-        state["current"] = {"law_id": law_id, "size_kb": size_kb, "started_at": _now()}
-        _save_state(source, state)
+        with _state_lock:
+            state["current"] = {"law_id": law_id, "size_kb": size_kb, "started_at": _now()}
+            _save_state(source, state)
+        stats = _process_law_full(source, law_id, str(meta_path), log, stop_event)
+        ok = stats["uploaded"] > 0 and stats["errors"] == 0
+        msg = f"chunks={stats['chunks']:,} uploaded={stats['uploaded']:,} errors={stats['errors']:,}"
+        return ok, msg
 
-        try:
-            stats = _process_law_full(source, law_id, str(meta_path), log, stop_event)
-            ok = stats["uploaded"] > 0 and stats["errors"] == 0
-            msg = f"chunks={stats['chunks']:,} uploaded={stats['uploaded']:,} errors={stats['errors']:,}"
-        except InterruptedError as ex:
+    def _handle_result(law_id: str, ok: bool, msg: str) -> None:
+        nonlocal processed, failed
+        with _state_lock:
+            if ok:
+                processed += 1
+                if law_id not in done_set:
+                    state["done"].append(law_id)
+                    done_set.add(law_id)
+                log(f"  OK [{law_id}]: {msg}", "success")
+            else:
+                failed += 1
+                if law_id not in failed_set:
+                    state["failed"].append(law_id)
+                    failed_set.add(law_id)
+                log(f"  ERROR [{law_id}]: {msg}", "error")
+            state["processed"] = len(state["done"])
             state["current"] = None
             _save_state(source, state)
-            log(f"Stopped safely: {ex}. Resume will continue from this document.", "warning")
-            return
-        except Exception as ex:
-            ok = False
-            msg = str(ex)
-
-        if ok:
-            processed += 1
-            if law_id not in done_set:
-                state["done"].append(law_id)
-                done_set.add(law_id)
-            log(f"  OK: {msg}", "success")
-        else:
-            failed += 1
-            if law_id not in failed_set:
-                state["failed"].append(law_id)
-                failed_set.add(law_id)
-            log(f"  ERROR: {msg}", "error")
-
-        state["processed"] = len(state["done"])
-        state["current"] = None
-        _save_state(source, state)
 
         elapsed = time.time() - t0
         remaining_count = len(todo) - processed - failed
         if processed + failed > 0:
             avg = elapsed / (processed + failed)
-            remaining = avg * remaining_count
+            eta = avg * remaining_count
             log(
-                f"  ETA: elapsed {elapsed / 60:.1f}m | remaining ~{remaining / 60:.1f}m | left {remaining_count:,}",
+                f"  ETA: elapsed {elapsed / 60:.1f}m | remaining ~{eta / 60:.1f}m | left {remaining_count:,}",
                 "info",
             )
+
+    if workers > 1:
+        executor = ThreadPoolExecutor(max_workers=workers)
+        try:
+            future_map = {
+                executor.submit(_do_one, lid, mp, len(done_set) + i + 1): lid
+                for i, (lid, mp) in enumerate(todo)
+            }
+            for future in as_completed(future_map):
+                law_id = future_map[future]
+                try:
+                    ok, msg = future.result()
+                    _handle_result(law_id, ok, msg)
+                except InterruptedError:
+                    log("Stopped. Progress was saved.", "warning")
+                    with _state_lock:
+                        _save_state(source, state)
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
+                except Exception as ex:
+                    _handle_result(law_id, False, str(ex))
+        finally:
+            executor.shutdown(wait=True)
+    else:
+        for law_id, meta_path in todo:
+            if stop_event is not None and stop_event.is_set():
+                log("Stopped. Progress was saved.", "warning")
+                _save_state(source, state)
+                return
+            try:
+                ok, msg = _do_one(law_id, meta_path, len(done_set) + processed + failed + 1)
+                _handle_result(law_id, ok, msg)
+            except InterruptedError as ex:
+                state["current"] = None
+                _save_state(source, state)
+                log(f"Stopped safely: {ex}. Resume will continue from this document.", "warning")
+                return
+            except Exception as ex:
+                _handle_result(law_id, False, str(ex))
 
     log(f"Done. Processed: {processed:,}; errors: {failed:,}", "success" if failed == 0 else "warning")
 
