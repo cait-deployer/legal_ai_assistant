@@ -5044,6 +5044,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             if not settings_cache.get_bool("query_planner_enabled", True):
                 logger.info("QUERY PLAN FINAL: source=base planner_disabled %s", _plan_log_summary(_base_plan))
                 return _base_plan
+            _planner_raw = ""
             try:
                 _planner_model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
                 _planner = GenerativeModel(
@@ -5080,20 +5081,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Якщо місця мало, пріоритет: target_collections, title_must_terms, title_exclude_terms, title_queries."
                     ),
                 )
-                try:
-                    from vertexai.generative_models import ThinkingConfig as _PlannerThinkingConfig
-                    _planner_cfg = GenerationConfig(
-                        temperature=0.0,
-                        max_output_tokens=1600,
-                        response_mime_type="application/json",
-                        thinking_config=_PlannerThinkingConfig(thinking_budget=0),
-                    )
-                except Exception:
-                    _planner_cfg = GenerationConfig(
-                        temperature=0.0,
-                        max_output_tokens=1600,
-                        response_mime_type="application/json",
-                    )
+                _planner_cfg = GenerationConfig(
+                    temperature=0.0,
+                    max_output_tokens=1600,
+                    response_mime_type="application/json",
+                )
                 _planner_prompt = (
                     f"Питання: {q[:600]}\n\n"
                     "Поверни компактний JSON-план пошуку. Для кожного правового механізму з питання додай окремий aspect. "
@@ -5110,7 +5102,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     ),
                     timeout=8.0,
                 )
-                _planner_raw = ""
                 try:
                     _planner_raw = _planner_resp.text or ""
                 except Exception:
@@ -6177,20 +6168,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 f"Question: {search_question}\n\n"
                 f"{_chunks_text}"
             )
-            try:
-                from vertexai.generative_models import ThinkingConfig as _RrThinkingConfig
-                _rr_cfg_json = GenerationConfig(
-                    temperature=0.0,
-                    max_output_tokens=1024,
-                    response_mime_type="application/json",
-                    thinking_config=_RrThinkingConfig(thinking_budget=0),
-                )
-            except Exception:
-                _rr_cfg_json = GenerationConfig(
-                    temperature=0.0,
-                    max_output_tokens=1024,
-                    response_mime_type="application/json",
-                )
+            _rr_cfg_json = GenerationConfig(
+                temperature=0.0,
+                max_output_tokens=1024,
+                response_mime_type="application/json",
+            )
             _rr_resp = await _aio.to_thread(
                 _rerank_model.generate_content, _rerank_prompt,
                 generation_config=_rr_cfg_json,

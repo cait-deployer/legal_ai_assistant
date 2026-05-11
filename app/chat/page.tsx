@@ -649,7 +649,8 @@ function ChatPage() {
                                     ? parsed.error
                                     : typeof parsed.detail === 'string'
                                         ? parsed.detail
-                                        : 'Помилка генерації відповіді.';
+                                        : JSON.stringify(parsed);
+                                console.error('[chat] stream error:', parsed);
                                 toast.error(errorMessage);
                             }
                         } else if (line === '') {
