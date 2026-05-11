@@ -1,4 +1,4 @@
-﻿"""
+﻿﻿"""
 server.py — FastAPI бекенд для URAI (уп Assistant).
 
 Запуск:  cd /home/devops/app/backend && uvicorn server:app --host 0.0.0.0 --port 8000
@@ -5608,6 +5608,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 _strip_punct(w) for w in _tq.split()
                 if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
+            
+        _must_phrases = [p.lower().strip() for p in _title_must_terms if p.strip()]
         _must_words = []
         for _mt in _title_must_terms:
             _must_words += [
@@ -5678,12 +5680,29 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         r.get("out_content", "")[:1500]
                     ).lower()
                     _tmatched = sum(1 for kw in _title_kws if kw.lower() in _tsrc)
-                    _must_matched = sum(1 for kw in _must_words if kw and kw.lower() in _tsrc)
                     _base_score = 0.50 + 0.35 * (_tmatched / max(len(_title_kws), 1))
-                    if _must_words and _must_matched:
-                        _base_score = min(_base_score + 0.12, 0.88)
+
+                    # Точний пошук за фразою замість "мішка слів"
+                    _must_matched_count = 0
+                    _has_domain_terms = any(kw.lower() in _tsrc for kw in _hyde_words + _q_words[:4])
+                    
+                    for phrase in _must_phrases:
+                        if phrase in _tsrc:
+                            # Якщо фраза загальна, вимагаємо наявності доменних термінів
+                            if ("порядок" in phrase or "використання" in phrase or "державна підтримка" in phrase) and not _has_domain_terms:
+                                continue
+                            _must_matched_count += 1
+                            # Protected slot для базових кодексів
+                            if "податковий кодекс" in phrase and "податковий кодекс" in _tsrc:
+                                r["_protected_code"] = True
+                                r["_title_match"] = True
+
+                    if _must_phrases and _must_matched_count > 0:
+                        _base_score = min(_base_score + 0.20 * _must_matched_count, 0.98)
+                        if r.get("_protected_code"):
+                            _base_score = 0.99
                     elif _must_words and not any(nt and nt.lower() in _tsrc for nt in _nice_words):
-                        _base_score = max(_base_score - 0.12, 0.35)
+                        _base_score = max(_base_score - 0.20, 0.35)
                     # Якщо документ знайдено по словах з act_hints (LLM вказала цей закон) —
                     # гарантуємо мінімальний score 0.87 щоб він точно потрапив у контекст
                     _hint_matched = _hints_words_set and any(kw.lower() in _tsrc for kw in _hints_words_set)
@@ -6111,12 +6130,28 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     # Low-confidence mode: hard floor of 0.40 to still filter obvious garbage while keeping weak but real matches.
     _min_ret_score = settings_cache.get_float("min_retrieval_score", 0.55)
     _ret_threshold = _min_ret_score if not low_confidence else max(_min_ret_score * 0.80, 0.40)
+    _min_ans_score = 0.30  # Строгий гейт відповідності
+    
     if results:
         _before = len(results)
-        results = [r for r in results if r.get("similarity", 0.0) >= _ret_threshold]
-        if len(results) < _before:
-            logger.info("min_retrieval_score=%.2f (low_conf=%s): dropped %d irrelevant chunks",
-                        _ret_threshold, low_confidence, _before - len(results))
+        _filtered_results = []
+        for r in results:
+            sim = float(r.get("similarity", 0.0))
+            ans = float(r.get("_answerability", {}).get("score", 0.0))
+            protected = bool(r.get("_full_law") or r.get("_doc_expansion") or _is_must_have_primary_act(r) or r.get("_protected_code"))
+            
+            if sim < _ret_threshold:
+                continue
+            # Жорсткий Answerability/Title Guard: відсікаємо сміття
+            if not protected and not low_confidence and ans < _min_ans_score:
+                continue
+                
+            _filtered_results.append(r)
+            
+        if len(_filtered_results) < _before:
+            logger.info("RELEVANCE/ANSWERABILITY GUARD: dropped %d chunks (sim_threshold=%.2f, ans_threshold=%.2f)",
+                        _before - len(_filtered_results), _ret_threshold, _min_ans_score)
+        results = _filtered_results
 
     # Fast path: if retrieval found no usable legal context, do not spend a full
     # LLM call. Normal weak-but-present context still goes through Gemini so the
