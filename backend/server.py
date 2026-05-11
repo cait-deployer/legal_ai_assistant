@@ -7351,6 +7351,7 @@ async def ask_stream(body: AskRequest):
                     token_queue.get(), timeout=pipe["llm_timeout"]
                 )
             except _asyncio.TimeoutError:
+                logger.error("ASK_STREAM LLM timeout after %.0fs | req=%s", pipe["llm_timeout"], request_id)
                 yield _sse("error", {
                     "request_id": request_id,
                     "error": "LLM timeout",
@@ -7361,6 +7362,7 @@ async def ask_stream(body: AskRequest):
             if event_type == "done":
                 break
             elif event_type == "error":
+                logger.error("ASK_STREAM generation error | %s | req=%s", data, request_id)
                 yield _sse("error", {
                     "request_id": request_id,
                     "error": data,
