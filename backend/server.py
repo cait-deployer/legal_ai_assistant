@@ -6215,72 +6215,36 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
-        _TITLE_GENERIC_TERMS = {
-            "акт", "акти", "закон", "закону", "закони", "кодекс", "кодексу",
-            "постанова", "постанови", "порядок", "порядку", "наказ", "наказу",
-            "україна", "україни", "кабінет", "міністрів", "кму", "рада",
-            "державний", "державна", "державне", "державної", "державну",
-            "служба", "служби", "орган", "органи", "питання", "деякі",
-            "затвердження", "внесення", "зміни", "змін", "правила", "правил",
-        }
-
-        def _is_good_title_kw(w: str) -> bool:
-            raw = (w or "").strip()
-            lw = raw.lower()
-            if not lw:
-                return False
-            if any(ch.isdigit() for ch in lw):
-                return True
-            if " " in lw or "-" in lw:
-                return True
-            if lw in _LEGAL_ACRONYMS or _looks_like_acronym(raw):
-                return True
-            return len(lw) >= 6 and lw not in _TITLE_STOPWORDS and lw not in _TITLE_GENERIC_TERMS
-
-        def _title_kw_rank(w: str) -> tuple[int, int]:
-            raw = w or ""
-            lw = raw.lower()
-            return (
-                0 if (any(ch.isdigit() for ch in lw) or " " in lw or "-" in lw or lw in _LEGAL_ACRONYMS or _looks_like_acronym(raw)) else 1,
-                -len(lw),
-            )
-
-        def _title_word_parts(text: str) -> list[str]:
-            return [_strip_punct(w) for w in (text or "").split()]
-
-        def _keep_title_word(w: str) -> bool:
-            return bool(w) and (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS or _looks_like_acronym(w)) and _is_good_title_kw(w)
-
         _search_terms_text = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
         _q_words = [
             _strip_punct(w) for w in _search_terms_text.split()
-            if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS or _looks_like_acronym(w)
+            if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS
         ]
         _q_words = [
             w for w in _q_words
-            if _keep_title_word(w)
+            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
         ]
         _hyde_words = [
             _strip_punct(w) for w in (hypothetical_text or "").split()
-            if len(w) > 5 or w.lower() in _LEGAL_ACRONYMS or _looks_like_acronym(w)
+            if len(w) > 5 or w.lower() in _LEGAL_ACRONYMS
         ][:16]
         _hyde_words = [
             w for w in _hyde_words
-            if _keep_title_word(w)
+            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
         ]
         # Слова з act_hints (назви актів від LLM) — для title search і пріоритетного буста
         _hints_words = []
         for _ht in _act_hints:
             _hints_words += [
                 _strip_punct(w) for w in _ht.split()
-                if _keep_title_word(_strip_punct(w))
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
         _hints_words_set = set(w.lower() for w in _hints_words)  # для швидкої перевірки hint-матчу
         _title_query_words = []
         for _tq in _title_queries:
             _title_query_words += [
                 _strip_punct(w) for w in _tq.split()
-                if _keep_title_word(_strip_punct(w))
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
             
         _must_phrases = [p.lower().strip() for p in _title_must_terms if p.strip()]
@@ -6288,49 +6252,29 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         for _mt in _title_must_terms:
             _must_words += [
                 _strip_punct(w) for w in _mt.split()
-                if _keep_title_word(_strip_punct(w))
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
         _nice_words = []
         for _nt in _title_nice_terms:
             _nice_words += [
                 _strip_punct(w) for w in _nt.split()
-                if _keep_title_word(_strip_punct(w))
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
-        _raw_title_texts = [*_title_queries, *_title_must_terms, *_title_nice_terms, *_act_hints]
-        _generic_companion_words = []
-        _has_specific_title_context = bool(_must_words or _hints_words or _title_query_words or _nice_words or _hyde_words or _q_words)
-        if _has_specific_title_context:
-            for _txt in _raw_title_texts:
-                for _w in _title_word_parts(_txt):
-                    if _w.lower() in _TITLE_GENERIC_TERMS and _w.lower() not in _TITLE_STOPWORDS:
-                        _generic_companion_words.append(_w)
-        _generic_companion_words = list(dict.fromkeys(_generic_companion_words))[:2]
         _exclude_phrases = [p.lower() for p in _title_exclude_terms if p and len(p) >= 4]
-        _raw_kws = list(dict.fromkeys(_must_words[:10] + _hints_words[:8] + _title_query_words[:12] + _nice_words[:8] + _hyde_words + _q_words[:6] + _generic_companion_words))[:22]
+        _raw_kws = list(dict.fromkeys(_must_words[:10] + _hints_words[:8] + _title_query_words[:12] + _nice_words[:8] + _hyde_words + _q_words[:4]))[:22]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
             _raw_kws + [
                 lm for w in _raw_kws
-                if (lm := _ua_lemma(w)) and _is_good_title_kw(lm)
+                if (lm := _ua_lemma(w)) and lm.lower() not in _TITLE_STOPWORDS
             ]
-        ))
-        _title_kws = sorted(_title_kws, key=_title_kw_rank)[:int(settings_cache.get_float("title_boost_max_keywords", 10) or 10)]
+        ))[:18]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
         if _title_kws:
-            _title_started = time.monotonic()
-            _title_results = search_qdrant_by_title(
-                _title_kws,
-                target_collections,
-                chunks_per_doc=2,
-                max_keywords=int(settings_cache.get_float("title_boost_max_keywords", 10) or 10),
-                max_docs_per_collection=int(settings_cache.get_float("title_boost_max_docs_per_collection", 24) or 24),
-                max_pages_per_keyword=int(settings_cache.get_float("title_boost_max_pages_per_keyword", 2) or 2),
-                time_budget_seconds=settings_cache.get_float("title_boost_timeout_seconds", 6.0),
-                scroll_timeout_seconds=settings_cache.get_float("title_boost_scroll_timeout_seconds", 2.0),
-            )
+            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
             if _exclude_phrases:
                 _before_title_exclude = len(_title_results)
                 _title_results = [
@@ -6353,11 +6297,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
             _title_cap = int(settings_cache.get_float("title_boost_max_chunks", 16))
             _title_results = _title_results[:max(4, min(_title_cap, 24))]
-            logger.info(
-                "TITLE BOOST found in %.2fs: %s",
-                time.monotonic() - _title_started,
-                [r["out_metadata"].get("law_id") for r in _title_results],
-            )
+            logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             logger.info(
                 "TITLE BOOST plan: title_queries=%s must=%s nice=%s exclude=%s act_hints=%s raw_kws=%s final_kws=%s",
                 _title_queries[:6],
