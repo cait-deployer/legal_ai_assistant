@@ -96,6 +96,7 @@ The planner returns:
 - `legal_terms`: exact legal terms and short acronyms such as `FOP`, `TOV`, `PDV`, `EP`, `CPD` in Ukrainian/Russian spelling when relevant;
 - `aspects`: issue dimensions that should be covered, for example taxation, liability, employees, contractors, corporate structure;
 - `title_queries`: short title-search phrases that should be tried before conversational words;
+- `title_must_terms`, `title_nice_terms`, `title_exclude_terms`: compact title vocabulary for boosting likely acts and rejecting wrong-domain title matches;
 - `primary_act_hints`: possible act titles for title search only;
 - `source_preferences`: broad source-type hints used as a small scoring prior, not a hard filter;
 - `target_collections`: exact V2 collection hints such as `rada_finance_v2`, `rada_industry_v2` or `laws_kmu_v2`;

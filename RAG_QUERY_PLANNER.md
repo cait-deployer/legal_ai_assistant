@@ -38,6 +38,9 @@ The planner returns a normalized dict with these fields:
   "legal_terms": ["string"],
   "aspects": ["string"],
   "title_queries": ["string"],
+  "title_must_terms": ["string"],
+  "title_nice_terms": ["string"],
+  "title_exclude_terms": ["string"],
   "primary_act_hints": ["string"],
   "source_preferences": ["string"],
   "target_collections": ["string"],
@@ -56,8 +59,8 @@ All fields are sanitized by `_normalize_query_plan()`:
 
 If Gemini returns truncated JSON, `_partial_query_plan()` extracts any completed
 string/list fields from the partial text. This preserves useful `title_queries`,
-`aspects`, `legal_terms` and `source_preferences` instead of dropping the whole
-search plan.
+`title_must_terms`, `title_nice_terms`, `title_exclude_terms`, `aspects`,
+`legal_terms` and `source_preferences` instead of dropping the whole search plan.
 
 ## Safety Rules
 
@@ -106,6 +109,14 @@ If the planner suggests an act title, that title is only a search hint. The titl
 - Used before conversational query words in title boost and keyword fallback.
 - They are short phrases likely to appear in document titles or stable act families.
 - They are search hints only: a title query must still resolve to a real indexed Qdrant document.
+
+`title_must_terms`, `title_nice_terms`, `title_exclude_terms`
+
+- Used by title boost as compact title vocabulary.
+- `title_must_terms` are strong positive title hints, for example `Податковий кодекс України` or `критично важливі`.
+- `title_nice_terms` are softer supporting hints, for example `воєнний стан` or `компенсація витрат`.
+- `title_exclude_terms` remove obvious wrong-domain title matches, for example excluding `електричної енергії` for a food-production support query.
+- These fields are hints only. They may boost, demote or reject retrieval candidates, but they never create legal facts.
 
 `primary_act_hints`
 

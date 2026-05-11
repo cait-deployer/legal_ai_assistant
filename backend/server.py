@@ -3487,6 +3487,9 @@ def _empty_query_plan(question: str) -> dict:
         "legal_terms": [],
         "aspects": [],
         "title_queries": [],
+        "title_must_terms": [],
+        "title_nice_terms": [],
+        "title_exclude_terms": [],
         "primary_act_hints": [],
         "source_preferences": [],
         "target_collections": [],
@@ -3626,8 +3629,12 @@ _QUERY_COLLECTION_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
         ("laws_kmu_v2", "rada_industry_v2", "rada_labor_v2"),
     ),
     (
-        ("харч", "продукт", "корм", "фітосанітар", "ветеринар", "безпечності"),
-        ("laws_kmu_v2", "rada_other_v2", "rada_industry_v2", "rada_land_v2"),
+        ("харч", "продукт", "корм", "безпечності"),
+        ("laws_kmu_v2", "rada_industry_v2", "rada_finance_v2"),
+    ),
+    (
+        ("фітосанітар", "ветеринар", "імпорт", "експорт", "укртзед"),
+        ("laws_kmu_v2", "rada_other_v2", "rada_land_v2", "rada_finance_v2"),
     ),
     (
         ("тов", "ооо", "обмеженою відповідальністю", "учасники товариства", "статутний капітал"),
@@ -3640,6 +3647,46 @@ _QUERY_COLLECTION_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (
         ("штраф", "адмін", "адміністративн", "купап", "відповідальність"),
         ("rada_admin_v2", "rada_court_v2"),
+    ),
+)
+
+
+_QUERY_TITLE_CONSTRAINT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("податков", "єдиний податок", "пдв", "пдфо", "прибуток", "пільг", "льгот"),
+        ("Податковий кодекс України",),
+        ("податкові пільги", "єдиний податок", "ПДВ", "податок на прибуток"),
+        (),
+    ),
+    (
+        ("компенсац", "відшкодуван", "витрат", "державна підтримка", "підтримк"),
+        ("державна підтримка", "порядок використання коштів"),
+        ("компенсація витрат", "фінансова підтримка", "воєнний стан"),
+        (),
+    ),
+    (
+        ("критично", "важлив", "бронюван", "бронь", "мобілізац", "особливий період"),
+        ("критично важливі", "функціонування економіки"),
+        ("бронювання військовозобов'язаних", "особливий період"),
+        (),
+    ),
+    (
+        ("харч", "продукт", "корм", "безпечності"),
+        ("харчові продукти",),
+        ("виробництво харчових продуктів", "безпечність харчових продуктів"),
+        ("електричної енергії", "Енергоринок", "виробників електричної енергії"),
+    ),
+    (
+        ("фітосанітар", "ветеринар", "імпорт", "експорт", "укртзед"),
+        ("фітосанітар", "ветеринар", "харчових продуктів"),
+        ("імпорт", "експорт", "УКТЗЕД", "воєнний стан"),
+        ("електричної енергії", "Енергоринок"),
+    ),
+    (
+        ("it", "іт", "айті", "програмуван", "інформаційні технолог"),
+        ("інформаційні технології", "Дія Сіті"),
+        ("комп'ютерне програмування", "IT-послуги"),
+        ("фермерське господарство", "сільськогосподарський"),
     ),
 )
 
@@ -3687,13 +3734,19 @@ def _scoring_query_text(
 
 def _plan_log_summary(plan: dict) -> dict:
     plan = plan or {}
-    usable = any(plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "primary_act_hints", "source_preferences", "target_collections"))
+    usable = any(plan.get(k) for k in (
+        "legal_terms", "aspects", "title_queries", "title_must_terms", "title_nice_terms",
+        "title_exclude_terms", "primary_act_hints", "source_preferences", "target_collections",
+    ))
     return {
         "usable": usable,
         "search": (plan.get("search_query") or "")[:120],
         "terms": (plan.get("legal_terms") or [])[:6],
         "aspects": (plan.get("aspects") or [])[:5],
         "titles": (plan.get("title_queries") or [])[:5],
+        "must_titles": (plan.get("title_must_terms") or [])[:5],
+        "nice_titles": (plan.get("title_nice_terms") or [])[:5],
+        "exclude_titles": (plan.get("title_exclude_terms") or [])[:5],
         "acts": (plan.get("primary_act_hints") or [])[:4],
         "sources": (plan.get("source_preferences") or [])[:5],
         "collections": (plan.get("target_collections") or [])[:8],
@@ -3706,6 +3759,9 @@ def _deterministic_query_plan(question: str) -> dict:
     legal_terms: list[str] = []
     aspects: list[str] = []
     target_collections: list[str] = []
+    title_must_terms: list[str] = []
+    title_nice_terms: list[str] = []
+    title_exclude_terms: list[str] = []
     for triggers, terms, rule_aspects in _QUERY_ALIAS_RULES:
         if any(trigger in q for trigger in triggers):
             legal_terms.extend(terms)
@@ -3720,6 +3776,11 @@ def _deterministic_query_plan(question: str) -> dict:
     for triggers, collections in _QUERY_COLLECTION_RULES:
         if any(trigger in q for trigger in triggers):
             target_collections.extend(collections)
+    for triggers, must_terms, nice_terms, exclude_terms in _QUERY_TITLE_CONSTRAINT_RULES:
+        if any(trigger in q for trigger in triggers):
+            title_must_terms.extend(must_terms)
+            title_nice_terms.extend(nice_terms)
+            title_exclude_terms.extend(exclude_terms)
 
     compare_markers = (" чи ", " або ", " vs ", " versus ", "краще", "лучше", "обрати", "выбрать", "порівня", "сравн")
     should_compare = any(marker in f" {q} " for marker in compare_markers)
@@ -3729,10 +3790,16 @@ def _deterministic_query_plan(question: str) -> dict:
     legal_terms = _merge_unique_strings(legal_terms, limit=18)
     aspects = _merge_unique_strings(aspects, limit=8)
     target_collections = _merge_unique_strings(target_collections, limit=8)
+    title_must_terms = _merge_unique_strings(title_must_terms, limit=5)
+    title_nice_terms = _merge_unique_strings(title_nice_terms, limit=6)
+    title_exclude_terms = _merge_unique_strings(title_exclude_terms, limit=6)
     if legal_terms:
         plan["legal_terms"] = legal_terms
         plan["aspects"] = aspects
         plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
+        plan["title_must_terms"] = title_must_terms
+        plan["title_nice_terms"] = title_nice_terms
+        plan["title_exclude_terms"] = title_exclude_terms
         plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
         plan["target_collections"] = target_collections
         plan["search_query"] = " ".join(_merge_unique_strings(_query_terms(question, limit=12), legal_terms, aspects, limit=28))[:350]
@@ -3746,6 +3813,9 @@ def _deterministic_query_plan(question: str) -> dict:
             ]
     elif title_queries:
         plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
+        plan["title_must_terms"] = title_must_terms
+        plan["title_nice_terms"] = title_nice_terms
+        plan["title_exclude_terms"] = title_exclude_terms
         plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
         plan["target_collections"] = target_collections
         plan["aspects"] = aspects
@@ -3753,6 +3823,9 @@ def _deterministic_query_plan(question: str) -> dict:
         plan["search_query"] = " ".join(_merge_unique_strings(plan["legal_terms"], plan["aspects"], limit=24))[:350]
     elif target_collections:
         plan["target_collections"] = target_collections
+        plan["title_must_terms"] = title_must_terms
+        plan["title_nice_terms"] = title_nice_terms
+        plan["title_exclude_terms"] = title_exclude_terms
         plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
         plan["search_query"] = " ".join(plan["legal_terms"])[:350] or question[:350]
     return plan
@@ -3777,6 +3850,21 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
         extra.get("title_queries", []),
         base.get("title_queries", []),
         limit=8,
+    )
+    merged["title_must_terms"] = _merge_unique_strings(
+        extra.get("title_must_terms", []),
+        base.get("title_must_terms", []),
+        limit=5,
+    )
+    merged["title_nice_terms"] = _merge_unique_strings(
+        extra.get("title_nice_terms", []),
+        base.get("title_nice_terms", []),
+        limit=6,
+    )
+    merged["title_exclude_terms"] = _merge_unique_strings(
+        extra.get("title_exclude_terms", []),
+        base.get("title_exclude_terms", []),
+        limit=6,
     )
     merged["primary_act_hints"] = _merge_unique_strings(
         extra.get("primary_act_hints", []),
@@ -3822,6 +3910,9 @@ def _normalize_query_plan(raw_plan, question: str) -> dict:
     plan["legal_terms"] = _clean_plan_list(raw_plan.get("legal_terms"), limit=14, min_len=2)
     plan["aspects"] = _clean_plan_list(raw_plan.get("aspects"), limit=8, min_len=4)
     plan["title_queries"] = _clean_plan_list(raw_plan.get("title_queries"), limit=8, min_len=5)
+    plan["title_must_terms"] = _clean_plan_list(raw_plan.get("title_must_terms"), limit=5, min_len=4, max_len=80)
+    plan["title_nice_terms"] = _clean_plan_list(raw_plan.get("title_nice_terms"), limit=6, min_len=4, max_len=80)
+    plan["title_exclude_terms"] = _clean_plan_list(raw_plan.get("title_exclude_terms"), limit=6, min_len=4, max_len=80)
     plan["primary_act_hints"] = _clean_plan_list(raw_plan.get("primary_act_hints"), limit=5, min_len=6)
     plan["source_preferences"] = _clean_plan_list(raw_plan.get("source_preferences"), limit=6, min_len=4)
     plan["target_collections"] = _clean_plan_collections(raw_plan.get("target_collections"), limit=8)
@@ -3854,6 +3945,9 @@ def _partial_query_plan(raw: str, question: str) -> dict:
     plan["legal_terms"] = _partial_json_list_values(raw, "legal_terms", limit=14, min_len=2)
     plan["aspects"] = _partial_json_list_values(raw, "aspects", limit=8, min_len=4)
     plan["title_queries"] = _partial_json_list_values(raw, "title_queries", limit=8, min_len=5)
+    plan["title_must_terms"] = _partial_json_list_values(raw, "title_must_terms", limit=5, min_len=4, max_len=80)
+    plan["title_nice_terms"] = _partial_json_list_values(raw, "title_nice_terms", limit=6, min_len=4, max_len=80)
+    plan["title_exclude_terms"] = _partial_json_list_values(raw, "title_exclude_terms", limit=6, min_len=4, max_len=80)
     plan["primary_act_hints"] = _partial_json_list_values(raw, "primary_act_hints", limit=5, min_len=6)
     plan["source_preferences"] = _partial_json_list_values(raw, "source_preferences", limit=6, min_len=3)
     plan["target_collections"] = _clean_plan_collections(
@@ -4133,6 +4227,63 @@ def _directness_penalty(content: str, terms: list[str]) -> float:
     if hits >= 2:
         return 0.0
     return 0.12 if hits == 1 else 0.20
+
+
+_QUERY_DOMAIN_GUARDS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "food_vs_energy",
+        ("харч", "продукт", "корм", "безпечн", "фітосанітар", "ветеринар"),
+        ("електричн", "електроенерг", "енергоринок", "електростанц", "енергетичн"),
+        ("харч", "продукт", "корм", "безпечн", "фітосанітар", "ветеринар", "аграр", "сільськогосп"),
+    ),
+    (
+        "food_vs_fuel",
+        ("харч", "продукт", "корм", "безпечн"),
+        ("палив", "нафт", "газ", "вугіл", "енергоресурс"),
+        ("харч", "продукт", "корм", "безпечн", "аграр", "сільськогосп"),
+    ),
+    (
+        "it_vs_agro",
+        (" it ", " іт ", "айті", "програмуван", "інформаційні технолог"),
+        ("фермер", "сільськогосп", "аграр", "земельн"),
+        (" it ", " іт ", "айті", "програмуван", "інформаційні технолог", "дія сіті"),
+    ),
+)
+
+
+def _result_domain_conflict_reason(query_text: str, result: dict) -> str | None:
+    query = f" {(query_text or '').lower()} "
+    meta = result.get("out_metadata", {}) or {}
+    title = f"{meta.get('source') or ''} {meta.get('title') or ''}".lower()
+    content = (result.get("out_content") or "").lower()[:1200]
+    haystack = f" {title} {content} "
+    for name, query_terms, negative_terms, rescue_terms in _QUERY_DOMAIN_GUARDS:
+        if not any(term in query for term in query_terms):
+            continue
+        if not any(term in haystack for term in negative_terms):
+            continue
+        title_has_rescue = any(term in title for term in rescue_terms)
+        content_has_rescue = any(term in content for term in rescue_terms)
+        if not title_has_rescue and not content_has_rescue:
+            return name
+    return None
+
+
+def _apply_domain_relevance_guard(results: list[dict], query_text: str) -> list[dict]:
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for r in results:
+        reason = _result_domain_conflict_reason(query_text, r)
+        if reason:
+            meta = r.get("out_metadata", {}) or {}
+            dropped.append(
+                f"{r.get('_collection')}:{meta.get('law_id','?')}:{reason}:{(meta.get('source') or meta.get('title') or '')[:90]}"
+            )
+            continue
+        kept.append(r)
+    if dropped:
+        logger.info("RELEVANCE GUARD: dropped %d domain-conflict chunks: %s", len(dropped), dropped[:8])
+    return kept
 
 
 def _answerability_score(result: dict, query_text: str, terms: list[str] | None = None) -> dict:
@@ -4842,6 +4993,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "title_queries:string[] — короткі фрази для пошуку в НАЗВАХ документів, кожна 2-5 слів; "
                         "включай тип акта або сферу, наприклад 'Податковий кодекс України', 'критично важливі підприємства', "
                         "'державна підтримка виробників'.\n"
+                        "title_must_terms:string[] — 1-3 фрази, які бажано бачити в назві потрібних актів.\n"
+                        "title_nice_terms:string[] — 1-4 допоміжні фрази для назви або близької теми.\n"
+                        "title_exclude_terms:string[] — 0-4 фрази, які означають очевидно чужу тему і мають відсікти документ.\n"
                         "primary_act_hints:string[] — тільки загальновідомі назви актів або дуже впізнавані фрагменти назв; "
                         "якщо не впевнений у точній назві, дай фрагмент без номера і дати.\n"
                         "source_preferences:string[] — broad джерела: rada, kmu, zir, court, wiki, mod.\n"
@@ -4849,29 +5003,31 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "Не пиши просто rada. Для Ради обери конкретні rada_*_v2 за картою h-категорій. "
                         f"{_RADA_COLLECTION_GUIDE}\n"
                         "should_compare:boolean, needs_clarification:boolean, clarification_questions:string[]. "
-                        "Якщо місця мало, пріоритет: target_collections, title_queries, aspects, legal_terms."
+                        "Не заповнюй поля для галочки: якщо сигналу немає, лишай список порожнім. "
+                        "Якщо місця мало, пріоритет: target_collections, title_must_terms, title_exclude_terms, title_queries."
                     ),
                 )
                 try:
                     from vertexai.generative_models import ThinkingConfig as _PlannerThinkingConfig
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=900,
+                        max_output_tokens=1100,
                         response_mime_type="application/json",
                         thinking_config=_PlannerThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=900,
+                        max_output_tokens=1100,
                         response_mime_type="application/json",
                     )
                 _planner_prompt = (
                     f"Питання: {q[:600]}\n\n"
                     "Поверни компактний JSON-план пошуку. Для кожного правового механізму з питання додай окремий aspect. "
                     "У title_queries постав фрази, які найімовірніше є в назвах законів, кодексів, постанов або порядків. "
+                    "У title_must_terms/title_nice_terms/title_exclude_terms дай короткі title-слова для точного пошуку та відсікання чужої теми. "
                     "У target_collections постав точні v2-колекції, а не broad source. "
-                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[]}'
+                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[]}'
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -4936,6 +5092,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             rewritten_query = None
         _act_hints = _query_plan.get("primary_act_hints", []) if _query_plan else []
         _title_queries = _query_plan.get("title_queries", []) if _query_plan else []
+        _title_must_terms = _query_plan.get("title_must_terms", []) if _query_plan else []
+        _title_nice_terms = _query_plan.get("title_nice_terms", []) if _query_plan else []
+        _title_exclude_terms = _query_plan.get("title_exclude_terms", []) if _query_plan else []
         _source_preferences = [
             str(s).strip().lower()
             for s in (_query_plan.get("source_preferences", []) if _query_plan else [])
@@ -4963,9 +5122,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             " ".join(_scoring_terms),
         ]).strip()
         logger.info(
-            "QUERY PLAN USED: scoring_terms=%s title_queries=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
+            "QUERY PLAN USED: scoring_terms=%s title_queries=%s title_must=%s title_nice=%s title_exclude=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
             _scoring_terms[:10],
             _title_queries[:6],
+            _title_must_terms[:5],
+            _title_nice_terms[:6],
+            _title_exclude_terms[:6],
             _source_preferences[:6],
             _target_collection_hints[:8],
             _act_hints[:5],
@@ -5446,7 +5608,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 _strip_punct(w) for w in _tq.split()
                 if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
-        _raw_kws = list(dict.fromkeys(_hints_words[:8] + _title_query_words[:12] + _hyde_words + _q_words[:4]))[:18]
+        _must_words = []
+        for _mt in _title_must_terms:
+            _must_words += [
+                _strip_punct(w) for w in _mt.split()
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+            ]
+        _nice_words = []
+        for _nt in _title_nice_terms:
+            _nice_words += [
+                _strip_punct(w) for w in _nt.split()
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+            ]
+        _exclude_phrases = [p.lower() for p in _title_exclude_terms if p and len(p) >= 4]
+        _raw_kws = list(dict.fromkeys(_must_words[:10] + _hints_words[:8] + _title_query_words[:12] + _nice_words[:8] + _hyde_words + _q_words[:4]))[:22]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
@@ -5460,6 +5635,23 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_kws = []
         if _title_kws:
             _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
+            if _exclude_phrases:
+                _before_title_exclude = len(_title_results)
+                _title_results = [
+                    r for r in _title_results
+                    if not any(
+                        phrase in (
+                            (r["out_metadata"].get("source", "") + " " + r["out_metadata"].get("title", "")).lower()
+                        )
+                        for phrase in _exclude_phrases
+                    )
+                ]
+                if len(_title_results) < _before_title_exclude:
+                    logger.info(
+                        "TITLE BOOST exclude: dropped %d by phrases=%s",
+                        _before_title_exclude - len(_title_results),
+                        _exclude_phrases[:6],
+                    )
             # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
             _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
@@ -5467,8 +5659,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_results = _title_results[:max(4, min(_title_cap, 24))]
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             logger.info(
-                "TITLE BOOST plan: title_queries=%s act_hints=%s raw_kws=%s final_kws=%s",
+                "TITLE BOOST plan: title_queries=%s must=%s nice=%s exclude=%s act_hints=%s raw_kws=%s final_kws=%s",
                 _title_queries[:6],
+                _title_must_terms[:5],
+                _title_nice_terms[:6],
+                _title_exclude_terms[:6],
                 _act_hints[:5],
                 _raw_kws[:12],
                 _title_kws[:12],
@@ -5483,7 +5678,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         r.get("out_content", "")[:1500]
                     ).lower()
                     _tmatched = sum(1 for kw in _title_kws if kw.lower() in _tsrc)
+                    _must_matched = sum(1 for kw in _must_words if kw and kw.lower() in _tsrc)
                     _base_score = 0.50 + 0.35 * (_tmatched / max(len(_title_kws), 1))
+                    if _must_words and _must_matched:
+                        _base_score = min(_base_score + 0.12, 0.88)
+                    elif _must_words and not any(nt and nt.lower() in _tsrc for nt in _nice_words):
+                        _base_score = max(_base_score - 0.12, 0.35)
                     # Якщо документ знайдено по словах з act_hints (LLM вказала цей закон) —
                     # гарантуємо мінімальний score 0.87 щоб він точно потрапив у контекст
                     _hint_matched = _hints_words_set and any(kw.lower() in _tsrc for kw in _hints_words_set)
@@ -5588,6 +5788,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             )
     except Exception as _pa_err:
         logger.warning("Primary act discovery error: %s", _pa_err)
+
+    _pre_guard_len = len(results)
+    results = _apply_domain_relevance_guard(
+        results,
+        _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints),
+    )
+    if len(results) < _pre_guard_len:
+        results.sort(key=lambda x: x["similarity"], reverse=True)
 
     # Unified pre-sort: title_match chunks отримують бонус якщо вони підтверджені семантикою
     # Мета: реранкер бачить найбільш різноманітних кандидатів, а не просто топ-40 за вектором
