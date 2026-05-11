@@ -1,36 +1,37 @@
 # URAI RAG Query Planner
 
-> Updated: May 2026. ASCII-only on purpose. Source of truth: `backend/server.py` and `backend/qdrant_storage.py`.
+> Updated: May 2026. Source of truth: `backend/server.py`.
 
 ## Purpose
 
 The query planner is a retrieval helper, not a legal authority.
 
-It exists because a user question like "which is better, FOP or TOV for an IT team?" is not one search problem. It contains several legal aspects: taxation, liability, employees or contractors, corporate structure, limits and sometimes investment planning.
+It converts a user question into a structured search plan so the backend can
+look for direct evidence deliberately. This is especially important for:
 
-The planner converts the user question into a structured search plan so retrieval can look for those aspects deliberately.
+- comparison questions;
+- recommendation questions;
+- multi-part "tax benefits, compensation, critical status" questions;
+- direct norm questions where a large code contains the answer;
+- follow-up questions that depend on previous cited context.
 
 ## Runtime Position
 
-The planner runs inside `backend/server.py::_ask_pipeline()` after:
+The planner runs inside `_ask_pipeline()` after:
 
-1. The question is validated.
-2. Russian-looking text may be translated to Ukrainian.
-3. A follow-up question may be resolved using recent chat history.
+1. question validation;
+2. optional Russian-to-Ukrainian search translation;
+3. follow-up resolution;
+4. compact history evidence preparation when useful.
 
-Then the backend runs two tasks in parallel:
+Then two tasks run in parallel:
 
-1. Embed the resolved search question.
-2. Ask the planner for a JSON search plan.
-
-The planner replaces the older split flow of:
-
-- free-form query rewrite;
-- separate act-hints extraction.
+1. embed the resolved search question;
+2. ask Gemini for a JSON search plan.
 
 ## Planner Contract
 
-The planner returns a normalized dict with these fields:
+Normalized planner shape:
 
 ```json
 {
@@ -44,9 +45,21 @@ The planner returns a normalized dict with these fields:
   "primary_act_hints": ["string"],
   "source_preferences": ["string"],
   "target_collections": ["string"],
+  "evidence_subquestions": [
+    {
+      "id": "string",
+      "question": "string",
+      "must_find": ["string"],
+      "avoid_if_only": ["string"],
+      "target_collections": ["string"],
+      "source_preferences": ["string"]
+    }
+  ],
   "should_compare": false,
   "needs_clarification": false,
-  "clarification_questions": ["string"]
+  "clarification_questions": ["string"],
+  "article_hint": null,
+  "article_confidence": 0.0
 }
 ```
 
@@ -55,170 +68,181 @@ All fields are sanitized by `_normalize_query_plan()`:
 - strings are trimmed and whitespace-normalized;
 - lists are deduplicated;
 - list sizes and string lengths are capped;
-- invalid planner output falls back to `_empty_query_plan(question)`.
+- collection names are validated against the V2 whitelist;
+- invalid output falls back to `_empty_query_plan(question)`.
 
-If Gemini returns truncated JSON, `_partial_query_plan()` extracts any completed
-string/list fields from the partial text. This preserves useful `title_queries`,
-`title_must_terms`, `title_nice_terms`, `title_exclude_terms`, `aspects`,
-`legal_terms` and `source_preferences` instead of dropping the whole search plan.
+If Gemini returns truncated JSON, partial extraction preserves completed fields,
+including `evidence_subquestions`, instead of discarding the whole plan.
 
 ## Safety Rules
-
-The planner must never be treated as a source of law.
 
 Planner output may influence:
 
 - embedding query text;
 - keyword terms;
-- title-search terms;
+- title terms;
 - dynamic primary-act discovery;
-- aspect coverage;
-- debug metadata.
+- target collection hints;
+- aspect/evidence coverage;
+- article-window retrieval hints;
+- debug logs.
 
-Planner output may not directly influence:
+Planner output may not directly create:
 
 - final legal conclusions;
 - citations;
-- statute or article numbers;
+- statute/article numbers in the answer;
 - rates, limits, amounts, dates or deadlines;
 - document status;
-- recommendations such as "choose FOP" or "choose TOV".
+- recommendations like "choose FOP" or "choose TOV".
 
-If the planner suggests an act title, that title is only a search hint. The title must match a real Qdrant payload before any document from it can appear in the context.
+Every legal fact must still come from retrieved context.
 
-## Retrieval Use
+## Field Usage
 
-`search_query`
+### `search_query`
 
-- Used as the planned semantic search text when it differs from the resolved user question.
-- The backend searches both the original resolved question and the planned search query, then merges by `(law_id, chunk_index)`.
+Used as normalized search text. The backend searches both the resolved user
+question and this planned query when they differ.
 
-`legal_terms`
+### `legal_terms`
 
-- Added to keyword fallback.
-- Added to title boost.
-- Keeps short Ukrainian legal acronyms alive through retrieval. The backend preserves indexed lowercase spellings for FOP, TOV/OOO, PDV, EP, CPD, KVED, KZpP, KMU, DPS and ZIR.
+Used for keyword fallback, title boost and scoring. Short legal acronyms are
+preserved, including FOP, TOV/OOO, PDV, EP, CPD, KVED, KZpP, KMU, DPS and ZIR
+in relevant Ukrainian/Russian spellings.
 
-`aspects`
+### `aspects`
 
-- Added to primary discovery terms.
-- Used by aspect coverage so a multi-aspect question does not collapse to one source family.
+Used to protect coverage for independent dimensions such as taxation,
+liability, employees, contractors, corporate structure, compensation or
+procedure.
 
-`title_queries`
+### `evidence_subquestions`
 
-- Used before conversational query words in title boost and keyword fallback.
-- They are short phrases likely to appear in document titles or stable act families.
-- They are search hints only: a title query must still resolve to a real indexed Qdrant document.
+Used for retrieval only. Each subquestion describes one evidence block the
+answer should try to prove. Example blocks:
 
-`title_must_terms`, `title_nice_terms`, `title_exclude_terms`
+- tax treatment;
+- who qualifies;
+- amount/limit;
+- procedure;
+- required documents;
+- exceptions;
+- liability/risk.
 
-- Used by title boost as compact title vocabulary.
-- `title_must_terms` are strong positive title hints, for example `Податковий кодекс України` or `критично важливі`.
-- `title_nice_terms` are softer supporting hints, for example `воєнний стан` or `компенсація витрат`.
-- `title_exclude_terms` remove obvious wrong-domain title matches, for example excluding `електричної енергії` for a food-production support query.
-- These fields are hints only. They may boost, demote or reject retrieval candidates, but they never create legal facts.
+The backend adds their `question` and `must_find` terms to evidence search and
+coverage scoring. `avoid_if_only` terms help demote candidates that are
+topically close but answer the wrong domain.
 
-`primary_act_hints`
+### Title Fields
 
-- Added to title search terms only.
-- A hint that does not resolve to a real indexed document has no authority and does not reach the answer.
+`title_queries`, `title_must_terms`, `title_nice_terms` and
+`title_exclude_terms` guide title MatchText and title scoring. They are hints,
+not hard filters, and must resolve to real indexed Qdrant payloads.
 
-`source_preferences`
+### `primary_act_hints`
 
-- Used as a small source-family prior, not as a hard filter.
-- Supported broad hints include `rada`, `kmu`, `zir`, `court`, `wiki` and `mod`.
+Search hints for likely act titles. A hint has no authority unless it resolves
+to a real indexed document.
 
-`target_collections`
+### `source_preferences`
 
-- Used as exact V2 Qdrant collection hints for the first retrieval pass.
-- This is how the planner avoids saying only `rada` when the real choice is a
-  narrower Rada collection such as `rada_finance_v2`, `rada_labor_v2` or
-  `rada_industry_v2`.
-- Values are validated against the production whitelist. Unknown collection
-  names are discarded.
-- Low-confidence retrieval still expands back to the allowed plan collections,
-  so a bad hint should not permanently hide useful documents.
-- For Rada categories the planner sees the h-code map:
-  - `h2`, `h3`, `h26`, `h23` -> `rada_finance_v2`;
-  - `h4` -> `rada_state_v2`;
-  - `h27` -> `rada_personnel_v2`;
-  - `h22`, `h30`, `h1` -> `rada_court_v2`;
-  - `h11` -> `rada_intl_v2`;
-  - `h19`, `h20` -> `rada_labor_v2`;
-  - `h5`, `h16`, `h13` -> `rada_civil_v2`;
-  - `h25` -> `rada_criminal_v2`;
-  - `h8`, `h10`, `h31` -> `rada_admin_v2`;
-  - `h6`, `h21` -> `rada_housing_v2`;
-  - `h9`, `h18` -> `rada_land_v2`;
-  - `h7`, `h17`, `h15` -> `rada_industry_v2`;
-  - `h12`, `h14`, `h24`, `h28`, `h29`, `h32` -> `rada_other_v2`.
+Small source-family priors, not hard filters. Supported broad values include:
+
+- `rada`
+- `kmu`
+- `zir`
+- `court`
+- `wiki`
+- `mod`
+
+### `target_collections`
+
+Exact V2 collection hints for the first retrieval pass. Unknown names are
+discarded. Low-confidence retrieval can widen safely back to allowed
+collections.
+
+## Numeric And Word Variants
+
+The backend expands numeric tokens into Ukrainian word variants where useful.
+For example, a query containing `20` can search for variants such as
+`двадцять` and `двадцяти`. This is generic numeric matching, not a hardcoded
+speed-fine rule.
+
+## Follow-Up Evidence Carry
+
+For follow-up or recommendation-continuation questions, the backend can extract
+a compact summary of previously cited assistant claims and add it to retrieval
+terms. This helps a second question like "so what should I choose?" reuse the
+sources already found in the previous answer.
+
+The carried history is not treated as law. It only helps retrieval and is
+marked separately in the final prompt.
 
 ## Dynamic Primary-Act Discovery
 
 The backend does not pin hardcoded law ids.
 
-Primary-act discovery looks at candidates already found by semantic, keyword or title search and scores them by:
-
-- source family;
-- document type;
-- current/dead status;
-- query-term coverage in title and content;
-- semantic similarity;
-- recency and temporal penalties.
-
-Documents can be promoted only if they are real retrieved candidates and look like current primary normative material, for example:
+Primary-act discovery promotes current primary normative material already found
+by search:
 
 - Rada laws/codes;
-- KMU resolutions;
-- ministry orders/instructions where appropriate.
+- KMU resolutions/procedures;
+- ministry orders/procedures when appropriate, including MOD.
 
-The discovery layer may expand those real documents with sibling chunks from Qdrant. It does not invent documents.
+It can expand those real documents with sibling chunks. It does not invent
+documents.
+
+## Article Window
+
+Large legal acts often split condition and consequence across neighboring
+chunks. For direct norm/article questions, the backend can protect a contiguous
+window around likely article chunks: N-1, N and N+1 when useful.
+
+This fixed cases where the answer saw only the sanction for "more than 50 km/h"
+but missed the preceding clause for "more than 20 km/h".
 
 ## Aspect Coverage
 
-After primary discovery, the backend selects a small number of protected aspect candidates from the planner's `aspects`.
+After primary discovery and reranking, the backend protects a small number of
+additional candidates that cover planner aspects/evidence. This prevents:
 
-This protects the final context from common failures:
+- one source family from crowding out the other side of a comparison;
+- tax/ZIR sources crowding out company-law sources;
+- broad wiki/court context replacing direct norms.
 
-- tax explanation sources crowding out company-law sources;
-- one large document occupying all slots;
-- a comparison answer having sources for only one side.
-
-Aspect coverage still uses only retrieved documents. It does not force a document into context if Qdrant found nothing for that aspect.
-
-## Stopwords And Acronyms
-
-Conversational words are removed from search terms. The stopword set covers common "I need a recommendation / which is better / choose / criteria" wording in Ukrainian and Russian.
-
-Short legal acronyms are preserved even when they are shorter than four characters, for example FOP, TOV, PDV, EP, CPD and KVED in their indexed lowercase spellings.
-
-This is important because many Ukrainian legal queries depend on short abbreviations.
+Coverage candidates must still be real retrieved documents and pass quality
+checks.
 
 ## Logging
 
-Expected logs after this change:
+Expected logs:
 
-- `QUERY PLAN: ...`
-- `QUERY PLAN USED: ... target_collections=[...]`
-- `COLLECTION SCOPE: hints=[...] prefs=[...] target=[...]`
-- `PRIMARY ACT DISCOVERY: ...`
-- `ASPECT COVERAGE: ...` when aspects produce protected candidates.
-- `FINAL RESULTS: ...`
+- `QUERY PLAN BASE`
+- `QUERY PLAN AI`
+- `QUERY PLAN FINAL`
+- `QUERY PLAN USED`
+- `COLLECTION SCOPE`
+- `PRIMARY ACT DISCOVERY`
+- `ARTICLE FINAL GUARANTEE`
+- `ASPECT COVERAGE`
+- `EVIDENCE COVERAGE`
+- `FOLLOWUP EVIDENCE CARRY`
+- `CONTEXT SQUEEZE`
+- `FINAL RESULTS`
 
-The older `REWRITE raw=...` and `ACT HINTS: ...` logs should no longer appear from the main chat pipeline.
+Older `REWRITE raw=...` and separate `ACT HINTS` should not be considered the
+current main chat flow.
 
 ## Operational Notes
 
-`query_planner_enabled`
+`query_planner_enabled` defaults to enabled if the setting is absent. When
+disabled, the backend uses the resolved question as the basic search plan.
 
-- Read from `app_settings` through `settings_cache.get_bool("query_planner_enabled", True)`.
-- Defaults to enabled if the setting is absent.
-- When disabled, the backend uses the original resolved question as the search plan.
+The planner improves retrieval quality, but good answers still depend on:
 
-The planner improves retrieval quality but does not replace metadata enrichment. For best answers, the V2 database still needs:
-
-1. Full chunk repair/reindex.
-2. OpenData metadata enrichment.
-3. Text cancellation scan.
-4. Applying cancellation cache to `meta.json`.
-5. Patching Qdrant payload metadata.
+1. complete V2 scraping/reindex;
+2. OpenData metadata enrichment;
+3. text cancellation scan;
+4. Qdrant payload metadata patching;
+5. eval-case driven tuning.

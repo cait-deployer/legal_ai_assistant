@@ -1,6 +1,7 @@
 # URAI Chatbot Flow
 
-> Updated: May 2026. This file is intentionally ASCII-only to avoid Windows console encoding corruption.
+> Updated: May 2026. Source of truth: `app/chat/page.tsx`,
+> `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`.
 
 ## Runtime Flow
 
@@ -9,50 +10,56 @@ flowchart TD
     A[User sends question] --> B[Chat UI creates chat if needed]
     B --> C[User message is saved]
     C --> D[Frontend sends last 6 messages as history]
-    D --> E[/api/ask/stream reads auth, profile, plan, beta, features]
+    D --> E[Next.js ask route reads auth, profile, plan and features]
     E --> F[FastAPI /ask_stream]
-    F --> G[Optional RU to UA translation]
-    G --> H[Follow-up resolver for ambiguous short questions]
+    F --> G[Optional RU to UA search translation]
+    G --> H[Follow-up resolver and compact history evidence carry]
     H --> I[Parallel: query embedding + AI query planner]
-    I --> J[Plan sources -> allowed V2 Qdrant collections]
-    J --> K[Vector search: original and planner search query]
-    K --> L[Merge semantic candidates]
-    L --> M[Boost, dedup, diversity, document expansion]
-    M --> N[Keyword MatchText + title boost + primary-act discovery]
-    N --> O[Aspect coverage + deterministic answerability reranker]
-    O --> P[Strict context squeeze + expired-document filter + context buckets]
-    P --> Q[Gemini streamed answer + hidden completion marker + parallel classification]
-    Q --> R[Backend strips marker and frontend displays clean tokens]
-    R --> S[Assistant message, citations, analytics and usage are saved]
-    S --> T[Every 2nd user turn starts background summary]
+    I --> J[Planner and source features build allowed V2 collections]
+    J --> K[Vector search: resolved question + planned search query]
+    K --> L[Merge candidates]
+    L --> M[Source scoring, avoid-topic penalties and dedup]
+    M --> N[Document expansion, keyword search and title boost]
+    N --> O[Primary-act discovery and article window protection]
+    O --> P[Aspect and evidence-subquestion coverage]
+    P --> Q[Deterministic answerability reranker]
+    Q --> R[Strict context squeeze and expired-document filter]
+    R --> S[Gemini streamed answer + classification]
+    S --> T[Completion marker / continuation if needed]
+    T --> U[Frontend saves assistant message, citations, analytics]
 ```
 
 ## Frontend Payload
 
-`app/chat/page.tsx` currently:
+`app/chat/page.tsx`:
 
-- sends only the last 6 messages, roughly 3 conversation turns;
-- sends `context_summary: null`;
-- still generates and stores `chats.context_summary` in the background after every 2nd user turn;
-- saves the assistant answer and analytics after streaming completes.
-
-`context_summary` exists in the backend contract, but the chat UI does not inject it into generation yet.
+- sends the last 6 messages as `history`;
+- currently sends `context_summary: null`;
+- stores `context_summary` after background summarization, but does not inject it
+  into the next generation payload yet;
+- saves the assistant answer and citations after streaming completes;
+- lets the user stop generation. While generation is active, the send icon
+  becomes a stop icon; clicking it aborts the request and restores the last
+  submitted question into the input.
 
 ## API Route
 
-`app/api/ask/stream/route.ts`:
+`app/api/ask/stream/route.ts` and `app/api/ask/route.ts`:
 
-- verifies Supabase auth;
-- reads `profiles` for tier, beta, onboarding profile, personal prompt, response preferences and usage fields;
-- treats beta users as effective `pro`;
-- reads `subscription_plans.max_docs_retrieved`;
-- reads enabled `plan_features`;
-- maps source features to backend source keys;
-- adds `mod` and `zir` when at least one source feature is present;
-- gates response preferences:
+- verify Supabase auth;
+- read `profiles` for tier, beta status, onboarding profile, personal prompt,
+  response preferences and usage fields;
+- treat beta users as effective Pro;
+- read `subscription_plans.max_docs_retrieved`;
+- read enabled `plan_features`;
+- map source features to backend source keys;
+- add `kmu`, `mod` and `zir` when at least one source feature exists;
+- gate response preferences:
   - `full` requires Pro/Beta;
   - `detailed` requires paid/Beta;
-- forwards `question`, `max_docs`, `filter_sources`, `response_features`, `user_profile`, `history`, `context_summary`, `ai_personal_prompt`, `response_length_pref`, `response_lang_style`.
+- forward `question`, `max_docs`, `filter_sources`, `response_features`,
+  `user_profile`, `history`, `context_summary`, `ai_personal_prompt`,
+  `response_length_pref`, `response_lang_style`.
 
 ## Backend Retrieval
 
@@ -62,59 +69,64 @@ flowchart TD
 2. Initialize Vertex AI if needed.
 3. Translate Russian-looking questions to Ukrainian for search.
 4. Resolve follow-up questions using recent history.
-5. Run query embedding and the AI query planner in parallel.
-6. Convert plan source features into allowed V2 collections.
-7. Apply planner `target_collections` first, then broad source preferences, then allowed collections as fallback. The old centroid router is disabled.
-8. Run vector search for the original question and, when the planner produced a distinct `search_query`, for that planned search query.
-9. Merge by `(law_id, chunk_index)`.
-10. Apply low-confidence widening when raw score is weak.
-11. Apply source and document-type scoring.
-12. Deduplicate to max 2 chunks per law id.
-13. Apply diversity caps.
-14. Expand promising documents with sibling chunks.
-15. Add keyword MatchText candidates using planner legal terms, aspects and verified act-title hints.
-16. Add title MatchText candidates with a small cap.
-17. Run dynamic primary-act discovery. This is not id hardcoding: it promotes current laws/codes/procedures already found by search and expands only real Qdrant documents.
-18. Add aspect coverage candidates from the planner so multi-aspect questions do not collapse to one source family.
+5. Build a compact history-evidence summary from cited previous assistant
+   answers when the new question is a follow-up or recommendation continuation.
+6. Run query embedding and the AI query planner in parallel.
+7. Convert plan/source features into allowed V2 collections.
+8. Apply planner `target_collections`, semantic collection hints and broad
+   source preferences. If retrieval confidence is weak, widen safely back to
+   allowed collections.
+9. Run vector search for both the resolved question and distinct planned search
+   query.
+10. Merge by `(law_id, chunk_index)`.
+11. Apply source/document scoring and avoid-topic penalties.
+12. Deduplicate and diversify so one document/source family cannot eat the
+    whole context.
+13. Expand promising documents with sibling chunks.
+14. Add keyword MatchText candidates using planner terms, aspects, evidence
+    subquestions and carried history evidence.
+15. Add title MatchText candidates.
+16. Run dynamic primary-act discovery. This promotes only real retrieved
+    candidates; it does not hardcode law ids.
+17. Apply article-hint preference and contiguous article-window protection for
+    direct norm/article questions.
+18. Add aspect/evidence coverage candidates for multi-part questions.
 19. Run deterministic answerability rerank.
 20. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
-21. Squeeze final context: keep search wide, but send only the strongest source-strict chunks to Gemini.
+21. Squeeze final context to the strongest chunks.
 22. Filter cancelled/expired documents.
 23. Build context buckets.
 24. Generate streamed answer and parallel classification.
-25. Require a hidden answer-done marker from the model.
-26. If the marker is missing or the model hit max tokens, request a short continuation.
-27. Strip the marker before returning, streaming final payload, saving analytics or showing citations.
+25. Ask the model to finish with hidden marker `URAI_DONE`.
+26. If the answer is cut off or the marker is missing with a dangling ending,
+    request a short continuation.
+27. Strip the marker before returning/saving the answer.
 
 ## Query Planner
 
-The old pair of `rewrite` + `act_hints` calls has been replaced by one JSON query planner inside `backend/server.py::_ask_pipeline()`.
-
 The planner returns:
 
-- `search_query`: normalized Ukrainian legal search text for embeddings;
-- `legal_terms`: exact legal terms and short acronyms such as `FOP`, `TOV`, `PDV`, `EP`, `CPD` in Ukrainian/Russian spelling when relevant;
-- `aspects`: issue dimensions that should be covered, for example taxation, liability, employees, contractors, corporate structure;
-- `title_queries`: short title-search phrases that should be tried before conversational words;
-- `title_must_terms`, `title_nice_terms`, `title_exclude_terms`: compact title vocabulary for boosting likely acts and rejecting wrong-domain title matches;
-- `primary_act_hints`: possible act titles for title search only;
-- `source_preferences`: broad source-type hints used as a small scoring prior, not a hard filter;
-- `target_collections`: exact V2 collection hints such as `rada_finance_v2`, `rada_industry_v2` or `laws_kmu_v2`;
+- `search_query`;
+- `legal_terms`;
+- `aspects`;
+- `title_queries`;
+- `title_must_terms`;
+- `title_nice_terms`;
+- `title_exclude_terms`;
+- `primary_act_hints`;
+- `source_preferences`;
+- `target_collections`;
+- `evidence_subquestions`;
 - `should_compare`;
 - `needs_clarification`;
-- `clarification_questions`.
+- `clarification_questions`;
+- optional `article_hint` and `article_confidence`.
 
-Planner output is never treated as legal truth. It is only a retrieval plan:
-
-- act hints must resolve to real Qdrant documents before they can influence context;
-- no statute number, date, tax rate, limit or legal conclusion from the planner is used in the final answer;
-- final answers are still based only on retrieved context and citations.
-
-If `app_settings.query_planner_enabled` is absent, the backend defaults it to enabled. When disabled, the planner falls back to the original question as the search query.
+Planner output is never legal truth. It is only a retrieval plan.
 
 ## V2 Collections
 
-Production chat retrieval uses V2 Qdrant collections:
+Production chat retrieval uses:
 
 - `rada_finance_v2`
 - `rada_state_v2`
@@ -139,84 +151,46 @@ Production chat retrieval uses V2 Qdrant collections:
 
 V2 uses `gemini-embedding-001`, 3072 dimensions and cosine distance.
 
-## Answerability Reranker
+## Context Squeeze
 
-The deterministic reranker is the main precision/speed fix. It scores each chunk by:
+Search can be broad, but Gemini receives only the strongest final context:
 
-- semantic similarity;
-- query-term coverage in title and content;
-- directness: whether the chunk content covers several specific terms from the user question, not just broad topical words;
-- content coverage, not just title match;
-- source authority;
-- normative markers such as law/order/procedure/obligation language;
-- legal recency based on law metadata dates, not scrape/index timestamps;
-- text quality, penalizing noisy or mixed-language chunks;
-- source penalties for broad background sources such as wiki and broad Supreme Court PDFs.
+| Preference | Target chunks |
+| --- | ---: |
+| `short` | 6 |
+| `standard` | 8 |
+| `detailed` | 10 |
+| `full` | 12 |
 
-It also limits repeated chunks from the same document and caps wiki chunks so background material cannot dominate final context.
+Context is ranked by answerability, content coverage, source authority, recency
+and text quality. Wiki/ZIR/court-like background sources are capped so they do
+not dominate direct normative answers.
 
-## Context
-
-Context buckets:
-
-- law/general bucket: max 15 chunks;
-- KMU bucket: max 8 chunks;
-- court bucket: max 6 chunks.
-
-Overall context cap is controlled by `context_char_cap`, default 30,000 characters.
-
-Before context building, the backend runs a strict context squeeze. It does not narrow
-the search space; it narrows only the final chunks sent to Gemini:
-
-- `short`: up to 6 chunks;
-- `standard`: up to 8 chunks;
-- `detailed`: up to 10 chunks;
-- `full`: up to 12 chunks.
-
-The squeeze ranks by answerability, content coverage, authority and text quality.
-Background sources such as wiki/ZIR are kept to at most one final chunk unless they
-are the only useful evidence. Court sources are also capped so they do not dominate
-questions that need a normative answer.
-
-## Response Preferences
-
-`response_length_pref`:
-
-| Mode | Token bounds | Target |
-| --- | ---: | --- |
-| `short` | 1200-1800 | compact answer |
-| `standard` | 1800-2600 | up to 400 words |
-| `detailed` | 4200-5600 | up to 850 words |
-| `full` | 6500-9000 | up to 1600 words |
-
-`response_lang_style`:
-
-- `legal`: precise legal language;
-- `plain`: simple non-jargon explanation.
+Overall cap: `context_char_cap`, default 30000 characters.
 
 ## Answer Completion Contract
 
-The backend no longer guesses completion from answer shape, such as numbered sections.
-Gemini is asked to finish with the hidden marker `URAI_DONE`, but the marker is advisory,
-not required for a valid answer.
+Gemini is asked to end with hidden marker `URAI_DONE`.
 
 Server behavior:
 
-- if the streamed answer includes the marker, the stream buffer removes it before the user sees it;
-- if Gemini reports `MAX_TOKENS`, or the visible text ends in an obviously dangling fragment,
+- if marker appears, stream buffering removes it before the user sees it;
+- if answer ends in a dangling fragment or finish reason suggests truncation,
   `_complete_answer_if_needed()` asks for a short continuation;
-- continuation can add only the marker when the answer was already complete;
-- the marker is stripped before `/ask`, `/ask_stream` citations payload and saved assistant text.
+- continuation is appended to the stream and saved answer;
+- marker is stripped from `/ask`, `/ask_stream` final payload and saved message.
 
-This is format-independent: it works for paragraphs, bullet lists, legal memos, short answers and full analysis.
-
-## Limits And Beta
+## Limits And Persistence
 
 - Chat UI blocks users over `monthly_limit + bonus_requests`.
-- `/api/ask/stream` also has a free-account fingerprint guard.
+- Streaming API has free-account fingerprint protection.
 - Usage increments only after assistant message save.
-- Beta users bypass chat UI limit and use effective `pro` features.
+- Beta users bypass UI limit and use effective Pro features.
 
-## Current Performance Design
+## Known Gaps
 
-Default path now avoids an extra Gemini call for reranking. The retrieval stage uses deterministic answerability reranking first. Gemini LLM reranking is still available behind `llm_reranker_enabled`, but it is not the default because it adds latency and can pick topically similar chunks that do not answer the exact question.
+- `context_summary` is generated and stored but currently not sent into
+  generation from the chat page.
+- `tokens_used` is not a reliable real token count.
+- Some legacy V1 scripts/pages remain for operations, but production chat should
+  be reasoned about from V2 docs and code.
