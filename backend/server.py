@@ -4591,8 +4591,26 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
 
     rw_vector = None
+    _aspects = (_query_plan.get("aspects", []) if _query_plan else [])
     try:
-        if rewritten_query:
+        if rewritten_query and _aspects:
+            # Паралельно: embed rewrite + embed всіх аспектів + search оригінал
+            _texts_to_embed = [rewritten_query] + _aspects
+            *_embed_results, orig_results = await _asyncio.gather(
+                *[_asyncio.to_thread(_embed_v2.embed_query, t) for t in _texts_to_embed],
+                _asyncio.to_thread(search_qdrant, query_vector, fetch_k, target_collections, match_threshold),
+            )
+            rw_vector = _embed_results[0]
+            _aspect_vectors = _embed_results[1:]
+            # Паралельно: search rewrite + search всіх аспектів
+            _all_search = await _asyncio.gather(
+                _asyncio.to_thread(search_qdrant, rw_vector, fetch_k, target_collections, match_threshold),
+                *[_asyncio.to_thread(search_qdrant, av, fetch_k, target_collections, match_threshold)
+                  for av in _aspect_vectors],
+            )
+            results = _merge_results([orig_results] + list(_all_search))
+            logger.info("MULTI-ASPECT: %d aspects → %d candidates", len(_aspects), len(results))
+        elif rewritten_query:
             rw_vector, orig_results = await _asyncio.gather(
                 _asyncio.to_thread(_embed_v2.embed_query, rewritten_query),
                 _asyncio.to_thread(search_qdrant, query_vector, fetch_k, target_collections, match_threshold),
