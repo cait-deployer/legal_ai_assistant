@@ -3448,6 +3448,83 @@ _QUERY_STOPWORDS = {
 _LEGAL_ACRONYMS = {"фоп", "тов", "ооо", "пдв", "єп", "квед", "цпд", "кзпп", "кму", "дпс", "зір"}
 
 
+_UA_NUMBER_FORMS: dict[int, tuple[str, ...]] = {
+    0: ("нуль", "нуля"),
+    1: ("один", "одного", "одна", "однієї"),
+    2: ("два", "двох", "дві"),
+    3: ("три", "трьох"),
+    4: ("чотири", "чотирьох"),
+    5: ("п'ять", "п’ять", "пять", "п'яти", "п’яти", "пяти"),
+    6: ("шість", "шести"),
+    7: ("сім", "семи"),
+    8: ("вісім", "восьми"),
+    9: ("дев'ять", "дев’ять", "девять", "дев'яти", "дев’яти", "девяти"),
+    10: ("десять", "десяти"),
+    11: ("одинадцять", "одинадцяти"),
+    12: ("дванадцять", "дванадцяти"),
+    13: ("тринадцять", "тринадцяти"),
+    14: ("чотирнадцять", "чотирнадцяти"),
+    15: ("п'ятнадцять", "п’ятнадцять", "пятнадцять", "п'ятнадцяти", "п’ятнадцяти", "пятнадцяти"),
+    16: ("шістнадцять", "шістнадцяти"),
+    17: ("сімнадцять", "сімнадцяти"),
+    18: ("вісімнадцять", "вісімнадцяти"),
+    19: ("дев'ятнадцять", "дев’ятнадцять", "девятнадцять", "дев'ятнадцяти", "дев’ятнадцяти", "девятнадцяти"),
+    20: ("двадцять", "двадцяти"),
+    30: ("тридцять", "тридцяти"),
+    40: ("сорок", "сорока"),
+    50: ("п'ятдесят", "п’ятдесят", "пятдесят", "п'ятдесяти", "п’ятдесяти", "пятдесяти"),
+    60: ("шістдесят", "шістдесяти"),
+    70: ("сімдесят", "сімдесяти"),
+    80: ("вісімдесят", "вісімдесяти"),
+    90: ("дев'яносто", "дев’яносто", "девяносто", "дев'яноста", "дев’яноста", "девяноста"),
+    100: ("сто", "ста"),
+    200: ("двісті", "двохсот"),
+    300: ("триста", "трьохсот"),
+    400: ("чотириста", "чотирьохсот"),
+    500: ("п'ятсот", "п’ятсот", "пятсот", "п'ятисот", "п’ятисот", "пятисот"),
+    600: ("шістсот", "шестисот"),
+    700: ("сімсот", "семисот"),
+    800: ("вісімсот", "восьмисот"),
+    900: ("дев'ятсот", "дев’ятсот", "девятсот", "дев'ятисот", "дев’ятисот", "девятисот"),
+}
+
+
+def _number_word_variants(raw: str) -> list[str]:
+    match = re.search(r"\d{1,3}", raw or "")
+    if not match:
+        return []
+    n = int(match.group(0))
+    if n < 0 or n > 999:
+        return []
+    direct = list(_UA_NUMBER_FORMS.get(n, ()))
+    if direct:
+        return direct
+
+    parts: list[tuple[str, ...]] = []
+    remainder = n
+    if remainder >= 100:
+        hundreds = (remainder // 100) * 100
+        parts.append(_UA_NUMBER_FORMS.get(hundreds, ()))
+        remainder %= 100
+    if remainder:
+        if remainder in _UA_NUMBER_FORMS:
+            parts.append(_UA_NUMBER_FORMS.get(remainder, ()))
+        else:
+            tens = (remainder // 10) * 10
+            units = remainder % 10
+            parts.append(_UA_NUMBER_FORMS.get(tens, ()))
+            parts.append(_UA_NUMBER_FORMS.get(units, ()))
+
+    variants: list[str] = []
+    for forms in parts:
+        variants.extend(forms[:3])
+    if parts and all(parts):
+        variants.append(" ".join(forms[0] for forms in parts if forms))
+        if len(parts) > 1:
+            variants.append(" ".join((forms[1] if len(forms) > 1 else forms[0]) for forms in parts if forms))
+    return list(dict.fromkeys(v for v in variants if v))
+
+
 def _query_terms(text: str, limit: int = 24) -> list[str]:
     terms: list[str] = []
     for raw in re.findall(r"[\w'-]+", (text or "").lower()):
@@ -3455,6 +3532,8 @@ def _query_terms(text: str, limit: int = 24) -> list[str]:
         if (len(raw) < 4 and raw not in _LEGAL_ACRONYMS and not has_digit) or raw in _QUERY_STOPWORDS:
             continue
         terms.append(raw)
+        if has_digit:
+            terms.extend(_number_word_variants(raw))
         lemma = _ua_lemma(raw)
         if lemma and lemma not in _QUERY_STOPWORDS:
             terms.append(lemma)
@@ -4464,24 +4543,70 @@ def _apply_article_hint_preference(results: list[dict], article_hint: dict | Non
         logger.info("ARTICLE HINT PREFERENCE: adjusted %d chunks for %s: %s", len(adjusted), hinted_law_id, adjusted[:12])
 
 
-def _inject_article_hint_final(results: list[dict], candidates: list[dict], max_docs: int) -> list[dict]:
+_ARTICLE_ANSWER_MARKERS = (
+    "штраф", "стягнен", "тягне", "тягнуть", "накладення", "неоподатковуван", "мінімум",
+    "грив", "розмір", "ставк", "відсот", "компенсу", "надається", "виплачується",
+    "має право", "не має права", "зобов", "повинен", "підляга", "не підляга",
+    "заборон", "дозвол", "може", "не може", "строк", "термін", "протягом",
+    "днів", "місяц", "рок", "умов", "порядок", "підстав", "пільг",
+)
+
+
+def _article_candidate_key(result: dict) -> tuple[str, str, int]:
+    meta = result.get("out_metadata", {}) or {}
+    return (str(result.get("_collection") or ""), str(meta.get("law_id") or ""), int(meta.get("chunk_index") or 0))
+
+
+def _article_answer_window(candidates: list[dict], query_text: str, max_docs: int) -> list[dict]:
     if not candidates:
-        return results
-    target = max(3, min(6, max_docs))
-    existing_keys = {
-        (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
-        for r in results
-    }
-    ordered_candidates = sorted(
+        return []
+    ordered = sorted(
         candidates,
         key=lambda r: (
-            r["out_metadata"].get("chunk_index", 0),
-            -_strict_context_score(r, " ".join(_query_terms(r.get("out_content") or "", limit=12))),
+            str(r.get("_collection") or ""),
+            str((r.get("out_metadata", {}) or {}).get("law_id") or ""),
+            int((r.get("out_metadata", {}) or {}).get("chunk_index") or 0),
         ),
     )
-    injected: list[dict] = []
-    for r in ordered_candidates:
-        key = (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+    target = max(3, min(6, max_docs, len(ordered)))
+    q_terms = _query_terms(query_text, limit=32)
+
+    def score(result: dict) -> float:
+        meta = result.get("out_metadata", {}) or {}
+        content = (result.get("out_content") or "").lower()
+        heading = f"{meta.get('source') or ''} {meta.get('title') or ''}".lower()
+        content_hits = sum(1 for term in q_terms if term and term in content)
+        heading_hits = sum(1 for term in q_terms if term and term in heading)
+        marker_hits = sum(1 for marker in _ARTICLE_ANSWER_MARKERS if marker in content)
+        answerability = float((result.get("_answerability") or {}).get("score", 0.0) or 0.0)
+        return content_hits * 4.0 + heading_hits * 1.5 + marker_hits * 0.8 + answerability * 2.0
+
+    ranked_positions = sorted(range(len(ordered)), key=lambda i: (-score(ordered[i]), i))
+    selected: set[int] = set()
+    for pos in ranked_positions:
+        if score(ordered[pos]) <= 0 and selected:
+            break
+        for neighbor in (pos - 1, pos, pos + 1):
+            if 0 <= neighbor < len(ordered):
+                selected.add(neighbor)
+        if len(selected) >= target:
+            break
+    if len(selected) < target:
+        for pos in ranked_positions:
+            selected.add(pos)
+            if len(selected) >= target:
+                break
+    return [ordered[i] for i in sorted(selected)[:target]]
+
+
+def _inject_article_hint_final(results: list[dict], candidates: list[dict], query_text: str, max_docs: int) -> list[dict]:
+    if not candidates:
+        return results
+    article_window = _article_answer_window(candidates, query_text, max_docs)
+    if not article_window:
+        return results
+    article_keys = {_article_candidate_key(r) for r in article_window}
+    for r in article_window:
         r["similarity"] = max(float(r.get("similarity", 0.0) or 0.0), 0.91)
         if not r.get("_answerability"):
             r["_answerability"] = {
@@ -4491,25 +4616,11 @@ def _inject_article_hint_final(results: list[dict], candidates: list[dict], max_
                 "normative": True,
                 "_article_proxy": True,
             }
-        if key in existing_keys:
-            continue
-        injected.append(r)
-        existing_keys.add(key)
-        if len(injected) >= target:
-            break
-    if not injected:
-        logger.info(
-            "ARTICLE FINAL GUARANTEE: candidates=%d already_present=%d final=%d",
-            len(candidates),
-            sum(1 for r in results if r.get("_article_hint")),
-            len(results),
-        )
-        return results
-    merged = injected + results
+    merged = article_window + results
     seen: set[tuple[str, str, int]] = set()
     deduped: list[dict] = []
     for r in merged:
-        key = (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+        key = _article_candidate_key(r)
         if key in seen:
             continue
         seen.add(key)
@@ -4517,11 +4628,13 @@ def _inject_article_hint_final(results: list[dict], candidates: list[dict], max_
         if len(deduped) >= max_docs:
             break
     logger.info(
-        "ARTICLE FINAL GUARANTEE: candidates=%d injected=%d article_out=%d final=%d",
+        "ARTICLE FINAL GUARANTEE: candidates=%d window=%d moved_front=%d article_out=%d final=%d indices=%s",
         len(candidates),
-        len(injected),
+        len(article_window),
+        sum(1 for key in article_keys if key in {_article_candidate_key(r) for r in results}),
         sum(1 for r in deduped if r.get("_article_hint")),
         len(deduped),
+        [(_article_candidate_key(r)[1], _article_candidate_key(r)[2]) for r in article_window],
     )
     return deduped
 
@@ -6710,7 +6823,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_length_pref,
         keep_weak=low_confidence,
     )
-    results = _inject_article_hint_final(results, _article_final_candidates, body.max_docs)
+    results = _inject_article_hint_final(results, _article_final_candidates, _answerability_query, body.max_docs)
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
     # Drop documents with similarity below threshold (configurable via admin panel).
