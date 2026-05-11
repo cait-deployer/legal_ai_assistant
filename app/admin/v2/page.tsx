@@ -1554,9 +1554,10 @@ function FixTruncatedTab() {
   // Auto-scroll logs
   useEffect(() => {
     FIX_SOURCES.forEach(({ id }) => {
-      const sourceRunning = status[id]?.running
-      if ((expandedLogs[id] || sourceRunning) && logRefs.current[id]) {
-        logRefs.current[id]!.scrollTop = logRefs.current[id]!.scrollHeight
+      const logsOpen = expandedLogs[id] ?? status[id]?.running
+      const el = logRefs.current[id]
+      if (logsOpen && el) {
+        el.scrollTop = el.scrollHeight
       }
     })
   }, [status, expandedLogs])
@@ -1625,6 +1626,7 @@ function FixTruncatedTab() {
         const progress  = src?.resume_progress
         const totalDisk = src?.total_on_disk ?? 0
         const logs      = src?.live_logs ?? []
+        const logsOpen  = expandedLogs[id] ?? running
         const pct       = progress && progress.total > 0
           ? Math.round((progress.done / progress.total) * 100) : 0
 
@@ -1717,15 +1719,15 @@ function FixTruncatedTab() {
             {(running || logs.length > 0) && (
               <div className="space-y-2">
                 <button
-                  onClick={() => setExpandedLogs(l => ({ ...l, [id]: !l[id] }))}
+                  onClick={() => setExpandedLogs(l => ({ ...l, [id]: !logsOpen }))}
                   className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
                 >
                   {expandedLogs[id] ? "▲ Сховати логи" : `▼ Показати логи (${logs.length})`}
                 </button>
-                {(expandedLogs[id] || running) && (
+                {logsOpen && (
                   <div
                     ref={el => { logRefs.current[id] = el }}
-                    className="h-56 overflow-y-auto bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-3 font-mono text-[11px] space-y-0.5"
+                    className="h-56 overflow-y-auto overscroll-contain bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 p-3 font-mono text-[11px] space-y-0.5"
                   >
                     {logs.length === 0 && (
                       <div className="text-gray-500">Очікування першого запису з backend...</div>

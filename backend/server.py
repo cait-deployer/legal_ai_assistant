@@ -1997,10 +1997,11 @@ def _any_fix_truncated_running() -> str | None:
     return None
 
 
-def _do_fix_truncated(source: str):
+def _do_fix_truncated(session_id: str, source: str):
     slot = f"fix_truncated_{source}"
     log  = _make_reindex_log_cb(slot)
     try:
+        log(f"Repair session {session_id[:8]} started for {source}", "info")
         from reindex_truncated import run_fix_truncated
         _fix_truncated_stop[source].clear()
         run_fix_truncated(source, log_callback=log, stop_event=_fix_truncated_stop[source], resume=True)
