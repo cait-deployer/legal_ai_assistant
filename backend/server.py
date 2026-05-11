@@ -95,6 +95,8 @@ V2_REINDEX_SOURCES = ("rada", "kmu", "ccu", "supreme", "wiki", "positions", "mod
 
 _TAX_KEYWORDS = ("пдв", "ват", "податк", "єдиний податок", "фоп", "пдфо", "акциз",
                  "реєстрац", "платник", "зir", "зір", "дпс", "митн", "збір")
+_TAX_CODE_ID = "2755-17"
+_LLC_LAW_ID = "2275-19"
 
 def _scrape_v2_state_file(source: str) -> Path:
     return BASE_DIR / f"scrape_v2_{source}_state.json"
@@ -3483,6 +3485,71 @@ def _term_overlap_score(result: dict, terms: list[str]) -> int:
     return sum(1 for term in terms if term in haystack)
 
 
+def _parse_doc_date(value) -> datetime | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw or raw in {"—", "-", "None", "null"}:
+        return None
+    raw = raw.replace("Z", "+00:00")
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y%m%d"):
+        try:
+            return datetime.strptime(raw[:10], fmt).replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    try:
+        dt = datetime.fromisoformat(raw)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _doc_best_date(result: dict) -> datetime | None:
+    meta = result.get("out_metadata", {}) or {}
+    for key in (
+        "rada_last_edition",
+        "effective_date",
+        "date_adopted",
+        "rada_adopted_date",
+        "scraped_at",
+        "indexed_at",
+    ):
+        dt = _parse_doc_date(meta.get(key))
+        if dt:
+            return dt
+    return None
+
+
+def _recency_score(result: dict) -> float:
+    """Positive for fresh relevant law; negative for stale secondary material."""
+    dt = _doc_best_date(result)
+    if not dt:
+        return 0.0
+    age_days = max(0, (datetime.now(timezone.utc) - dt).days)
+    age_years = age_days / 365.25
+    col = result.get("_collection", "")
+    meta = result.get("out_metadata", {}) or {}
+    doc_type = meta.get("rada_doc_type") or meta.get("doc_type", "")
+    is_primary = col.startswith("rada_") or col == "laws_kmu_v2"
+    is_code_or_law = doc_type in {"Кодекс", "Закон"}
+
+    if age_years <= 1:
+        return 0.18 if is_primary else 0.12
+    if age_years <= 3:
+        return 0.12 if is_primary else 0.07
+    if age_years <= 7:
+        return 0.06 if is_primary else 0.02
+
+    # Old primary codes/laws can still be current if last_edition is missing in old payloads.
+    if is_primary and is_code_or_law and not meta.get("rada_is_dead"):
+        return 0.0
+    if _is_court_collection(col):
+        return -0.16 if age_years >= 10 else -0.08
+    if col in {"laws_zir_v2", "laws_wiki_v2"}:
+        return -0.10 if age_years >= 7 else -0.04
+    return -0.05 if age_years >= 10 else 0.0
+
+
 def _authority_score(result: dict) -> float:
     col = result.get("_collection", "")
     meta = result.get("out_metadata", {})
@@ -3571,6 +3638,7 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
         + content_coverage * 0.18
         + min(len(set(title_terms)), 3) * 0.025
         + (_authority_score(result) - 1.0) * 0.10
+        + _recency_score(result) * 0.35
         + (0.06 if has_normative else 0.0)
         - source_penalty
         - quality_penalty
@@ -3583,6 +3651,7 @@ def _answerability_score(result: dict, query_text: str, terms: list[str] | None 
         "matched": matched_terms[:10],
         "quality": round(quality, 3),
         "normative": has_normative,
+        "recency": round(_recency_score(result), 3),
     }
     return result["_answerability"]
 
@@ -3595,18 +3664,26 @@ def _is_court_collection(col: str) -> bool:
     return col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2")
 
 
+def _is_must_have_primary_act(result: dict) -> bool:
+    meta = result.get("out_metadata", {}) or {}
+    return result.get("_must_have_act") or meta.get("law_id") in {_TAX_CODE_ID, _LLC_LAW_ID}
+
+
 def _strict_context_score(result: dict, query_text: str, terms: list[str] | None = None) -> float:
     ans = result.get("_answerability") or _answerability_score(result, query_text, terms)
     col = result.get("_collection", "")
     score = float(ans.get("score", 0.0) or 0.0)
     score += (float(ans.get("content_coverage", 0.0) or 0.0) * 0.16)
     score += ((_authority_score(result) - 1.0) * 0.18)
+    score += _recency_score(result) * 0.80
     if ans.get("normative"):
         score += 0.05
     if _is_background_collection(col):
         score -= 0.10
     if col == "laws_supreme_v2":
         score -= 0.04
+    if _is_must_have_primary_act(result):
+        score += 0.42
     if (result.get("out_metadata") or {}).get("rada_is_dead"):
         score -= 0.40
     return score
@@ -3637,7 +3714,7 @@ def _squeeze_context_results(
     scored: list[tuple[float, dict]] = []
     for r in results:
         ans = r.get("_answerability") or _answerability_score(r, query_text, terms)
-        protected = bool(r.get("_full_law") or r.get("_doc_expansion"))
+        protected = bool(r.get("_full_law") or r.get("_doc_expansion") or _is_must_have_primary_act(r))
         if not protected and float(ans.get("coverage", 0.0) or 0.0) < min_cov:
             continue
         scored.append((_strict_context_score(r, query_text, terms), r))
@@ -3671,7 +3748,7 @@ def _squeeze_context_results(
             if court_count >= court_cap:
                 continue
         doc_key = (col, r["out_metadata"].get("law_id", ""))
-        doc_cap = 2 if r.get("_full_law") else 1
+        doc_cap = 3 if _is_must_have_primary_act(r) else (2 if r.get("_full_law") else 1)
         if per_doc.get(doc_key, 0) >= doc_cap:
             continue
         picked.append(r)
@@ -3707,7 +3784,7 @@ def _squeeze_context_results(
         target,
         dict(sorted(counts.items())),
         [
-            f"{r.get('_collection')}:{r['out_metadata'].get('law_id','?')}:s={_strict_context_score(r, query_text, terms):.3f}:a={r.get('_answerability',{}).get('score')}:cov={r.get('_answerability',{}).get('coverage')}"
+            f"{r.get('_collection')}:{r['out_metadata'].get('law_id','?')}:s={_strict_context_score(r, query_text, terms):.3f}:a={r.get('_answerability',{}).get('score')}:cov={r.get('_answerability',{}).get('coverage')}:rec={_recency_score(r):.2f}"
             for r in picked[:6]
         ],
     )
@@ -3726,7 +3803,7 @@ def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int
         # Keep low-coverage chunks only when they are protected structural chunks
         # from a selected document, or when we are in weak-search mode and need
         # Gemini to explain what was found.
-        protected = bool(r.get("_full_law") or r.get("_doc_expansion"))
+        protected = bool(r.get("_full_law") or r.get("_doc_expansion") or _is_must_have_primary_act(r))
         if not keep_weak and coverage < 0.12 and not protected:
             continue
         scored.append((ans["score"], r))
@@ -4330,6 +4407,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         factor = _DOC_TYPE_SCORE.get(doc_type, 1.0)
         if factor != 1.0:
             r["similarity"] = min(r["similarity"] * factor, 1.0)
+        recency = _recency_score(r)
+        if recency:
+            r["similarity"] = max(0.0, min(r["similarity"] + recency, 1.0))
+            r["_recency_score"] = round(recency, 3)
 
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
@@ -4571,6 +4652,82 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     except Exception as _kw_err:
         logger.warning("Keyword search error: %s", _kw_err)
 
+    # Must-have primary acts for business/tax form questions. Semantic search often
+    # finds the Tax Code, but generic recommendation wording can let weaker sources
+    # win later. Pin the primary acts before reranking so the answer can compare
+    # FOP/ТОВ against actual law, not old court fragments.
+    try:
+        from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
+
+        _mh_text = f"{search_question} {rewritten_query or ''} {' '.join(_act_hints or [])}".lower()
+        _must_docs: list[tuple[str, str, list[str]]] = []
+        if any(k in _mh_text for k in ("фоп", "єдиний подат", "един", "спрощен", "упрощен", "податк", "налог")):
+            _must_docs.append((
+                "rada_finance_v2",
+                _TAX_CODE_ID,
+                [
+                    "спрощена система оподаткування",
+                    "єдиний податок",
+                    "платники єдиного податку",
+                    "фізична особа-підприємець",
+                    "третя група",
+                    "кількість осіб",
+                    "обсяг доходу",
+                ],
+            ))
+        if any(k in _mh_text for k in ("тов", "ооо", "обмеженою відповідальністю", "ограниченной ответственностью")):
+            _must_docs.append((
+                "rada_industry_v2",
+                _LLC_LAW_ID,
+                [
+                    "товариство з обмеженою відповідальністю",
+                    "статутний капітал",
+                    "учасники товариства",
+                    "виконавчий орган",
+                    "відповідальність",
+                ],
+            ))
+
+        _mh_existing = {
+            (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"), r.get("_collection"))
+            for r in results
+        }
+        _mh_added = 0
+        _mh_vector = rw_vector or query_vector
+        for _col, _lid, _terms in _must_docs:
+            _mh_chunks = search_law_chunks_by_terms(_col, _lid, _terms, top_k=4)
+            _mh_chunks += search_qdrant_in_law(_col, _lid, _mh_vector, top_k=2, threshold=0.0)
+            _mh_chunks.sort(
+                key=lambda c: (
+                    _term_overlap_score(c, _query_terms(" ".join(_terms), limit=18)),
+                    c.get("similarity", 0.0),
+                ),
+                reverse=True,
+            )
+            _taken = 0
+            for _chunk in _mh_chunks:
+                if _taken >= 4:
+                    break
+                _key = (
+                    _chunk["out_metadata"].get("law_id"),
+                    _chunk["out_metadata"].get("chunk_index"),
+                    _chunk.get("_collection"),
+                )
+                if _key in _mh_existing:
+                    continue
+                _chunk["_must_have_act"] = True
+                _chunk["_doc_expansion"] = True
+                _chunk["similarity"] = max(float(_chunk.get("similarity", 0.0) or 0.0), 0.88)
+                results.append(_chunk)
+                _mh_existing.add(_key)
+                _mh_added += 1
+                _taken += 1
+        if _mh_added:
+            results.sort(key=lambda x: x["similarity"], reverse=True)
+            logger.info("MUST-HAVE ACTS: added %d primary-law chunks for docs=%s", _mh_added, [(c, l) for c, l, _ in _must_docs])
+    except Exception as _mh_err:
+        logger.warning("Must-have act injection error: %s", _mh_err)
+
     # Title-based metadata boost: знаходить документи по заголовку (source поле)
     # Стоп-слова: розмовні та функціональні слова які НЕ є юридичними термінами
     _TITLE_STOPWORDS = {
@@ -4663,9 +4820,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     _protected_colls = {"laws_kmu_v2", "laws_positions_v2"}
     _rr_protected = [
         r for r in results
-        if r.get("_collection") in _protected_colls
-        and (r.get("_title_match") or r.get("_doc_expansion"))
-        and r["out_metadata"].get("law_id") in _seen_laws_in_semantic
+        if (
+            _is_must_have_primary_act(r)
+            or (
+                r.get("_collection") in _protected_colls
+                and (r.get("_title_match") or r.get("_doc_expansion"))
+                and r["out_metadata"].get("law_id") in _seen_laws_in_semantic
+            )
+        )
     ][:3]
     _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
     _docset_keep: list[dict] = []
