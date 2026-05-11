@@ -6,10 +6,11 @@ so most of their content was missing from Qdrant. Now TRUNCATE["rada"]=2_000_000
 so re-indexing them will include the full text.
 
 Run from /home/devops/app/backend:
-    python reindex_large_rada.py                  # re-index all > 50KB
-    python reindex_large_rada.py --min-kb 100     # re-index all > 100KB
-    python reindex_large_rada.py --dry-run        # show what would be re-indexed
-    python reindex_large_rada.py --resume         # skip already-done (reads state file)
+    python reindex_large_rada.py                               # re-index all > 50KB
+    python reindex_large_rada.py --min-kb 100                  # re-index all > 100KB
+    python reindex_large_rada.py --dry-run                     # show what would be re-indexed
+    python reindex_large_rada.py --resume                      # skip already-done (reads state file)
+    python reindex_large_rada.py --law-ids 80731-10 80732-10   # re-index specific IDs (any size)
 """
 import argparse
 import json
@@ -60,6 +61,22 @@ def _get_large_files(min_bytes: int) -> list[tuple[str, Path]]:
     return result
 
 
+def _get_specific_files(law_ids: list[str]) -> list[tuple[str, Path]]:
+    """Returns [(law_id, meta_path)] for explicitly specified law_ids."""
+    result = []
+    for law_id in law_ids:
+        txt_path = RAW_DIR / f"{law_id}.txt"
+        meta_path = RAW_DIR / f"{law_id}.meta.json"
+        if not txt_path.exists():
+            print(f"  ⚠️  Файл не знайдено: {txt_path}", flush=True)
+            continue
+        if not meta_path.exists():
+            print(f"  ⚠️  Мета не знайдено: {meta_path}", flush=True)
+            continue
+        result.append((law_id, meta_path))
+    return result
+
+
 def _process_one(law_id: str, meta_path: Path) -> tuple[str, bool, str]:
     """Returns (law_id, success, info)."""
     try:
@@ -72,13 +89,19 @@ def _process_one(law_id: str, meta_path: Path) -> tuple[str, bool, str]:
         return law_id, False, str(ex)
 
 
-def run(min_kb: int = DEFAULT_MIN_KB, dry_run: bool = False, resume: bool = False):
-    min_bytes = min_kb * 1024
-    files = _get_large_files(min_bytes)
-
-    _log(f"\n{'='*60}")
-    _log(f"  Файлів > {min_kb} KB: {len(files)}")
-    _log(f"{'='*60}\n")
+def run(min_kb: int = DEFAULT_MIN_KB, dry_run: bool = False, resume: bool = False,
+        law_ids: list[str] | None = None):
+    if law_ids:
+        files = _get_specific_files(law_ids)
+        _log(f"\n{'='*60}")
+        _log(f"  Конкретні ID ({len(files)}): {law_ids}")
+        _log(f"{'='*60}\n")
+    else:
+        min_bytes = min_kb * 1024
+        files = _get_large_files(min_bytes)
+        _log(f"\n{'='*60}")
+        _log(f"  Файлів > {min_kb} KB: {len(files)}")
+        _log(f"{'='*60}\n")
 
     if dry_run:
         for law_id, meta_path in files[:50]:
@@ -131,9 +154,11 @@ def run(min_kb: int = DEFAULT_MIN_KB, dry_run: bool = False, resume: bool = Fals
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--min-kb",  type=int, default=DEFAULT_MIN_KB,
+    parser.add_argument("--min-kb",   type=int, default=DEFAULT_MIN_KB,
                         help=f"min file size in KB (default: {DEFAULT_MIN_KB})")
-    parser.add_argument("--dry-run", action="store_true", help="show files without processing")
-    parser.add_argument("--resume",  action="store_true", help="skip already-done files")
+    parser.add_argument("--dry-run",  action="store_true", help="show files without processing")
+    parser.add_argument("--resume",   action="store_true", help="skip already-done files")
+    parser.add_argument("--law-ids",  nargs="+", metavar="ID",
+                        help="reindex specific law_ids regardless of size (e.g. 80731-10 80732-10)")
     args = parser.parse_args()
-    run(min_kb=args.min_kb, dry_run=args.dry_run, resume=args.resume)
+    run(min_kb=args.min_kb, dry_run=args.dry_run, resume=args.resume, law_ids=args.law_ids)

@@ -4521,9 +4521,9 @@ def _squeeze_context_results(
     positions_cap = 2
     # Supreme + CCU + rada_court — судова практика і рішення КСУ.
     court_cap = max(1, min(2, target // 4))
-    # Будь-яка одна колекція може зайняти не більше половини слотів,
-    # щоб не витіснити документи з інших джерел (напр., ПКУ коли всі топи — КМУ).
-    regular_col_cap = max(2, target // 2)
+    # Будь-яка одна regular-колекція займає не більше 1/3 слотів —
+    # захист від того, що КМУ або одна rada_* колекція витіснить всі інші джерела.
+    regular_col_cap = max(2, target // 3)
 
     # Aspect-protected docs get first pick — they were selected for distinct query
     # aspects and must not be crowded out by other high-scoring docs from one collection.
@@ -6126,20 +6126,29 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         # Aspect-protected and must-have docs bypass the answerability reranker —
         # they were selected precisely because each covers a distinct query aspect,
         # so they must enter the squeeze even if term overlap is low.
+        # Quality gate: only inject if the doc's coverage is at least as high as the
+        # weakest doc the reranker accepted. Prevents old/marginal docs from bypassing
+        # the reranker when their aspect match is coincidental, not substantive.
         _answ_keys = {
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in _answ_results
         }
+        _min_answ_coverage = min(
+            (float(r.get("_answerability", {}).get("coverage", 0.0) or 0.0) for r in _answ_results),
+            default=0.12,
+        )
         _extra_prot = [
             r for r in _rr_protected
             if (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             not in _answ_keys
+            and float((r.get("_answerability") or {}).get("coverage", 0.0) or 0.0) >= _min_answ_coverage
         ]
         if _extra_prot:
             logger.info(
-                "ASPECT INJECT: %d protected docs added before squeeze: %s",
+                "ASPECT INJECT: %d protected docs added before squeeze (min_cov=%.3f): %s",
                 len(_extra_prot),
-                [f"{r.get('_collection')}:{r['out_metadata'].get('law_id')}" for r in _extra_prot],
+                _min_answ_coverage,
+                [f"{r.get('_collection')}:{r['out_metadata'].get('law_id')}:cov={r.get('_answerability',{}).get('coverage','?')}" for r in _extra_prot],
             )
         results = _extra_prot + _answ_results
 
