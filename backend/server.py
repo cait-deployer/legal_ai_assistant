@@ -4028,18 +4028,25 @@ def _squeeze_context_results(
 
     picked: list[dict] = []
     per_doc: dict[tuple[str, str], int] = {}
+    col_counts: dict[str, int] = {}
     background_count = 0
     court_count = 0
     background_cap = 1
     court_cap = max(1, min(2, target // 4))
+    # Будь-яка одна колекція може зайняти не більше половини слотів,
+    # щоб не витіснити документи з інших джерел (напр., ПКУ коли всі топи — КМУ).
+    regular_col_cap = max(2, target // 2)
 
     for _score, r in scored:
         col = r.get("_collection", "")
         if _is_background_collection(col):
             if background_count >= background_cap:
                 continue
-        if _is_court_collection(col):
+        elif _is_court_collection(col):
             if court_count >= court_cap:
+                continue
+        else:
+            if col_counts.get(col, 0) >= regular_col_cap:
                 continue
         doc_key = (col, r["out_metadata"].get("law_id", ""))
         doc_cap = 3 if _is_must_have_primary_act(r) else (2 if r.get("_full_law") else 1)
@@ -4049,8 +4056,10 @@ def _squeeze_context_results(
         per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
         if _is_background_collection(col):
             background_count += 1
-        if _is_court_collection(col):
+        elif _is_court_collection(col):
             court_count += 1
+        else:
+            col_counts[col] = col_counts.get(col, 0) + 1
         if len(picked) >= target:
             break
 
