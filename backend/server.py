@@ -5446,7 +5446,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         )[:_seed_limit]
 
         _FULL_LAW_MIN_SCORE = 0.60  # якщо топ-1 seed скорить так — беремо ВСІ чанки
-        _FULL_LAW_MAX = 20          # максимум чанків для full-law expansion
+        _FULL_LAW_MAX = 500         # скільки чанків тягнемо з Qdrant (вся колекція)
+        _FULL_LAW_TOP = 30          # скільки найрелевантніших чанків додаємо до results
 
         for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
             _seed_score = _seed_info["similarity"]
@@ -5458,11 +5459,26 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         _directness_score((_seed.get("out_content") or "").lower(), _doc_terms),
                     )
             if _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE and _seed_directness >= 0.18:
-                # Топ-1 закон з високою впевненістю → ВСІ чанки по порядку (включно з таблицями)
-                _doc_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
-                logger.info("FULL LAW: %s/%s score=%.3f → %d chunks", _col, _lid, _seed_score, len(_doc_chunks))
+                # Топ-1 закон з високою впевненістю → витягуємо всі чанки,
+                # сортуємо за релевантністю до запиту (term overlap) і беремо топ-30.
+                # Раніше limit=20 повертав 20 довільних чанків із Qdrant scroll —
+                # потрібний ст.122 міг не потрапити взагалі. Тепер завантажуємо всю
+                # колекцію закону (~500 чанків) і вибираємо найрелевантніші.
+                _all_fl_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
+                _all_fl_chunks.sort(
+                    key=lambda c: (
+                        -_term_overlap_score(c, _doc_terms),
+                        c["out_metadata"].get("chunk_index", 0),
+                    )
+                )
+                logger.info(
+                    "FULL LAW: %s/%s score=%.3f → %d total, selecting top-%d by term overlap",
+                    _col, _lid, _seed_score, len(_all_fl_chunks), _FULL_LAW_TOP,
+                )
                 _taken_for_doc = 0
-                for _chunk in _doc_chunks:
+                for _chunk in _all_fl_chunks:
+                    if _taken_for_doc >= _FULL_LAW_TOP:
+                        break
                     _key = (
                         _chunk["out_metadata"].get("law_id"),
                         _chunk["out_metadata"].get("chunk_index"),
@@ -5972,15 +5988,20 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             for r in _rr_protected
         }:
             _rr_protected.append(_wk)
-    # Full-law chunks (sorted by chunk_index) bypass reranker entirely:
-    # table rows like "| США | 80 | 240 |" have zero term-overlap but contain the actual amounts
+    # Full-law chunks bypass reranker entirely (sorted by term overlap so the most
+    # query-relevant chunks get protected slots, not just the first 15 by index).
     _rr_protected_key_set = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
     }
     _fl_added = 0
-    for _fl in [r for r in results if r.get("_full_law")]:
-        if _fl_added >= 15:
+    _fl_candidates = sorted(
+        [r for r in results if r.get("_full_law")],
+        key=lambda r: _term_overlap_score(r, _docset_terms),
+        reverse=True,
+    )
+    for _fl in _fl_candidates:
+        if _fl_added >= 25:
             break
         _fl_key = (_fl["out_metadata"].get("law_id"), _fl["out_metadata"].get("chunk_index"))
         if _fl_key not in _rr_protected_key_set:
@@ -5988,7 +6009,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _rr_protected_key_set.add(_fl_key)
             _fl_added += 1
     if _fl_added:
-        logger.info("FULL LAW PROTECTED: %d chunks bypassing reranker", _fl_added)
+        logger.info("FULL LAW PROTECTED: %d chunks bypassing reranker (top by term overlap)", _fl_added)
     _rr_protected_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
@@ -6153,6 +6174,16 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             )
         results = _extra_prot + _answ_results
 
+    # Скасовані документи виключаємо до squeeze — не витрачають слоти на мертві чанки
+    def _is_expired(r: dict) -> bool:
+        m = r["out_metadata"]
+        if m.get("rada_is_dead"):
+            return True
+        s = m.get("status", "").lower()
+        return "втратив" in s or "втратила" in s
+
+    results = [r for r in results if not _is_expired(r)]
+
     response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
     results = _squeeze_context_results(
         results,
@@ -6221,17 +6252,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     law_chunks:   list[str] = []
     kmu_chunks:   list[str] = []
     court_chunks: list[str] = []
-
-    # Скасовані документи виключаємо повністю — не в контекст, не в citations
-    # (вони дезорієнтують LLM і вводять користувача в оману)
-    def _is_expired(r: dict) -> bool:
-        m = r["out_metadata"]
-        if m.get("rada_is_dead"):
-            return True
-        s = m.get("status", "").lower()
-        return "втратив" in s or "втратила" in s
-
-    results = [r for r in results if not _is_expired(r)]
 
     for i, r in enumerate(results):
         num = i + 1

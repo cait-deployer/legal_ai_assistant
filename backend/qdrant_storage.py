@@ -431,23 +431,37 @@ def search_law_chunks_by_terms(
 
 
 def get_all_law_chunks(collection_name: str, law_id: str, max_chunks: int = 60) -> list:
-    """Повертає всі чанки закону відсортовані по chunk_index (без вектора)."""
+    """Повертає всі чанки закону відсортовані по chunk_index (без вектора).
+
+    Використовує пагінацію scroll щоб отримати ВСІ чанки незалежно від розміру закону.
+    max_chunks — лише аварійний ліміт (захист від нескінченних законів).
+    """
     client = get_client()
     law_filter = Filter(
         must=[FieldCondition(key="law_id", match=MatchValue(value=law_id))]
     )
+    all_points = []
+    offset = None
+    _page_size = 250
     try:
-        points, _ = client.scroll(
-            collection_name=collection_name,
-            scroll_filter=law_filter,
-            limit=max_chunks,
-            with_payload=True,
-            with_vectors=False,
-        )
+        while True:
+            points, next_offset = client.scroll(
+                collection_name=collection_name,
+                scroll_filter=law_filter,
+                limit=_page_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            all_points.extend(points)
+            if next_offset is None or len(all_points) >= max_chunks:
+                break
+            offset = next_offset
     except Exception as e:
         print(f"⚠️ get_all_law_chunks [{collection_name}:{law_id}]: {e}")
         return []
-    points_sorted = sorted(points, key=lambda p: p.payload.get("chunk_index", 0))
+    all_points = all_points[:max_chunks]
+    points_sorted = sorted(all_points, key=lambda p: p.payload.get("chunk_index", 0))
     return [
         {
             "out_content":  p.payload.get("content", ""),
