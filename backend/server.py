@@ -3538,26 +3538,30 @@ _QUERY_ALIAS_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...
 )
 
 
-_QUERY_TITLE_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
+_QUERY_TITLE_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
     (
         ("податков", "єдиний податок", "пдв", "пдфо", "фоп", "пільг", "льгот"),
         ("Податковий кодекс України", "єдиний податок", "податкові пільги"),
         ("rada", "zir"),
+        ("податкові пільги", "ПДВ та прибуток"),
     ),
     (
         ("компенсац", "відшкодуван", "витрат", "державна підтримка", "підтримк"),
         ("компенсація витрат", "державна підтримка", "порядок використання коштів"),
         ("kmu", "rada"),
+        ("компенсація витрат", "фінансова підтримка"),
     ),
     (
         ("критично", "важлив", "бронюван", "бронь", "мобілізац"),
         ("критично важливі підприємства", "особливий період", "бронювання військовозобов'язаних"),
         ("kmu", "rada"),
+        ("критично важливий статус", "бронювання працівників"),
     ),
     (
         ("тов", "ооо", "обмеженою відповідальністю"),
         ("товариства з обмеженою відповідальністю", "державна реєстрація юридичних осіб"),
         ("rada",),
+        ("корпоративна структура", "державна реєстрація"),
     ),
 )
 
@@ -3600,7 +3604,9 @@ def _scoring_query_text(
 
 def _plan_log_summary(plan: dict) -> dict:
     plan = plan or {}
+    usable = any(plan.get(k) for k in ("legal_terms", "aspects", "title_queries", "primary_act_hints", "source_preferences"))
     return {
+        "usable": usable,
         "search": (plan.get("search_query") or "")[:120],
         "terms": (plan.get("legal_terms") or [])[:6],
         "aspects": (plan.get("aspects") or [])[:5],
@@ -3621,10 +3627,11 @@ def _deterministic_query_plan(question: str) -> dict:
             aspects.extend(rule_aspects)
     title_queries: list[str] = []
     source_preferences: list[str] = []
-    for triggers, titles, sources in _QUERY_TITLE_RULES:
+    for triggers, titles, sources, rule_aspects in _QUERY_TITLE_RULES:
         if any(trigger in q for trigger in triggers):
             title_queries.extend(titles)
             source_preferences.extend(sources)
+            aspects.extend(rule_aspects)
 
     compare_markers = (" чи ", " або ", " vs ", " versus ", "краще", "лучше", "обрати", "выбрать", "порівня", "сравн")
     should_compare = any(marker in f" {q} " for marker in compare_markers)
@@ -3650,7 +3657,7 @@ def _deterministic_query_plan(question: str) -> dict:
     elif title_queries:
         plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
         plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
-        plan["aspects"] = _merge_unique_strings(aspects, title_queries, limit=8)
+        plan["aspects"] = aspects
         plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
         plan["search_query"] = " ".join(_merge_unique_strings(plan["legal_terms"], plan["aspects"], limit=24))[:350]
     return plan
