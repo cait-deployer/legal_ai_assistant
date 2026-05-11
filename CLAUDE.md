@@ -137,7 +137,7 @@ Early-answer path skips `message` events and emits `citations` directly.
 - V1 collections (`rada_finance`, `laws_kmu`, etc.) are no longer used in any live code path — all init/search/stats use V2 only
 - `/ask` endpoint: embed → parallel Qdrant search → boost Rada scores → Gemini (full JSON response)
 - `/ask_stream` endpoint: same pipeline via `_ask_pipeline()` helper → SSE streaming. Events: `data: {"token":"..."}` per chunk, `event: citations\ndata: {...}` at end (full answer + references + _meta). Early-answer path also uses `event: citations`.
-- Response style preferences: `response_length_pref` (short/standard/detailed/full) and `response_lang_style` (legal/plain) stored in `profiles` table. Gated by plan tier — downgraded silently in Next.js route. Word limits: short=200, standard=400, detailed=900, full=2000.
+- Response style preferences: `response_length_pref` (short/standard/detailed/full) and `response_lang_style` (legal/plain) stored in `profiles` table. Gated by plan tier — downgraded silently in Next.js route. Word limits (hard constraints in prompt): short=100-180, standard=500-900, detailed=1000-1600, full=1600-2500.
 - Next.js SSE proxy: `app/api/ask/stream/route.ts` — same auth + plan gating as `/api/ask`, proxies stream from backend via `new Response(res.body, ...)`. Chat page reads stream with `ReadableStream` / `getReader()`, appends tokens live, finalizes on `event: citations`.
 - Auto-sync scheduler: APScheduler `daily_sync` cron job at `schedule_hour` UTC. Per-source flags: `schedule_enabled` (Rada legacy — deprecated, `_do_rada` is a no-op stub), `schedule_{source}_enabled` for V2 sources. `schedule_hour` key (int, stored as value_text). UI: `/admin/sync` → ScheduleWidget. Endpoints: `GET /admin/sync/status`, `PATCH /admin/sync/settings`.
 - Scraper `force=True` mode: bypasses skip logic (re-downloads existing files). Available in `run_scrape_all`, `run_scrape_mod`, `run_scrape_zir`. Trigger via `/admin/v2/scrape/trigger` with `{"force": true}`.
@@ -163,6 +163,12 @@ Early-answer path skips `message` events and emits `citations` directly.
 - Citation modal (chat): shows enriched metadata (adopted_date, last_edition, dead_since, theme, org, replaced_by links, cancelled_by links) when available
 - Enrichment endpoints: `POST /admin/enrich/start`, `POST /admin/enrich/stop`, `GET /admin/enrich/status`, `POST /admin/enrich/qdrant/apply`, `POST /admin/enrich/qdrant/stop`, `GET /admin/meta/list`
 - Feedback system: `message_feedback` table (upsert per message per user), `app_reviews` table (full history). `profiles` has `bonus_requests` (additive) + `has_received_review_reward` (one-time flag). RPC `submit_app_review_and_reward(p_rating, p_review_text)` — atomic insert + bonus grant. Reward amount configurable via `app_settings` key `review_reward_requests` (default 50). Trigger threshold: `review_trigger_count` (default 10 total_requests). Endpoints: `POST /api/feedback/message`, `POST /api/feedback/audio`, `POST /api/feedback/review`, `GET/PATCH /api/feedback/review/status`, `GET /api/admin/feedback`. Limit check uses `monthly_limit + bonus_requests`.
+
+## Answer pipeline — scoring constants (server.py)
+- `_recency_score()`: вік документа з `_doc_best_date()` (пріоритет: `rada_last_edition` → `effective_date` → `rada_adopted_date` → рік з `law_id`). Бакети penalty для KMU/Rada (не кодекси): `age>=20y → -0.18`, `age>=15y → -0.10`, `age>=10y → -0.05`.
+- `_strict_context_score()`: recency weight = **0.40** (не підвищувати — при 0.80 нові але нерелевантні документи витісняють старі але валідні закони).
+- `temperature` default = **0.20** (Supabase `app_settings.temperature`). При 0.1 модель копіює фрагменти замість синтезу. Якщо є явне значення в Supabase — воно має пріоритет.
+- `_squeeze_context_results()`: `laws_wiki_v2` і `laws_zir_v2` мають **окремі** caps. `wiki_cap=1` (фоновий контент). `zir_cap=2` (офіційна позиція ДПС — авторитетне джерело, не фон). Не об'єднувати їх назад в один `background_cap`.
 
 ## Rules: when making changes
 - **Architecture changes** → update the Architecture section in this file

@@ -4446,7 +4446,7 @@ def _strict_context_score(result: dict, query_text: str, terms: list[str] | None
     score = float(ans.get("score", 0.0) or 0.0)
     score += (float(ans.get("content_coverage", 0.0) or 0.0) * 0.16)
     score += ((_authority_score(result) - 1.0) * 0.18)
-    score += _recency_score(result) * 0.80
+    score += _recency_score(result) * 0.40
     if ans.get("normative"):
         score += 0.05
     if _is_background_collection(col):
@@ -4509,9 +4509,13 @@ def _squeeze_context_results(
     picked: list[dict] = []
     per_doc: dict[tuple[str, str], int] = {}
     col_counts: dict[str, int] = {}
-    background_count = 0
+    wiki_count = 0
+    zir_count = 0
     court_count = 0
-    background_cap = 1
+    wiki_cap = 1
+    # ZIR — офіційна позиція ДПС (авторитетне джерело), не просто фоновий контент.
+    # Дозволяємо 2 документи, щоб покрити питання + уточнення/виняток.
+    zir_cap = 2
     court_cap = max(1, min(2, target // 4))
     # Будь-яка одна колекція може зайняти не більше половини слотів,
     # щоб не витіснити документи з інших джерел (напр., ПКУ коли всі топи — КМУ).
@@ -4522,6 +4526,15 @@ def _squeeze_context_results(
     _aspect_items = [(s, r) for s, r in scored if r.get("_aspect_coverage")]
     _regular_items = [(s, r) for s, r in scored if not r.get("_aspect_coverage")]
 
+    def _col_bucket(col: str) -> str:
+        if col == "laws_zir_v2":
+            return "zir"
+        if col == "laws_wiki_v2":
+            return "wiki"
+        if _is_court_collection(col):
+            return "court"
+        return "regular"
+
     for _score, r in _aspect_items:
         if len(picked) >= target:
             break
@@ -4531,9 +4544,12 @@ def _squeeze_context_results(
             continue
         picked.append(r)
         per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
-        if _is_background_collection(col):
-            background_count += 1
-        elif _is_court_collection(col):
+        bucket = _col_bucket(col)
+        if bucket == "zir":
+            zir_count += 1
+        elif bucket == "wiki":
+            wiki_count += 1
+        elif bucket == "court":
             court_count += 1
         else:
             col_counts[col] = col_counts.get(col, 0) + 1
@@ -4542,10 +4558,14 @@ def _squeeze_context_results(
         if len(picked) >= target:
             break
         col = r.get("_collection", "")
-        if _is_background_collection(col):
-            if background_count >= background_cap:
+        bucket = _col_bucket(col)
+        if bucket == "zir":
+            if zir_count >= zir_cap:
                 continue
-        elif _is_court_collection(col):
+        elif bucket == "wiki":
+            if wiki_count >= wiki_cap:
+                continue
+        elif bucket == "court":
             if court_count >= court_cap:
                 continue
         else:
@@ -4557,9 +4577,11 @@ def _squeeze_context_results(
             continue
         picked.append(r)
         per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
-        if _is_background_collection(col):
-            background_count += 1
-        elif _is_court_collection(col):
+        if bucket == "zir":
+            zir_count += 1
+        elif bucket == "wiki":
+            wiki_count += 1
+        elif bucket == "court":
             court_count += 1
         else:
             col_counts[col] = col_counts.get(col, 0) + 1
@@ -6310,7 +6332,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "Якщо відповіді немає в контексті, повідом про це."
             ),
         )
-        temperature      = settings_cache.get_float("temperature", 0.1)
+        temperature      = settings_cache.get_float("temperature", 0.20)
         top_p            = settings_cache.get_float("top_p", 0.8)
         is_short_response = response_length_pref == "short"
         is_detailed_response = response_length_pref in {"detailed", "full"}
@@ -6330,10 +6352,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         # Response style/length/features instruction block
         _WORD_LIMITS = {
-            "short":    "Відповідь коротка — 100-180 слів. Лише ключовий висновок і 2-3 практичних кроки.",
-            "standard": "Відповідь повна та структурована — 500-900 слів. Використай усі блоки системного промпту: Коротко, Що зробити, Деталі, На що звернути увагу.",
-            "detailed": "Відповідь детальна — 1000-1600 слів. Повний аналіз з усіма нюансами, таблицями та виключеннями з контексту.",
-            "full":     "Відповідь максимально повна — 1600-2500 слів. Глибокий правовий розбір, судова практика, всі варіанти.",
+            "short":    "ЛІМІТ: 100-180 слів. Лише ключовий висновок і 2-3 практичних кроки. Більше — заборонено.",
+            "standard": "ЛІМІТ: 500-900 слів. Структура: Коротко → Що зробити → Деталі → На що звернути увагу. Якщо не вкладаєшся — вкорочуй 'Деталі', а не інші блоки.",
+            "detailed": "ЛІМІТ: 1000-1600 слів. Повний аналіз з нюансами, таблицями та виключеннями. Якщо не вкладаєшся — вкорочуй приклади, не скорочуй практичні кроки.",
+            "full":     "ЛІМІТ: 1600-2500 слів. Глибокий правовий розбір: законодавство, судова практика, всі варіанти та ризики.",
         }
         _LANG_STYLES = {
             "plain": "Мова відповіді: розмовна, без юридичного жаргону. Поясни як людині без юридичної освіти.",
