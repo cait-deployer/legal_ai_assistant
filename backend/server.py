@@ -4427,6 +4427,105 @@ def _apply_avoid_topic_penalties(results: list[dict], avoid_terms: list[str], qu
         logger.info("AVOID TOPIC PENALTY: %d chunks penalized by %s: %s", len(penalized), avoid_terms[:8], penalized[:10])
 
 
+def _looks_like_amendatory_act(result: dict) -> bool:
+    meta = result.get("out_metadata", {}) or {}
+    title = f"{meta.get('source') or ''} {meta.get('title') or ''}".lower()
+    return any(
+        marker in title
+        for marker in (
+            "про внесення змін",
+            "про внесення зміни",
+            "про внесення змін і доповнень",
+            "про внесення доповнень",
+        )
+    )
+
+
+def _apply_article_hint_preference(results: list[dict], article_hint: dict | None, confidence: float) -> None:
+    if not article_hint or confidence < 0.85:
+        return
+    hinted_law_id = str(article_hint.get("law_id") or "").strip()
+    if not hinted_law_id:
+        return
+    adjusted: list[str] = []
+    for r in results:
+        meta = r.get("out_metadata", {}) or {}
+        law_id = str(meta.get("law_id") or "")
+        if r.get("_article_hint"):
+            r["similarity"] = max(float(r.get("similarity", 0.0) or 0.0), 0.91)
+            adjusted.append(f"+{r.get('_collection')}:{law_id}:{meta.get('chunk_index')}")
+            continue
+        if law_id != hinted_law_id and _looks_like_amendatory_act(r):
+            penalty = 0.28
+            r["_avoid_topic_penalty"] = max(float(r.get("_avoid_topic_penalty") or 0.0), penalty)
+            r["similarity"] = max(0.0, float(r.get("similarity", 0.0) or 0.0) - penalty)
+            adjusted.append(f"-{r.get('_collection')}:{law_id}:amendatory")
+    if adjusted:
+        logger.info("ARTICLE HINT PREFERENCE: adjusted %d chunks for %s: %s", len(adjusted), hinted_law_id, adjusted[:12])
+
+
+def _inject_article_hint_final(results: list[dict], candidates: list[dict], max_docs: int) -> list[dict]:
+    if not candidates:
+        return results
+    target = max(3, min(6, max_docs))
+    existing_keys = {
+        (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+        for r in results
+    }
+    ordered_candidates = sorted(
+        candidates,
+        key=lambda r: (
+            r["out_metadata"].get("chunk_index", 0),
+            -_strict_context_score(r, " ".join(_query_terms(r.get("out_content") or "", limit=12))),
+        ),
+    )
+    injected: list[dict] = []
+    for r in ordered_candidates:
+        key = (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+        r["similarity"] = max(float(r.get("similarity", 0.0) or 0.0), 0.91)
+        if not r.get("_answerability"):
+            r["_answerability"] = {
+                "score": 0.91,
+                "coverage": max(0.35, float(r.get("_answerability", {}).get("coverage", 0.0) or 0.0)),
+                "content_coverage": max(0.25, float(r.get("_answerability", {}).get("content_coverage", 0.0) or 0.0)),
+                "normative": True,
+                "_article_proxy": True,
+            }
+        if key in existing_keys:
+            continue
+        injected.append(r)
+        existing_keys.add(key)
+        if len(injected) >= target:
+            break
+    if not injected:
+        logger.info(
+            "ARTICLE FINAL GUARANTEE: candidates=%d already_present=%d final=%d",
+            len(candidates),
+            sum(1 for r in results if r.get("_article_hint")),
+            len(results),
+        )
+        return results
+    merged = injected + results
+    seen: set[tuple[str, str, int]] = set()
+    deduped: list[dict] = []
+    for r in merged:
+        key = (r.get("_collection", ""), r["out_metadata"].get("law_id", ""), r["out_metadata"].get("chunk_index"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+        if len(deduped) >= max_docs:
+            break
+    logger.info(
+        "ARTICLE FINAL GUARANTEE: candidates=%d injected=%d article_out=%d final=%d",
+        len(candidates),
+        len(injected),
+        sum(1 for r in deduped if r.get("_article_hint")),
+        len(deduped),
+    )
+    return deduped
+
+
 _QUERY_DOMAIN_GUARDS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
     (
         "food_vs_energy",
@@ -5789,6 +5888,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     if _article_filtered:
                         _chunk["_article_hint"] = True
                         _chunk["_full_article_window"] = True
+                        _chunk["similarity"] = max(float(_chunk.get("similarity", 0.0) or 0.0), 0.91)
                     results.append(_chunk)
                     _expanded_keys.add(_key)
                     _expanded_added += 1
@@ -6160,6 +6260,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _avoid_topic_terms,
         _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints),
     )
+    _active_article_hint = (_query_plan or {}).get("article_hint")
+    _active_article_conf = float((_query_plan or {}).get("article_confidence") or 0.0)
+    _apply_article_hint_preference(results, _active_article_hint, _active_article_conf)
 
     _pre_guard_len = len(results)
     results = _apply_domain_relevance_guard(
@@ -6596,6 +6699,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     results = [r for r in results if not _is_expired(r)]
 
     response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
+    _article_final_candidates = [
+        r for r in results
+        if r.get("_article_hint") and not _is_expired(r)
+    ]
     results = _squeeze_context_results(
         results,
         _answerability_query,
@@ -6603,6 +6710,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         response_length_pref,
         keep_weak=low_confidence,
     )
+    results = _inject_article_hint_final(results, _article_final_candidates, body.max_docs)
     logger.info("FINAL RESULTS: %d chunks → Gemini", len(results))
 
     # Drop documents with similarity below threshold (configurable via admin panel).
