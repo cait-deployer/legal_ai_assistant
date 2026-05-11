@@ -7460,28 +7460,32 @@ async def ask_stream(body: AskRequest):
         except Exception:
             classification = dict(_CLF_FALLBACK)
 
-        cats = [r["out_metadata"].get("category", "") for r in pipe["results"] if r["out_metadata"].get("category")]
-        category = max(set(cats), key=cats.count) if cats else "Загальне"
-        elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
+        try:
+            cats = [r["out_metadata"].get("category", "") for r in pipe["results"] if r["out_metadata"].get("category")]
+            category = max(set(cats), key=cats.count) if cats else "Загальне"
+            elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
-        citations_payload = {
-            "answer": full_answer,
-            "references": pipe["citations"],
-            "templates": [],
-            "_meta": {
-                "processing_time_ms": elapsed_ms,
-                "tokens_used": 0,
-                "category": category,
-                "low_confidence": pipe["low_confidence"],
-                "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
-                "n_docs": len(pipe["results"]),
-                "query_rewritten": pipe.get("query_rewritten"),
-                "query_plan": pipe.get("query_plan"),
-                **classification,
-            },
-        }
-        yield _sse("citations", citations_payload)
-        yield _sse("done", {"request_id": request_id})
+            citations_payload = {
+                "answer": full_answer,
+                "references": pipe["citations"],
+                "templates": [],
+                "_meta": {
+                    "processing_time_ms": elapsed_ms,
+                    "tokens_used": 0,
+                    "category": category,
+                    "low_confidence": pipe["low_confidence"],
+                    "top_score": round(pipe["results"][0]["similarity"], 3) if pipe["results"] else 0.0,
+                    "n_docs": len(pipe["results"]),
+                    "query_rewritten": pipe.get("query_rewritten"),
+                    "query_plan": pipe.get("query_plan"),
+                    **classification,
+                },
+            }
+            yield _sse("citations", citations_payload)
+            yield _sse("done", {"request_id": request_id})
+        except Exception as _post_exc:
+            logger.error("ASK_STREAM post-generation error | %s | req=%s", _post_exc, request_id, exc_info=True)
+            yield _sse("error", {"request_id": request_id, "error": str(_post_exc)})
 
     return _SR(generate(), media_type="text/event-stream",
                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
