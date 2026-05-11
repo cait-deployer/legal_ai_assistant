@@ -4472,13 +4472,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     _planner_model_name,
                     system_instruction=(
                         "Ти планувальник пошуку для юридичного RAG. Не відповідай на питання і не встановлюй правові факти. "
-                        "Твоя задача — підготувати пошукові гіпотези українською мовою для векторного пошуку. "
                         "Не вигадуй статті, цифри, строки або назви неіснуючих актів. "
                         "Поверни тільки JSON з чотирма полями:\n"
-                        "search_query:string — перефразований запит юридичними термінами для embedding.\n"
-                        "aspects:string[] — 2-4 окремі сторони питання для паралельного пошуку (коротко, до 8 слів кожен).\n"
-                        "legal_terms:string[] — ключові юридичні терміни та абревіатури (ФОП, ПДВ, ЄП тощо).\n"
-                        "primary_act_hints:string[] — лише загальновідомі назви актів для пошуку за назвою."
+                        "search_query:string — перефразований запит юридичними термінами, МАКСИМУМ 12 СЛІВ.\n"
+                        "aspects:string[] — 2-3 незалежні сторони питання для паралельного пошуку, кожен МАКСИМУМ 6 СЛІВ.\n"
+                        "legal_terms:string[] — ключові терміни та абревіатури (ФОП, ПДВ, ЄП тощо), кожен до 4 слів.\n"
+                        "primary_act_hints:string[] — загальновідомі назви актів, кожен до 5 слів."
                     ),
                 )
                 try:
@@ -4497,9 +4496,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     )
                 _planner_prompt = (
                     f"Питання: {q[:600]}\n\n"
-                    "Поверни JSON з чотирма полями: search_query, aspects, legal_terms, primary_act_hints. "
-                    "aspects — список із 2-4 коротких (до 8 слів) незалежних аспектів питання для окремого векторного пошуку. "
-                    "Не вигадуй конкретних норм, цифр, ставок."
+                    "Поверни JSON. search_query — коротко (до 12 слів), aspects — 2-3 штуки по 5-6 слів кожен."
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -4554,6 +4551,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _plan_query(search_question),
         )
         rewritten_query = _query_plan.get("search_query") if _query_plan else None
+        # Обрізаємо до перших 120 символів — embedding моделі оптимізовані для коротких запитів
+        if rewritten_query:
+            rewritten_query = " ".join(rewritten_query.split()[:20])  # max 20 слів
         if rewritten_query and rewritten_query.strip().lower() == search_question.strip().lower():
             rewritten_query = None
         _act_hints = _query_plan.get("primary_act_hints", []) if _query_plan else []
