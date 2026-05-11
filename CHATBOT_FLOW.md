@@ -95,8 +95,9 @@ The planner returns:
 - `search_query`: normalized Ukrainian legal search text for embeddings;
 - `legal_terms`: exact legal terms and short acronyms such as `FOP`, `TOV`, `PDV`, `EP`, `CPD` in Ukrainian/Russian spelling when relevant;
 - `aspects`: issue dimensions that should be covered, for example taxation, liability, employees, contractors, corporate structure;
+- `title_queries`: short title-search phrases that should be tried before conversational words;
 - `primary_act_hints`: possible act titles for title search only;
-- `source_preferences`: broad source-type hints;
+- `source_preferences`: broad source-type hints used as a small scoring prior, not a hard filter;
 - `should_compare`;
 - `needs_clarification`;
 - `clarification_questions`.

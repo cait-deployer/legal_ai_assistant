@@ -37,6 +37,7 @@ The planner returns a normalized dict with these fields:
   "search_query": "string",
   "legal_terms": ["string"],
   "aspects": ["string"],
+  "title_queries": ["string"],
   "primary_act_hints": ["string"],
   "source_preferences": ["string"],
   "should_compare": false,
@@ -51,6 +52,11 @@ All fields are sanitized by `_normalize_query_plan()`:
 - lists are deduplicated;
 - list sizes and string lengths are capped;
 - invalid planner output falls back to `_empty_query_plan(question)`.
+
+If Gemini returns truncated JSON, `_partial_query_plan()` extracts any completed
+string/list fields from the partial text. This preserves useful `title_queries`,
+`aspects`, `legal_terms` and `source_preferences` instead of dropping the whole
+search plan.
 
 ## Safety Rules
 
@@ -94,10 +100,21 @@ If the planner suggests an act title, that title is only a search hint. The titl
 - Added to primary discovery terms.
 - Used by aspect coverage so a multi-aspect question does not collapse to one source family.
 
+`title_queries`
+
+- Used before conversational query words in title boost and keyword fallback.
+- They are short phrases likely to appear in document titles or stable act families.
+- They are search hints only: a title query must still resolve to a real indexed Qdrant document.
+
 `primary_act_hints`
 
 - Added to title search terms only.
 - A hint that does not resolve to a real indexed document has no authority and does not reach the answer.
+
+`source_preferences`
+
+- Used as a small source-family prior, not as a hard filter.
+- Supported broad hints include `rada`, `kmu`, `zir`, `court`, `wiki` and `mod`.
 
 ## Dynamic Primary-Act Discovery
 
@@ -166,4 +183,3 @@ The planner improves retrieval quality but does not replace metadata enrichment.
 3. Text cancellation scan.
 4. Applying cancellation cache to `meta.json`.
 5. Patching Qdrant payload metadata.
-

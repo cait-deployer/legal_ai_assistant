@@ -3442,6 +3442,7 @@ _QUERY_STOPWORDS = {
     "вибір", "вибору", "критерій", "критерії", "критерии", "діяльність",
     "діяльності", "особа", "осіб", "человек", "людей", "команда", "команди",
     "будь", "ласка", "можливо", "может", "уточни", "питання", "вопрос",
+    "може", "можуть", "могти", "можно", "займається", "займатися", "займаються",
 }
 
 _LEGAL_ACRONYMS = {"фоп", "тов", "ооо", "пдв", "єп", "квед", "цпд", "кзпп", "кму", "дпс", "зір"}
@@ -3485,6 +3486,7 @@ def _empty_query_plan(question: str) -> dict:
         "search_query": question[:350],
         "legal_terms": [],
         "aspects": [],
+        "title_queries": [],
         "primary_act_hints": [],
         "source_preferences": [],
         "should_compare": False,
@@ -3536,6 +3538,30 @@ _QUERY_ALIAS_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...
 )
 
 
+_QUERY_TITLE_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("податков", "єдиний податок", "пдв", "пдфо", "фоп", "пільг", "льгот"),
+        ("Податковий кодекс України", "єдиний податок", "податкові пільги"),
+        ("rada", "zir"),
+    ),
+    (
+        ("компенсац", "відшкодуван", "витрат", "державна підтримка", "підтримк"),
+        ("компенсація витрат", "державна підтримка", "порядок використання коштів"),
+        ("kmu", "rada"),
+    ),
+    (
+        ("критично", "важлив", "бронюван", "бронь", "мобілізац"),
+        ("критично важливі підприємства", "особливий період", "бронювання військовозобов'язаних"),
+        ("kmu", "rada"),
+    ),
+    (
+        ("тов", "ооо", "обмеженою відповідальністю"),
+        ("товариства з обмеженою відповідальністю", "державна реєстрація юридичних осіб"),
+        ("rada",),
+    ),
+)
+
+
 def _merge_unique_strings(*groups: list[str], limit: int) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -3554,6 +3580,24 @@ def _merge_unique_strings(*groups: list[str], limit: int) -> list[str]:
     return out
 
 
+def _scoring_query_text(
+    search_question: str,
+    rewritten_query: str | None = None,
+    planner_terms: list[str] | None = None,
+    act_hints: list[str] | None = None,
+) -> str:
+    parts: list[str] = []
+    if rewritten_query:
+        parts.append(rewritten_query)
+    if planner_terms:
+        parts.append(" ".join(planner_terms))
+    if act_hints:
+        parts.append(" ".join(act_hints))
+    if search_question:
+        parts.append(search_question)
+    return " ".join(part for part in parts if part).strip()
+
+
 def _deterministic_query_plan(question: str) -> dict:
     plan = _empty_query_plan(question)
     q = (question or "").lower()
@@ -3563,6 +3607,12 @@ def _deterministic_query_plan(question: str) -> dict:
         if any(trigger in q for trigger in triggers):
             legal_terms.extend(terms)
             aspects.extend(rule_aspects)
+    title_queries: list[str] = []
+    source_preferences: list[str] = []
+    for triggers, titles, sources in _QUERY_TITLE_RULES:
+        if any(trigger in q for trigger in triggers):
+            title_queries.extend(titles)
+            source_preferences.extend(sources)
 
     compare_markers = (" чи ", " або ", " vs ", " versus ", "краще", "лучше", "обрати", "выбрать", "порівня", "сравн")
     should_compare = any(marker in f" {q} " for marker in compare_markers)
@@ -3574,6 +3624,8 @@ def _deterministic_query_plan(question: str) -> dict:
     if legal_terms:
         plan["legal_terms"] = legal_terms
         plan["aspects"] = aspects
+        plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
+        plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
         plan["search_query"] = " ".join(_merge_unique_strings(_query_terms(question, limit=12), legal_terms, aspects, limit=28))[:350]
         plan["should_compare"] = should_compare
         plan["needs_clarification"] = should_compare
@@ -3583,6 +3635,12 @@ def _deterministic_query_plan(question: str) -> dict:
                 "Який очікуваний річний оборот?",
                 "Плануються інвестори або частки в бізнесі?",
             ]
+    elif title_queries:
+        plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
+        plan["source_preferences"] = _merge_unique_strings(source_preferences, limit=6)
+        plan["aspects"] = _merge_unique_strings(aspects, title_queries, limit=8)
+        plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
+        plan["search_query"] = " ".join(_merge_unique_strings(plan["legal_terms"], plan["aspects"], limit=24))[:350]
     return plan
 
 
@@ -3600,6 +3658,11 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
         base.get("aspects", []),
         extra.get("aspects", []),
         limit=10,
+    )
+    merged["title_queries"] = _merge_unique_strings(
+        extra.get("title_queries", []),
+        base.get("title_queries", []),
+        limit=8,
     )
     merged["primary_act_hints"] = _merge_unique_strings(
         extra.get("primary_act_hints", []),
@@ -3636,11 +3699,43 @@ def _normalize_query_plan(raw_plan, question: str) -> dict:
 
     plan["legal_terms"] = _clean_plan_list(raw_plan.get("legal_terms"), limit=14, min_len=2)
     plan["aspects"] = _clean_plan_list(raw_plan.get("aspects"), limit=8, min_len=4)
+    plan["title_queries"] = _clean_plan_list(raw_plan.get("title_queries"), limit=8, min_len=5)
     plan["primary_act_hints"] = _clean_plan_list(raw_plan.get("primary_act_hints"), limit=5, min_len=6)
     plan["source_preferences"] = _clean_plan_list(raw_plan.get("source_preferences"), limit=6, min_len=4)
     plan["clarification_questions"] = _clean_plan_list(raw_plan.get("clarification_questions"), limit=3, min_len=8, max_len=180)
     plan["should_compare"] = bool(raw_plan.get("should_compare"))
     plan["needs_clarification"] = bool(raw_plan.get("needs_clarification"))
+    return plan
+
+
+def _partial_json_string_value(raw: str, key: str) -> str | None:
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*"([^"]*)', raw or "", re.DOTALL)
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(1)).strip()
+
+
+def _partial_json_list_values(raw: str, key: str, *, limit: int, min_len: int = 2, max_len: int = 140) -> list[str]:
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*\[(.*?)(?:\]|$)', raw or "", re.DOTALL)
+    if not match:
+        return []
+    values = re.findall(r'"([^"]+)"', match.group(1))
+    return _clean_plan_list(values, limit=limit, min_len=min_len, max_len=max_len)
+
+
+def _partial_query_plan(raw: str, question: str) -> dict:
+    plan = _empty_query_plan(question)
+    search_query = _partial_json_string_value(raw, "search_query")
+    if search_query and 8 <= len(search_query) <= 350:
+        plan["search_query"] = search_query
+    plan["legal_terms"] = _partial_json_list_values(raw, "legal_terms", limit=14, min_len=2)
+    plan["aspects"] = _partial_json_list_values(raw, "aspects", limit=8, min_len=4)
+    plan["title_queries"] = _partial_json_list_values(raw, "title_queries", limit=8, min_len=5)
+    plan["primary_act_hints"] = _partial_json_list_values(raw, "primary_act_hints", limit=5, min_len=6)
+    plan["source_preferences"] = _partial_json_list_values(raw, "source_preferences", limit=6, min_len=3)
+    plan["clarification_questions"] = _partial_json_list_values(raw, "clarification_questions", limit=3, min_len=8, max_len=180)
+    plan["should_compare"] = bool(re.search(r'"should_compare"\s*:\s*true', raw or "", re.I))
+    plan["needs_clarification"] = bool(re.search(r'"needs_clarification"\s*:\s*true', raw or "", re.I))
     return plan
 
 
@@ -3990,6 +4085,25 @@ def _is_court_collection(col: str) -> bool:
     # Active codes in it have a recent rada_last_edition → positive recency branch.
     # Old court-practice letters have no last_edition → fall to court penalty here.
     return col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2", "rada_court_v2")
+
+
+def _collection_matches_source_preference(col: str, prefs: list[str] | None) -> bool:
+    pref_set = {str(p).strip().lower() for p in (prefs or []) if str(p).strip()}
+    if not pref_set:
+        return False
+    if "rada" in pref_set and col.startswith("rada_"):
+        return True
+    if "kmu" in pref_set and col == "laws_kmu_v2":
+        return True
+    if "zir" in pref_set and col == "laws_zir_v2":
+        return True
+    if "wiki" in pref_set and col == "laws_wiki_v2":
+        return True
+    if "mod" in pref_set and col == "laws_mod_v2":
+        return True
+    if "court" in pref_set and col in {"laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2", "rada_court_v2"}:
+        return True
+    return col.lower() in pref_set
 
 
 def _is_primary_normative_act(result: dict) -> bool:
@@ -4580,30 +4694,42 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     system_instruction=(
                         "Ти планувальник пошуку для юридичного RAG. Не відповідай на питання і не встановлюй правові факти. "
                         "Не вигадуй статті, цифри, строки або назви неіснуючих актів. "
-                        "Поверни тільки JSON з чотирма полями:\n"
-                        "search_query:string — перефразований запит юридичними термінами, МАКСИМУМ 12 СЛІВ.\n"
-                        "aspects:string[] — 2-3 незалежні сторони питання для паралельного пошуку, кожен МАКСИМУМ 6 СЛІВ.\n"
-                        "legal_terms:string[] — ключові терміни та абревіатури (ФОП, ПДВ, ЄП тощо), кожен до 4 слів.\n"
-                        "primary_act_hints:string[] — загальновідомі назви актів, кожен до 5 слів."
+                        "Твоя задача — скласти карту пошуку: що шукати семантично, що шукати в назвах актів, "
+                        "і які джерела ймовірно потрібні. Якщо питання має кілька підпитань, розклади їх окремо. "
+                        "Поверни тільки КОМПАКТНИЙ JSON з полями. Без markdown. Без пояснень. "
+                        "Кожен список максимум 3 елементи, крім legal_terms максимум 8.\n"
+                        "search_query:string — короткий юридичний запит, МАКСИМУМ 14 СЛІВ.\n"
+                        "aspects:string[] — 2-3 незалежні сторони питання, кожна МАКСИМУМ 5 СЛІВ.\n"
+                        "legal_terms:string[] — ключові терміни та абревіатури, кожен до 4 слів.\n"
+                        "title_queries:string[] — короткі фрази для пошуку в НАЗВАХ документів, кожна 2-5 слів; "
+                        "включай тип акта або сферу, наприклад 'Податковий кодекс України', 'критично важливі підприємства', "
+                        "'державна підтримка виробників'.\n"
+                        "primary_act_hints:string[] — тільки загальновідомі назви актів або дуже впізнавані фрагменти назв; "
+                        "якщо не впевнений у точній назві, дай фрагмент без номера і дати.\n"
+                        "source_preferences:string[] — broad джерела: rada, kmu, zir, court, wiki, mod.\n"
+                        "should_compare:boolean, needs_clarification:boolean, clarification_questions:string[]. "
+                        "Якщо місця мало, пріоритет: title_queries, aspects, legal_terms."
                     ),
                 )
                 try:
                     from vertexai.generative_models import ThinkingConfig as _PlannerThinkingConfig
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=1500,
+                        max_output_tokens=900,
                         response_mime_type="application/json",
                         thinking_config=_PlannerThinkingConfig(thinking_budget=0),
                     )
                 except Exception:
                     _planner_cfg = GenerationConfig(
                         temperature=0.0,
-                        max_output_tokens=1500,
+                        max_output_tokens=900,
                         response_mime_type="application/json",
                     )
                 _planner_prompt = (
                     f"Питання: {q[:600]}\n\n"
-                    "Поверни JSON. search_query — коротко (до 12 слів), aspects — 2-3 штуки по 5-6 слів кожен."
+                    "Поверни компактний JSON-план пошуку. Для кожного правового механізму з питання додай окремий aspect. "
+                    "У title_queries постав фрази, які найімовірніше є в назвах законів, кодексів, постанов або порядків. "
+                    'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"primary_act_hints":[],"source_preferences":[],"should_compare":false,"needs_clarification":false,"clarification_questions":[]}'
                 )
                 _planner_resp = await _asyncio.wait_for(
                     _asyncio.to_thread(
@@ -4632,18 +4758,24 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 try:
                     _parsed = _json.loads(_raw_to_parse)
                 except _json.JSONDecodeError:
-                    # JSON обрізаний (hit token limit) — витягуємо search_query з часткового JSON
-                    _sq_match = re.search(r'"search_query"\s*:\s*"([^"]{5,})', _raw_to_parse)
-                    _fallback_q = _sq_match.group(1) if _sq_match else q
-                    _parsed = {"search_query": _fallback_q}
-                    logger.warning("QUERY PLAN: truncated JSON, fallback search_query=%r", _fallback_q[:120])
+                    plan = _partial_query_plan(_raw_to_parse, q)
+                    logger.warning(
+                        "QUERY PLAN: partial JSON parsed search=%r terms=%s aspects=%s titles=%s",
+                        plan["search_query"][:120],
+                        plan["legal_terms"][:5],
+                        plan["aspects"][:5],
+                        plan["title_queries"][:5],
+                    )
+                    return plan
                 plan = _normalize_query_plan(_parsed, q)
                 logger.info(
-                    "QUERY PLAN: search=%r terms=%s aspects=%s acts=%s compare=%s clarify=%s",
+                    "QUERY PLAN: search=%r terms=%s aspects=%s titles=%s acts=%s sources=%s compare=%s clarify=%s",
                     plan["search_query"][:160],
                     plan["legal_terms"][:8],
                     plan["aspects"][:6],
+                    plan["title_queries"][:6],
                     plan["primary_act_hints"][:5],
+                    plan["source_preferences"][:5],
                     plan["should_compare"],
                     plan["needs_clarification"],
                 )
@@ -4664,13 +4796,29 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         if rewritten_query and rewritten_query.strip().lower() == search_question.strip().lower():
             rewritten_query = None
         _act_hints = _query_plan.get("primary_act_hints", []) if _query_plan else []
+        _title_queries = _query_plan.get("title_queries", []) if _query_plan else []
+        _source_preferences = [
+            str(s).strip().lower()
+            for s in (_query_plan.get("source_preferences", []) if _query_plan else [])
+            if str(s).strip()
+        ]
         _planner_terms = _clean_plan_list(
             (_query_plan.get("legal_terms", []) if _query_plan else [])
             + (_query_plan.get("aspects", []) if _query_plan else []),
             limit=22,
             min_len=2,
         )
-        hypothetical_text = " ".join([rewritten_query or "", " ".join(_planner_terms)]).strip()
+        _scoring_terms = _merge_unique_strings(
+            (_query_plan.get("aspects", []) if _query_plan else []),
+            (_query_plan.get("legal_terms", []) if _query_plan else []),
+            _title_queries,
+            _act_hints,
+            limit=22,
+        )
+        hypothetical_text = " ".join([
+            rewritten_query or "",
+            " ".join(_scoring_terms),
+        ]).strip()
         logger.info("QUERY: %s", search_question[:200])
     except Exception as e:
         raise HTTPException(500, f"Embedding/HyDE error: {e}")
@@ -4804,6 +4952,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] * _zir_boost, 1.0)
         elif abs(rada_boost - 1.0) > 0.001 and (col.startswith("rada_") or col == "laws_positions_v2"):
             r["similarity"] = min(r["similarity"] * rada_boost, 1.0)
+        if _collection_matches_source_preference(col, _source_preferences):
+            r["similarity"] = min(r["similarity"] + 0.04, 1.0)
+            r["_source_preference_match"] = True
 
     # Authority score: boost/penalize by document type to prefer current legislation
     _DOC_TYPE_SCORE = {
@@ -4895,7 +5046,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
             for r in results
         }
-        _term_text = f"{search_question} {rewritten_query or ''}".strip()
+        _term_text = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
         _doc_terms = _query_terms(_term_text, limit=18)
         _expand_min_score = max(match_threshold, 0.55)
 
@@ -4942,7 +5093,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         for _doc_rank, ((_col, _lid), _seed_info) in enumerate(_seed_docs, start=1):
             _seed_score = _seed_info["similarity"]
-            if _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE:
+            _seed_directness = 0.0
+            for _seed in results:
+                if _seed.get("_collection") == _col and _seed["out_metadata"].get("law_id") == _lid:
+                    _seed_directness = max(
+                        _seed_directness,
+                        _directness_score((_seed.get("out_content") or "").lower(), _doc_terms),
+                    )
+            if _doc_rank == 1 and _seed_score >= _FULL_LAW_MIN_SCORE and _seed_directness >= 0.18:
                 # Топ-1 закон з високою впевненістю → ВСІ чанки по порядку (включно з таблицями)
                 _doc_chunks = get_all_law_chunks(_col, _lid, max_chunks=_FULL_LAW_MAX)
                 logger.info("FULL LAW: %s/%s score=%.3f → %d chunks", _col, _lid, _seed_score, len(_doc_chunks))
@@ -5013,8 +5171,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     try:
         from qdrant_storage import search_qdrant_text
         _act_hints_text = " ".join(_act_hints) if _act_hints else ""
-        _planner_terms_text = " ".join(_planner_terms) if _planner_terms else ""
-        _kw_query = f"{search_question} {rewritten_query or ''} {_planner_terms_text} {_act_hints_text}".strip()
+        _planner_terms_text = " ".join(_scoring_terms) if _scoring_terms else ""
+        _title_queries_text = " ".join(_title_queries) if _title_queries else ""
+        _kw_query = f"{_planner_terms_text} {_title_queries_text} {rewritten_query or ''} {_act_hints_text} {search_question}".strip()
         _kw_results = (
             search_qdrant_text(_kw_query, target_collections, limit=15)
             if settings_cache.get_bool("lexical_fallback_enabled", True)
@@ -5090,7 +5249,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
-        _search_terms_text = f"{search_question} {rewritten_query or ''}".strip()
+        _search_terms_text = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
         _q_words = [
             _strip_punct(w) for w in _search_terms_text.split()
             if len(w) > 4 or w.lower() in _LEGAL_ACRONYMS
@@ -5115,7 +5274,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
             ]
         _hints_words_set = set(w.lower() for w in _hints_words)  # для швидкої перевірки hint-матчу
-        _raw_kws = list(dict.fromkeys(_q_words[:3] + _hyde_words + _hints_words[:6]))[:14]
+        _title_query_words = []
+        for _tq in _title_queries:
+            _title_query_words += [
+                _strip_punct(w) for w in _tq.split()
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+            ]
+        _raw_kws = list(dict.fromkeys(_hints_words[:8] + _title_query_words[:12] + _hyde_words + _q_words[:4]))[:18]
         # pymorphy3: додаємо лематизовані форми — відрядженні→відрядження автоматично
         # Лематизовані форми теж фільтруємо через стоп-слова
         _title_kws = list(dict.fromkeys(
@@ -5165,9 +5330,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     try:
         from qdrant_storage import search_law_chunks_by_terms, search_qdrant_in_law
 
-        _primary_query = f"{search_question} {rewritten_query or ''}".strip()
+        _primary_query = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
         _primary_terms = _query_terms(
-            f"{search_question} {rewritten_query or ''} {' '.join(_planner_terms or [])} {' '.join(_act_hints or [])}",
+            _primary_query,
             limit=24,
         )
         _primary_pool = [
@@ -5259,7 +5424,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r["similarity"] = min(r["similarity"] + 0.10, 0.99)  # підтверджено обома — буст
     results.sort(key=lambda x: x["similarity"], reverse=True)
 
-    _answerability_query = f"{search_question} {rewritten_query or ''}".strip()
+    _answerability_query = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
     if len(results) > body.max_docs * 2:
         results = _rerank_by_answerability(
             results,
@@ -5337,7 +5502,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _dedup_rr.append(_rp)
         _dedup_rr_keys.add(_rp_key)
     _rr_protected = _dedup_rr
-    _docset_terms = _query_terms(f"{search_question} {rewritten_query or ''}", limit=18)
+    _docset_terms = _query_terms(_answerability_query, limit=18)
     _docset_keep: list[dict] = []
     _docset_seen: set[tuple[str, str]] = set()
     for _r in sorted(
