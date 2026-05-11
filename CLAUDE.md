@@ -150,7 +150,7 @@ Early-answer path skips `message` events and emits `citations` directly.
 - Vertex AI initialized ONCE at startup via `_init_vertex_ai()` — do not call `vertexai.init()` per request
 - Embeddings v1: Vertex AI `text-embedding-004` (768 dims), max ~20000 tokens per batch call
 - Embeddings v2: `gemini-embedding-001` (3072 dims), new SDK `google.genai.Client`, batch=1, SLEEP_SEC=0.1, raises on 3rd failure
-- Chunk sizes: Rada 3000/300, KMU 3000/300, CCU/Supreme 3000/300, Wiki/Positions/ZIR 2000/200, MOD 3000/300
+- Chunk sizes: Rada 3000/600, KMU 3000/600, CCU/Supreme 3000/300, Wiki/Positions/ZIR 2000/200, MOD 3000/300 (overlap 600 for Rada/KMU — КУпАП-style codes have short article clauses ~200-400 chars; 300 was too small to capture violation+penalty in same chunk)
 - Chunk truncation: always slice `[:8000]` (Rada, Wiki, Positions) or `[:15000]` (KMU, CCU, Supreme, MOD) after title-prefix
 - Reindex v2 safe order: embed first → delete old → upload new (prevents data loss on embed failure)
 - `upload_to_qdrant()` returns `bool` — always check return value for accurate success counting
