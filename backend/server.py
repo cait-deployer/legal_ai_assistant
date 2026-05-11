@@ -4125,6 +4125,13 @@ def _collection_matches_source_preference(col: str, prefs: list[str] | None) -> 
     return col.lower() in pref_set
 
 
+def _collections_for_source_preferences(collections: list[str], prefs: list[str] | None) -> list[str]:
+    if not prefs:
+        return []
+    picked = [col for col in collections if _collection_matches_source_preference(col, prefs)]
+    return list(dict.fromkeys(picked))
+
+
 def _is_primary_normative_act(result: dict) -> bool:
     col = result.get("_collection", "")
     meta = result.get("out_metadata", {}) or {}
@@ -4879,10 +4886,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     else:
         plan_collections = ALL_V2_COLLECTIONS
 
-    # Centroid router вимкнено — шукаємо у всіх дозволених тарифом колекціях паралельно
-    # (router коштував 2-4с на probe-запити і міг відсікати релевантні колекції)
-    # target_collections = await _classify_and_route(search_question, plan_collections, _model_name, query_vector=query_vector)
-    target_collections = plan_collections
+    # Centroid router вимкнено, але planner/fallback source_preferences дають м'який
+    # scoped search для першого проходу. Якщо сигнал слабкий, low-confidence нижче
+    # розширить пошук назад у дозволені тарифом колекції.
+    preferred_collections = _collections_for_source_preferences(plan_collections, _source_preferences)
+    target_collections = preferred_collections or plan_collections
+    if preferred_collections:
+        logger.info(
+            "SOURCE SCOPE: prefs=%s target=%s fallback_total=%d",
+            _source_preferences,
+            target_collections,
+            len(plan_collections),
+        )
 
     fetch_k = body.max_docs * 5  # більше кандидатів для реранкера
     match_threshold = max(0.25, settings_cache.get_float("match_threshold_docs", 0.33))
@@ -4897,7 +4912,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         return sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)
 
     rw_vector = None
-    _aspects = (_query_plan.get("aspects", []) if _query_plan else [])
+    _aspects = (_query_plan.get("aspects", []) if _query_plan else [])[:4]
     try:
         if rewritten_query and _aspects:
             # Паралельно: embed rewrite + embed всіх аспектів + search оригінал
