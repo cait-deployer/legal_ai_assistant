@@ -1,4 +1,4 @@
-﻿﻿"""
+﻿"""
 server.py — FastAPI бекенд для URAI (уп Assistant).
 
 Запуск:  cd /home/devops/app/backend && uvicorn server:app --host 0.0.0.0 --port 8000
