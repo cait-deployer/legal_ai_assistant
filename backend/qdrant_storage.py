@@ -636,16 +636,32 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
     return results
 
 
-def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
+def search_qdrant_by_title(
+    keywords: list[str],
+    collections: list,
+    chunks_per_doc: int = 3,
+    max_keywords: int = 10,
+    max_docs_per_collection: int = 30,
+    max_pages_per_keyword: int = 2,
+    time_budget_seconds: float = 6.0,
+    scroll_timeout_seconds: float = 2.0,
+) -> list:
     """
     Multi-field keyword boost: знаходить документи де source АБО content містить
     ключові слова запиту. Docs ranked by total keyword matches across both fields.
     """
+    started_at = time.monotonic()
+    deadline = started_at + max(0.5, float(time_budget_seconds or 0))
+    scroll_timeout = max(1, int(min(float(scroll_timeout_seconds or 2.0), float(time_budget_seconds or 2.0))))
     client = get_client()
     results: list = []
+    keywords = list(dict.fromkeys(str(kw).strip() for kw in keywords if len(str(kw).strip()) >= 5))[:max(1, max_keywords)]
     lowered_keywords = list(dict.fromkeys(kw.lower() for kw in keywords if len(kw) >= 5))
     if not lowered_keywords:
         return []
+
+    def _time_left() -> bool:
+        return time.monotonic() < deadline
 
     def _chunk_keyword_score(point) -> tuple[int, int]:
         payload = point.payload or {}
@@ -657,17 +673,24 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
         return content_matches, matches
 
     for col in collections:
+        if not _time_left():
+            break
         law_match_counts: dict[str, set[str]] = {}
         law_points: dict[str, dict[str, object]] = {}
 
         for kw in keywords:
+            if not _time_left():
+                break
             if len(kw) < 5:
                 continue
             try:
                 # Пагінація — збираємо всі унікальні law_ids, не обмежуємось 500 чанками
                 offset = None
                 seen_in_kw: set[str] = set()
+                pages = 0
                 while True:
+                    if not _time_left() or pages >= max(1, max_pages_per_keyword):
+                        break
                     pts, next_offset = client.scroll(
                         collection_name=col,
                         scroll_filter=Filter(
@@ -677,7 +700,9 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                         offset=offset,
                         with_payload=True,
                         with_vectors=False,
+                        timeout=scroll_timeout,
                     )
+                    pages += 1
                     for p in pts:
                         lid = p.payload.get("law_id", "")
                         if not lid:
@@ -689,7 +714,7 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                             law_match_counts[lid].add(kw.lower())
                             seen_in_kw.add(lid)
                         law_points[lid][str(p.id)] = p
-                    if not next_offset or len(law_match_counts) > 500:
+                    if not next_offset or len(law_match_counts) >= max_docs_per_collection:
                         break
                     offset = next_offset
             except Exception as e:
@@ -705,7 +730,9 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
         ]
         ranked_law_ids.sort(key=lambda lid: -len(law_match_counts[lid]))
 
-        for lid in ranked_law_ids[:30]:
+        for lid in ranked_law_ids[:max(1, max_docs_per_collection)]:
+            if not _time_left():
+                break
             pts_by_id = dict(law_points[lid])
             try:
                 pts, _ = client.scroll(
@@ -716,6 +743,7 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                     limit=max(80, chunks_per_doc * 10),
                     with_payload=True,
                     with_vectors=False,
+                    timeout=scroll_timeout,
                 )
                 for p in pts:
                     pts_by_id[str(p.id)] = p

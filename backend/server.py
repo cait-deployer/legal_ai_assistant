@@ -6201,6 +6201,34 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         from qdrant_storage import search_qdrant_by_title
         import re as _re
         _strip_punct = lambda w: _re.sub(r"^[«»\"'()\[\].,;:!?]+|[«»\"'()\[\].,;:!?]+$", "", w)
+        _TITLE_GENERIC_TERMS = {
+            "акт", "акти", "закон", "закону", "закони", "кодекс", "кодексу",
+            "постанова", "постанови", "порядок", "порядку", "наказ", "наказу",
+            "україна", "україни", "кабінет", "міністрів", "кму", "рада",
+            "державний", "державна", "державне", "державної", "державну",
+            "служба", "служби", "орган", "органи", "питання", "деякі",
+            "затвердження", "внесення", "зміни", "змін", "правила", "правил",
+        }
+
+        def _is_good_title_kw(w: str) -> bool:
+            lw = (w or "").lower().strip()
+            if not lw:
+                return False
+            if any(ch.isdigit() for ch in lw):
+                return True
+            if " " in lw or "-" in lw:
+                return True
+            if lw in _LEGAL_ACRONYMS:
+                return True
+            return len(lw) >= 6 and lw not in _TITLE_STOPWORDS and lw not in _TITLE_GENERIC_TERMS
+
+        def _title_kw_rank(w: str) -> tuple[int, int]:
+            lw = (w or "").lower()
+            return (
+                0 if (any(ch.isdigit() for ch in lw) or " " in lw or "-" in lw or lw in _LEGAL_ACRONYMS) else 1,
+                -len(lw),
+            )
+
         _search_terms_text = _scoring_query_text(search_question, rewritten_query, _scoring_terms, _act_hints)
         _q_words = [
             _strip_punct(w) for w in _search_terms_text.split()
@@ -6208,7 +6236,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ]
         _q_words = [
             w for w in _q_words
-            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
         ]
         _hyde_words = [
             _strip_punct(w) for w in (hypothetical_text or "").split()
@@ -6216,21 +6244,21 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         ][:16]
         _hyde_words = [
             w for w in _hyde_words
-            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+            if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
         ]
         # Слова з act_hints (назви актів від LLM) — для title search і пріоритетного буста
         _hints_words = []
         for _ht in _act_hints:
             _hints_words += [
                 _strip_punct(w) for w in _ht.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
             ]
         _hints_words_set = set(w.lower() for w in _hints_words)  # для швидкої перевірки hint-матчу
         _title_query_words = []
         for _tq in _title_queries:
             _title_query_words += [
                 _strip_punct(w) for w in _tq.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
             ]
             
         _must_phrases = [p.lower().strip() for p in _title_must_terms if p.strip()]
@@ -6238,13 +6266,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         for _mt in _title_must_terms:
             _must_words += [
                 _strip_punct(w) for w in _mt.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
             ]
         _nice_words = []
         for _nt in _title_nice_terms:
             _nice_words += [
                 _strip_punct(w) for w in _nt.split()
-                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and w.lower() not in _TITLE_STOPWORDS
+                if (len(w) > 4 or w.lower() in _LEGAL_ACRONYMS) and _is_good_title_kw(w)
             ]
         _exclude_phrases = [p.lower() for p in _title_exclude_terms if p and len(p) >= 4]
         _raw_kws = list(dict.fromkeys(_must_words[:10] + _hints_words[:8] + _title_query_words[:12] + _nice_words[:8] + _hyde_words + _q_words[:4]))[:22]
@@ -6253,14 +6281,25 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _title_kws = list(dict.fromkeys(
             _raw_kws + [
                 lm for w in _raw_kws
-                if (lm := _ua_lemma(w)) and lm.lower() not in _TITLE_STOPWORDS
+                if (lm := _ua_lemma(w)) and _is_good_title_kw(lm)
             ]
-        ))[:18]
+        ))
+        _title_kws = sorted(_title_kws, key=_title_kw_rank)[:int(settings_cache.get_float("title_boost_max_keywords", 10) or 10)]
         logger.info("TITLE BOOST kws: %s", _title_kws)
         if not settings_cache.get_bool("title_boost_enabled", True):
             _title_kws = []
         if _title_kws:
-            _title_results = search_qdrant_by_title(_title_kws, target_collections, chunks_per_doc=2)
+            _title_started = time.monotonic()
+            _title_results = search_qdrant_by_title(
+                _title_kws,
+                target_collections,
+                chunks_per_doc=2,
+                max_keywords=int(settings_cache.get_float("title_boost_max_keywords", 10) or 10),
+                max_docs_per_collection=int(settings_cache.get_float("title_boost_max_docs_per_collection", 24) or 24),
+                max_pages_per_keyword=int(settings_cache.get_float("title_boost_max_pages_per_keyword", 2) or 2),
+                time_budget_seconds=settings_cache.get_float("title_boost_timeout_seconds", 6.0),
+                scroll_timeout_seconds=settings_cache.get_float("title_boost_scroll_timeout_seconds", 2.0),
+            )
             if _exclude_phrases:
                 _before_title_exclude = len(_title_results)
                 _title_results = [
@@ -6283,7 +6322,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
             _title_cap = int(settings_cache.get_float("title_boost_max_chunks", 16))
             _title_results = _title_results[:max(4, min(_title_cap, 24))]
-            logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
+            logger.info(
+                "TITLE BOOST found in %.2fs: %s",
+                time.monotonic() - _title_started,
+                [r["out_metadata"].get("law_id") for r in _title_results],
+            )
             logger.info(
                 "TITLE BOOST plan: title_queries=%s must=%s nice=%s exclude=%s act_hints=%s raw_kws=%s final_kws=%s",
                 _title_queries[:6],
