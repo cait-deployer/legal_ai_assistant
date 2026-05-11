@@ -5990,9 +5990,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _rr_protected.append(_wk)
     # Full-law chunks bypass reranker entirely (sorted by term overlap so the most
     # query-relevant chunks get protected slots, not just the first 15 by index).
+    # For each selected chunk, the preceding chunk (N-1) is also protected to preserve
+    # condition→penalty context (e.g. "тягнуть за собою 40 НМДГ" without its condition
+    # chunk is ambiguous — the LLM can't tell which speed range the penalty applies to).
     _rr_protected_key_set = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
+    }
+    # Build lookup for fast neighbor access
+    _fl_by_law_idx = {
+        (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index", 0)): r
+        for r in results
+        if r.get("_full_law")
     }
     _fl_added = 0
     _fl_candidates = sorted(
@@ -6000,16 +6009,42 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         key=lambda r: _term_overlap_score(r, _docset_terms),
         reverse=True,
     )
+    _n_terms = max(len(_docset_terms), 1)
     for _fl in _fl_candidates:
         if _fl_added >= 25:
             break
         _fl_key = (_fl["out_metadata"].get("law_id"), _fl["out_metadata"].get("chunk_index"))
         if _fl_key not in _rr_protected_key_set:
+            # Protected chunks bypass the reranker so _answerability is unset → coverage=0.0
+            # in squeeze. Give them a data-driven proxy: term overlap / query terms.
+            # A chunk that matches 3 of 4 query terms is ~75% covered — don't penalise it.
+            if not _fl.get("_answerability"):
+                _fl["_answerability"] = {
+                    "coverage": _term_overlap_score(_fl, _docset_terms) / _n_terms,
+                    "_proxy": True,
+                }
             _rr_protected.append(_fl)
             _rr_protected_key_set.add(_fl_key)
             _fl_added += 1
+            # Also protect the preceding chunk (condition clause before "тягнуть" penalty).
+            # Apply the same proxy so it competes fairly in squeeze.
+            _fl_lid = _fl_key[0]
+            _fl_idx = _fl_key[1]
+            if _fl_idx > 0 and _fl_added < 25:
+                _prev_key = (_fl_lid, _fl_idx - 1)
+                if _prev_key not in _rr_protected_key_set:
+                    _prev = _fl_by_law_idx.get(_prev_key)
+                    if _prev is not None:
+                        if not _prev.get("_answerability"):
+                            _prev["_answerability"] = {
+                                "coverage": _term_overlap_score(_prev, _docset_terms) / _n_terms,
+                                "_proxy": True,
+                            }
+                        _rr_protected.append(_prev)
+                        _rr_protected_key_set.add(_prev_key)
+                        _fl_added += 1
     if _fl_added:
-        logger.info("FULL LAW PROTECTED: %d chunks bypassing reranker (top by term overlap)", _fl_added)
+        logger.info("FULL LAW PROTECTED: %d chunks bypassing reranker (top by term overlap + N-1 neighbors)", _fl_added)
     _rr_protected_keys = {
         (r["out_metadata"].get("law_id"), r["out_metadata"].get("chunk_index"))
         for r in _rr_protected
