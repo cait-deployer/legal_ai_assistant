@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 
 const BACKEND = process.env.API_URL || "http://localhost:8000"
 
+export const dynamic = "force-dynamic"
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}))

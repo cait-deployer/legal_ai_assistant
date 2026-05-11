@@ -330,7 +330,10 @@ function ScraperTab() {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    const id = window.setTimeout(() => { void fetchStatus() }, 0)
+    return () => window.clearTimeout(id)
+  }, [fetchStatus])
 
   const anyRunning = SOURCES.some(s => allStatus[s]?.running)
 
@@ -1503,7 +1506,13 @@ type FixSourceStatus = {
   running: boolean
   pause_requested: boolean
   live_logs: LogEntry[]
-  resume_progress: { done: number; failed: number; total: number } | null
+  can_resume?: boolean
+  resume_progress: {
+    done: number
+    failed: number
+    total: number
+    current?: { law_id: string; size_kb: number; started_at: string } | null
+  } | null
   total_on_disk: number
 }
 
@@ -1529,7 +1538,10 @@ function FixTruncatedTab() {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    const id = window.setTimeout(() => { void fetchStatus() }, 0)
+    return () => window.clearTimeout(id)
+  }, [fetchStatus])
 
   const anyRunning = FIX_SOURCES.some(s => status[s.id]?.running)
 
@@ -1672,6 +1684,17 @@ function FixTruncatedTab() {
                 <div className="text-gray-500">помилок</div>
               </div>
             </div>
+
+            {progress?.current && (
+              <div className="rounded-lg border border-[#C9A84C]/15 bg-[#0A0E1A] px-3 py-2 text-xs text-gray-400">
+                <div className="font-bold text-[#E0E6ED]">Поточний документ</div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                  <span>ID: <b className="text-[#C9A84C]">{progress.current.law_id}</b></span>
+                  <span>Розмір: <b className="text-gray-300">{progress.current.size_kb.toLocaleString()} KB</b></span>
+                  <span>Етапи видно у логах нижче: читання, чанки, embedding, видалення старого, upload.</span>
+                </div>
+              </div>
+            )}
 
             {/* Progress bar */}
             {progress && progress.total > 0 && (

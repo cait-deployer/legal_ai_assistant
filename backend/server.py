@@ -1989,6 +1989,14 @@ async def v2_reindex_stop(body: dict = Body(default={})):
 FIX_TRUNCATED_SOURCES = ["rada", "kmu"]
 
 
+def _any_fix_truncated_running() -> str | None:
+    with _lock:
+        for src in FIX_TRUNCATED_SOURCES:
+            if _sync[f"fix_truncated_{src}"]["running"]:
+                return src
+    return None
+
+
 def _do_fix_truncated(source: str):
     slot = f"fix_truncated_{source}"
     log  = _make_reindex_log_cb(slot)
@@ -2023,6 +2031,7 @@ async def fix_truncated_status():
             "running":          running,
             "pause_requested":  pause_req,
             "live_logs":        logs,
+            "can_resume":       progress is not None and not running,
             "resume_progress":  progress,
             "total_on_disk":    total_on_disk,
         }
@@ -2034,6 +2043,9 @@ async def fix_truncated_trigger(body: dict = Body(default={})):
     source = body.get("source")
     if source not in FIX_TRUNCATED_SOURCES:
         raise HTTPException(400, f"source must be one of {FIX_TRUNCATED_SOURCES}")
+    running_src = _any_fix_truncated_running()
+    if running_src:
+        raise HTTPException(409, f"Fix-truncated '{running_src}' is already running")
     slot = f"fix_truncated_{source}"
     session_id = str(uuid.uuid4())
     try:

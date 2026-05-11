@@ -48,7 +48,12 @@ def _is_rate_limit(ex: Exception) -> bool:
     return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "QUOTA" in msg
 
 
-def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
+def embed_documents(
+    texts: list[str],
+    task: str = "RETRIEVAL_DOCUMENT",
+    progress_callback=None,
+    stop_event: threading.Event | None = None,
+) -> list[list[float]]:
     """Ембедить список текстів. Sequential — batch=1 на Vertex AI."""
     from google.genai.types import EmbedContentConfig
     client = _get_client()
@@ -56,12 +61,18 @@ def embed_documents(texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[
     total = len(texts)
     result = []
     for i, text in enumerate(texts):
+        if stop_event is not None and stop_event.is_set():
+            raise InterruptedError(f"embedding stopped at chunk {i}/{total}")
         hard_fails = 0
         rate_waits = 0
         while True:
+            if stop_event is not None and stop_event.is_set():
+                raise InterruptedError(f"embedding stopped at chunk {i}/{total}")
             try:
                 resp = client.models.embed_content(model=EMBED_MODEL, contents=text, config=cfg)
                 result.append(list(resp.embeddings[0].values))
+                if progress_callback:
+                    progress_callback(i + 1, total)
                 break
             except Exception as ex:
                 if _is_rate_limit(ex):
