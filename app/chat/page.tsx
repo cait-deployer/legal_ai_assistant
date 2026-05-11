@@ -645,7 +645,12 @@ function ChatPage() {
                                 if (message) setLoadingStatus(message);
                                 if (parsed.step === 'continuation') setIsContinuing(true);
                             } else if (currentEvent === 'error') {
-                                toast.error('Помилка генерації відповіді.');
+                                const errorMessage = typeof parsed.error === 'string'
+                                    ? parsed.error
+                                    : typeof parsed.detail === 'string'
+                                        ? parsed.detail
+                                        : 'Помилка генерації відповіді.';
+                                toast.error(errorMessage);
                             }
                         } else if (line === '') {
                             currentEvent = 'message';

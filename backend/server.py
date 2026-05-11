@@ -6610,15 +6610,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         main_model = GenerativeModel(model_name, system_instruction=system_prompt, safety_settings=_safety)
         clf_model  = GenerativeModel(model_name, safety_settings=_safety)
 
-        # thinking_budget=0: відповідь будується з готового контексту, thinking не потрібен
-        try:
-            from vertexai.generative_models import ThinkingConfig as _ThinkingConfig
-            _main_gen_cfg = GenerationConfig(
-                temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens,
-                thinking_config=_ThinkingConfig(thinking_budget=0),
-            )
-        except Exception:
-            _main_gen_cfg = GenerationConfig(temperature=temperature, top_p=top_p, max_output_tokens=max_output_tokens)
+        _main_gen_cfg = GenerationConfig(
+            temperature=temperature,
+            top_p=top_p,
+            max_output_tokens=max_output_tokens,
+        )
 
         llm_timeout = settings_cache.get_float("llm_timeout_seconds", 90.0)
 
