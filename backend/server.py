@@ -6600,8 +6600,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "захист прав (суперечка/скарга), роз'яснення (просить пояснити поняття/закон)."
         )
 
-        main_model = GenerativeModel(model_name, system_instruction=system_prompt)
-        clf_model  = GenerativeModel(model_name)
+        from vertexai.generative_models import HarmCategory as _HC, HarmBlockThreshold as _HBT
+        _safety = {
+            _HC.HARM_CATEGORY_HATE_SPEECH:      _HBT.BLOCK_ONLY_HIGH,
+            _HC.HARM_CATEGORY_DANGEROUS_CONTENT: _HBT.BLOCK_ONLY_HIGH,
+            _HC.HARM_CATEGORY_HARASSMENT:        _HBT.BLOCK_ONLY_HIGH,
+            _HC.HARM_CATEGORY_SEXUALLY_EXPLICIT: _HBT.BLOCK_ONLY_HIGH,
+        }
+        main_model = GenerativeModel(model_name, system_instruction=system_prompt, safety_settings=_safety)
+        clf_model  = GenerativeModel(model_name, safety_settings=_safety)
 
         # thinking_budget=0: відповідь будується з готового контексту, thinking не потрібен
         try:
