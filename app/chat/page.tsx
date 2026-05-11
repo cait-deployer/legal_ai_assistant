@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import { toast } from 'sonner';
 import {
     Send,
+    Square,
     BookOpenText,
     ExternalLink,
     AlertTriangle,
@@ -267,6 +268,7 @@ function ChatPage() {
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false);
     const [isContinuing, setIsContinuing] = useState(false);
     const [loadingStatus, setLoadingStatus] = useState('');
     const [loadingPhase, setLoadingPhase] = useState(0);
@@ -287,6 +289,11 @@ function ChatPage() {
     const newChatInProgressRef = useRef(false);
     const contextSummaryRef = useRef<string | null>(null);
     const summaryPromiseRef = useRef<Promise<string | null> | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const lastSubmittedQuestionRef = useRef('');
+    const abortedByUserRef = useRef(false);
+    const activeGenerationChatRef = useRef<string | null>(null);
+    const currentChatIdRef = useRef<string | null>(null);
 
     // Typewriter effect refs
     const twQueueRef = useRef('');   // chars waiting to be shown
@@ -395,11 +402,34 @@ function ChatPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoading]);
 
+    const chatIdParam = searchParams.get('chat');
+
+    const stopGeneration = useCallback((restoreQuestion = true) => {
+        abortedByUserRef.current = true;
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = null;
+        if (twTimerRef.current) { clearTimeout(twTimerRef.current); twTimerRef.current = null; }
+        twQueueRef.current = '';
+        if (restoreQuestion && lastSubmittedQuestionRef.current) {
+            setInput(lastSubmittedQuestionRef.current);
+            requestAnimationFrame(() => inputRef.current?.focus());
+        }
+        setIsLoading(false);
+        setIsGenerating(false);
+        setIsContinuing(false);
+        setLoadingStatus('');
+        newChatInProgressRef.current = false;
+    }, []);
+
     useEffect(() => {
-        const id = searchParams.get('chat');
+        const id = chatIdParam;
         if (id !== currentChatId) setCurrentChatId(id);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchParams]);
+    }, [chatIdParam]);
+
+    useEffect(() => {
+        currentChatIdRef.current = currentChatId;
+    }, [currentChatId]);
 
     useEffect(() => {
         if (!currentChatId) {
@@ -410,6 +440,12 @@ function ChatPage() {
             return;
         }
         setHistoryLoading(true);
+        const requestedChatId = currentChatId;
+        if (!newChatInProgressRef.current) {
+            setMessages([]);
+            setContextSummary(null);
+            contextSummaryRef.current = null;
+        }
         fetch(`/api/chats/${currentChatId}`)
             .then(r => {
                 if (r.status === 404) {
@@ -424,6 +460,7 @@ function ChatPage() {
             })
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .then((data: { messages: any[]; context_summary: string | null } | null) => {
+                if (requestedChatId !== currentChatIdRef.current) return;
                 if (data === null) return;
                 const rows = data.messages ?? [];
                 contextSummaryRef.current = data.context_summary ?? null;
@@ -436,10 +473,13 @@ function ChatPage() {
                 setIsFirstMessage(rows.length === 0);
             })
             .catch(() => toast.error('Не вдалося завантажити чат'))
-            .finally(() => setHistoryLoading(false));
+            .finally(() => {
+                if (requestedChatId === currentChatIdRef.current) setHistoryLoading(false);
+            });
     }, [currentChatId, router]);
 
     const handleNewChat = () => {
+        if (isGenerating) stopGeneration(false);
         setMessages([]);
         setIsFirstMessage(true);
         setInput('');
@@ -499,14 +539,17 @@ function ChatPage() {
     }, []);
 
     const handleSend = async (text: string) => {
-        if (!text.trim() || isLoading || limitExceeded) return;
+        if (!text.trim() || isGenerating || limitExceeded) return;
         const questionText = text.trim();
+        lastSubmittedQuestionRef.current = questionText;
+        abortedByUserRef.current = false;
         setInput('');
         autoScrollRef.current = true;
         setLoadingStatus('Готую запит...');
 
         setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: questionText }]);
         setIsLoading(true);
+        setIsGenerating(true);
 
         let chatId = currentChatId;
         if (!chatId) {
@@ -517,22 +560,24 @@ function ChatPage() {
                 if (!data.id) {
                     console.error('[chat] create failed:', data);
                     toast.error('Не вдалося створити чат: ' + (data.error ?? 'невідома помилка'));
-                    setMessages(prev => prev.slice(0, -1)); setIsLoading(false); newChatInProgressRef.current = false; return;
+                    setMessages(prev => prev.slice(0, -1)); setIsLoading(false); setIsGenerating(false); newChatInProgressRef.current = false; return;
                 }
                 chatId = data.id;
                 setCurrentChatId(chatId);
                 router.push(`/chat?chat=${chatId}`);
                 mutate('/api/chats');
-            } catch (e) { console.error('[chat] create exception:', e); toast.error('Не вдалося створити чат'); setMessages(prev => prev.slice(0, -1)); setIsLoading(false); newChatInProgressRef.current = false; return; }
+            } catch (e) { console.error('[chat] create exception:', e); toast.error('Не вдалося створити чат'); setMessages(prev => prev.slice(0, -1)); setIsLoading(false); setIsGenerating(false); newChatInProgressRef.current = false; return; }
         }
 
         if (!chatId) {
             setMessages(prev => prev.slice(0, -1));
             setIsLoading(false);
+            setIsGenerating(false);
             newChatInProgressRef.current = false;
             return;
         }
         const activeChatId = chatId;
+        activeGenerationChatRef.current = activeChatId;
 
         const currentUserTurnCount = messages.filter(m => m.role === 'user').length + 1;
 
@@ -556,18 +601,23 @@ function ChatPage() {
         let accText = '';
         type FinalPayload = { answer: string; references: Citation[]; templates: Template[]; _meta: Record<string, unknown> };
         let finalPayload: FinalPayload | null = null;
+        let streamTimeoutId: number | null = null;
 
         try {
+            const controller = new AbortController();
+            abortControllerRef.current = controller;
+            streamTimeoutId = window.setTimeout(() => controller.abort(), 185_000);
             const res = await fetch('/api/ask/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: questionText, history: historyForBackend, context_summary: null }),
-                signal: AbortSignal.timeout(185_000),
+                signal: controller.signal,
             });
 
             if (res.status === 429) {
                 setLimitExceeded(true);
                 setIsLoading(false);
+                setIsGenerating(false);
                 newChatInProgressRef.current = false;
                 return;
             }
@@ -575,6 +625,7 @@ function ChatPage() {
             if (!res.ok || !res.body) {
                 toast.error('Сервер не відповідає. Спробуйте ще раз.');
                 setIsLoading(false);
+                setIsGenerating(false);
                 newChatInProgressRef.current = false;
                 return;
             }
@@ -663,7 +714,7 @@ function ChatPage() {
             }
 
             // Save AI message to DB after stream ends
-            if (finalPayload || accText) {
+            if (!abortedByUserRef.current && activeGenerationChatRef.current === activeChatId && (finalPayload || accText)) {
                 const answer = stripCompletionArtifacts(finalPayload?.answer || accText);
                 const refs = finalPayload?.references ?? [];
                 const meta = finalPayload?._meta ?? {};
@@ -711,11 +762,24 @@ function ChatPage() {
                     }).then(() => mutate('/api/chats'));
                 } else { mutate('/api/chats'); }
             }
-        } catch { toast.error('Сервер не відповідає. Спробуйте ще раз.'); } finally {
+        } catch (error) {
+            const aborted = abortedByUserRef.current || (error instanceof DOMException && error.name === 'AbortError');
+            if (!aborted) toast.error('Сервер не відповідає. Спробуйте ще раз.');
+        } finally {
+            if (streamTimeoutId !== null) window.clearTimeout(streamTimeoutId);
+            abortControllerRef.current = null;
+            activeGenerationChatRef.current = null;
             setIsLoading(false);
+            setIsGenerating(false);
             setIsContinuing(false);
             newChatInProgressRef.current = false;
         }
+    };
+
+    const handleSelectChat = (id: string) => {
+        if (isGenerating) stopGeneration(false);
+        setSidebarOpen(false);
+        router.push(`/chat?chat=${id}`);
     };
 
     const handleTourComplete = () => {
@@ -742,7 +806,7 @@ function ChatPage() {
             <ChatSidebar
                 currentChatId={currentChatId}
                 onNewChat={handleNewChat}
-                onSelectChat={(id) => router.push(`/chat?chat=${id}`)}
+                onSelectChat={handleSelectChat}
                 isOpen={sidebarOpen}
                 onClose={() => setSidebarOpen(false)}
             />
@@ -919,11 +983,12 @@ function ChatPage() {
                                 rows={1}
                             />
                             <button
-                                onClick={() => handleSend(input)}
-                                disabled={!input.trim() || isLoading || limitExceeded}
-                                className="bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A] rounded-2xl h-12 w-12 flex items-center justify-center shrink-0 shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                                onClick={() => isGenerating ? stopGeneration(true) : handleSend(input)}
+                                disabled={(!input.trim() && !isGenerating) || limitExceeded}
+                                title={isGenerating ? 'Зупинити генерацію' : 'Надіслати'}
+                                className={`${isGenerating ? 'bg-[#E0E6ED] hover:bg-white text-[#0A0E1A]' : 'bg-[#C9A84C] hover:bg-[#E2C47A] text-[#0A0E1A]'} rounded-2xl h-12 w-12 flex items-center justify-center shrink-0 shadow-lg shadow-[#C9A84C]/10 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed`}
                             >
-                                <Send className="h-5 w-5" />
+                                {isGenerating ? <Square className="h-5 w-5 fill-current" /> : <Send className="h-5 w-5" />}
                             </button>
                         </div>
                         {isSummarizing && (
