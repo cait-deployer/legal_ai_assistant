@@ -158,6 +158,21 @@ _PIPELINE_RESUME_FILE      = BASE_DIR / "pipeline_resume_state.json"
 _PIPELINE_SOURCES = list(V2_SCRAPE_SOURCES)  # all 8 sources
 
 
+def _rebuild_document_registry(log, stop_event: threading.Event | None = None) -> None:
+    """Rebuild fast title/document registry after Qdrant content or metadata changes."""
+    try:
+        from document_registry import build_document_registry
+        from qdrant_storage import ALL_V2_COLLECTIONS
+
+        build_document_registry(
+            ALL_V2_COLLECTIONS,
+            log_callback=log,
+            stop_event=stop_event,
+        )
+    except Exception as e:
+        log(f"Document registry: {e}", "warning")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Supabase helpers
 # ══════════════════════════════════════════════════════════════════════════════
@@ -816,7 +831,7 @@ def _scheduled_sync() -> None:
     """Викликається щодня о schedule_hour UTC. Запускає пайплайн або окремі джерела."""
     print("⏰ [scheduler] Перевірка авто-синхронізації...")
 
-    # Pipeline mode — якщо увімкнено, запускає повний 6-крокований пайплайн
+    # Pipeline mode — якщо увімкнено, запускає повний пайплайн
     if settings_cache.get_bool("schedule_pipeline_enabled", False):
         with _lock:
             if _sync["pipeline"]["running"]:
@@ -1799,6 +1814,9 @@ def _do_reindex_v2(session_id: str, source: str | None, init_only: bool, reset: 
         _v2_stop[stop_key].clear()
         run_reindex_v2(source=source, log_callback=log, stop_event=_v2_stop[stop_key],
                        init_only=init_only, reset=reset)
+        if not init_only and not _v2_stop[stop_key].is_set():
+            log("🔎 Перебудова document registry після реіндексу...", "info")
+            _rebuild_document_registry(log, _v2_stop[stop_key])
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:
@@ -2005,6 +2023,9 @@ def _do_fix_truncated(session_id: str, source: str):
         from reindex_truncated import run_fix_truncated, WORKERS as _FIX_WORKERS
         _fix_truncated_stop[source].clear()
         run_fix_truncated(source, log_callback=log, stop_event=_fix_truncated_stop[source], resume=True, workers=_FIX_WORKERS)
+        if not _fix_truncated_stop[source].is_set():
+            log("🔎 Перебудова document registry після виправлення великих документів...", "info")
+            _rebuild_document_registry(log, _fix_truncated_stop[source])
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:
@@ -5085,6 +5106,133 @@ def _squeeze_context_results(
     return picked
 
 
+def _source_role_for_result(result: dict) -> str:
+    col = result.get("_collection", "")
+    if col.startswith("rada_") or col == "laws_kmu_v2":
+        return "primary_norm"
+    if col == "laws_mod_v2":
+        return "official_norm"
+    if col == "laws_zir_v2":
+        return "tax_consultation"
+    if col in {"laws_supreme_v2", "laws_ccu_v2", "laws_positions_v2"}:
+        return "court_practice"
+    if col == "laws_wiki_v2":
+        return "explanation"
+    return "other"
+
+
+def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, dict]:
+    """
+    Deterministic, conservative guide for Gemini.
+
+    It does not replace retrieval. It labels the already selected context so the
+    answer can be practical and human without treating every retrieved chunk as
+    equally authoritative.
+    """
+    if not results:
+        return (
+            "Evidence metadata:\n"
+            "- context_state: absent.\n"
+            "- primary_sources: none.\n\n",
+            {"state": "absent", "usable": [], "background": [], "not_basis": []},
+        )
+
+    q = query_text.lower()
+    terms = _query_terms(query_text, limit=18)
+    usable: list[str] = []
+    background: list[str] = []
+    not_basis: list[str] = []
+    reasons: dict[int, str] = {}
+
+    def _title(meta: dict) -> str:
+        return str(meta.get("rada_title") or meta.get("source") or meta.get("title") or "")[:120]
+
+    def _domain_conflict(meta: dict, content: str) -> str | None:
+        titleish = f"{meta.get('source','')} {meta.get('rada_title','')} {meta.get('category','')} {meta.get('rada_theme','')}".lower()
+        hay = f"{titleish} {content[:1200]}".lower()
+        query_terms = set(_query_terms(query_text, limit=24))
+        broad_terms = {
+            "питання", "порядок", "держав", "підтрим", "фінансов", "компенсац",
+            "витрат", "кошт", "підприєм", "суб'єкт", "отрим", "може", "закон",
+            "україн", "період", "воєнн", "стан", "послуг", "робіт",
+        }
+        distinctive_query_terms = {t for t in query_terms if len(t) >= 5 and not any(t.startswith(b) for b in broad_terms)}
+
+        special_scope_markers = (
+            "у сфері ",
+            "для підприємств",
+            "перелік підприємств",
+            "окремих підприємств",
+            "для використання як",
+            "для виробництва у",
+            "щодо уповноваженої особи",
+        )
+        has_special_scope = any(marker in hay for marker in special_scope_markers)
+        if has_special_scope and distinctive_query_terms:
+            title_terms = set(_query_terms(titleish, limit=24))
+            if not (distinctive_query_terms & title_terms):
+                return "спеціальна сфера документа не збігається з питанням"
+        return None
+
+    for idx, r in enumerate(results, 1):
+        meta = r.get("out_metadata", {}) or {}
+        content = r.get("out_content") or ""
+        role = _source_role_for_result(r)
+        ans = r.get("_answerability") or _answerability_score(r, query_text, terms)
+        score = float(ans.get("score", 0.0) or 0.0)
+        cov = float(ans.get("coverage", 0.0) or 0.0)
+        direct = float(ans.get("directness", 0.0) or 0.0)
+        dead = bool(meta.get("rada_is_dead")) or "втратив" in str(meta.get("status", "")).lower()
+        conflict = _domain_conflict(meta, content)
+        protected = bool(
+            r.get("_full_law") or r.get("_article_hint") or r.get("_protected_code")
+            or _is_must_have_primary_act(r)
+        )
+
+        label = f"[{idx}] {_title(meta)}"
+        if dead:
+            not_basis.append(label)
+            reasons[idx] = "документ нечинний/втратив чинність"
+        elif conflict:
+            not_basis.append(label)
+            reasons[idx] = conflict
+        elif protected or role == "primary_norm" and (score >= 0.48 or cov >= 0.25):
+            usable.append(label)
+            reasons[idx] = "можна використовувати як основу"
+        elif role in {"tax_consultation", "court_practice"} and (score >= 0.45 or direct >= 0.20):
+            background.append(label)
+            reasons[idx] = "допоміжне джерело, не замінює норму"
+        elif role == "explanation":
+            background.append(label)
+            reasons[idx] = "пояснювальне джерело"
+        elif score >= 0.55:
+            usable.append(label)
+            reasons[idx] = "прямо релевантний фрагмент"
+        else:
+            not_basis.append(label)
+            reasons[idx] = "слабко відповідає на питання"
+
+    state = "sufficient" if usable else ("partial" if background else "absent")
+    lines = [
+        "Evidence metadata:",
+        f"- context_state: {state}.",
+    ]
+    if usable:
+        lines.append("- primary_sources: " + "; ".join(usable[:6]) + ".")
+    if background:
+        lines.append("- background_sources: " + "; ".join(background[:4]) + ".")
+    if not_basis:
+        lines.append("- limited_sources: " + "; ".join(not_basis[:5]) + ".")
+    lines.append("")
+    return "\n".join(lines) + "\n", {
+        "state": state,
+        "usable": usable,
+        "background": background,
+        "not_basis": not_basis,
+        "reasons": reasons,
+    }
+
+
 def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int, *, keep_weak: bool = False) -> list[dict]:
     terms = _query_terms(query_text, limit=18)
     if len(terms) < 2 or not results:
@@ -6986,6 +7134,14 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     # 3. Будуємо збагачений контекст для LLM + citations для фронтенду
     # law_chunks — закони Ради; kmu_chunks — постанови КМУ; court_chunks — судова практика
+    evidence_brief, evidence_meta = _build_evidence_brief(results, _answerability_query)
+    logger.info(
+        "EVIDENCE BRIEF: state=%s usable=%d background=%d not_basis=%d",
+        evidence_meta.get("state"),
+        len(evidence_meta.get("usable", [])),
+        len(evidence_meta.get("background", [])),
+        len(evidence_meta.get("not_basis", [])),
+    )
     citations: list[dict] = []
     law_chunks:   list[str] = []
     kmu_chunks:   list[str] = []
@@ -7104,14 +7260,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         )
         temperature      = settings_cache.get_float("temperature", 0.20)
         top_p            = settings_cache.get_float("top_p", 0.8)
-        is_short_response = response_length_pref == "short"
-        is_detailed_response = response_length_pref in {"detailed", "full"}
-        is_full_response = response_length_pref == "full"
         configured_max_output_tokens = int(settings_cache.get_float("max_output_tokens", 8000))
         _pref_token_bounds = {
             "short":    (800,  1400),
-            "standard": (2000, 3500),
-            "detailed": (3500, 5500),
+            "standard": (1200, 2200),
+            "detailed": (2500, 4200),
             "full":     (5000, 8000),
         }
         _min_tokens, _max_tokens = _pref_token_bounds[response_length_pref]
@@ -7119,59 +7272,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         # Behavioral answer rules come from app_settings.system_prompt (admin AI prompt).
         # Keep backend prompt assembly technical-only: profile, history, retrieved context and question.
-
-        # Response style/length/features instruction block
-        _WORD_LIMITS = {
-            "short":    "ЛІМІТ: 100-180 слів. Лише ключовий висновок і 2-3 практичних кроки. Більше — заборонено.",
-            "standard": "ЛІМІТ: 500-900 слів. Структура: Коротко → Що зробити → Деталі → На що звернути увагу. Якщо не вкладаєшся — вкорочуй 'Деталі', а не інші блоки.",
-            "detailed": "ЛІМІТ: 1000-1600 слів. Повний аналіз з нюансами, таблицями та виключеннями. Якщо не вкладаєшся — вкорочуй приклади, не скорочуй практичні кроки.",
-            "full":     "ЛІМІТ: 1600-2500 слів. Глибокий правовий розбір: законодавство, судова практика, всі варіанти та ризики.",
-        }
-        _LANG_STYLES = {
-            "plain": "Мова відповіді: розмовна, без юридичного жаргону. Поясни як людині без юридичної освіти.",
-            "legal": "Мова відповіді: офіційна юридична термінологія.",
-        }
-        _FEATURE_HINTS = {
-            "response_detailed":   "Включай всі деталі, нюанси та виключення з контексту.",
-            "vs_position":         "Якщо є, порівняй позицію закону з судовою практикою.",
-            "response_steps":      "Структуруй відповідь як покроковий план дій.",
-        }
-        _response_lang_style = body.response_lang_style if body.response_lang_style in {"legal", "plain"} else "legal"
-        _style_parts = [
-            _WORD_LIMITS[response_length_pref],
-            _LANG_STYLES[_response_lang_style],
-        ]
-        for _feat in (body.response_features or []):
-            if _feat in _FEATURE_HINTS:
-                _style_parts.append(_FEATURE_HINTS[_feat])
-        style_block = "Інструкція щодо відповіді:\n" + "\n".join(f"- {p}" for p in _style_parts) + "\n\n"
-        evidence_rules_block = (
-            "Правила використання джерел:\n"
-            "- Якщо джерело регулює іншу сферу, інший статус суб'єкта або спеціальний режим, використовуй його тільки як обмеження/виняток, а не як рекомендацію для користувача.\n"
-            "- У блоці практичних кроків не радь подавати заяву, отримувати статус або користуватися програмою, якщо контекст прямо не підтверджує застосовність саме до ситуації користувача.\n"
-            "- Якщо контекст містить лише програму для іншої галузі, напиши: ця програма не підтверджена як доступна для описаного підприємства; потрібен окремий релевантний акт.\n"
-            "- Не розширюй сферу дії пільги, компенсації або статусу за аналогією.\n\n"
-        )
-        _q_lower = question.lower()
-        _is_recommendation = any(marker in _q_lower for marker in ("рекомендац", "краще", "обрати", "вибрати", "выбрать", "лучше", "уточни"))
-        _is_direct_fact = any(marker in _q_lower for marker in ("який штраф", "скільки", "розмір", "чи може", "чи потрібно", "чи треба"))
-        answer_mode_block = ""
-        if _is_recommendation:
-            answer_mode_block = (
-                "Режим відповіді: практична рекомендація.\n"
-                "- Дай попередній висновок на основі підтверджених факторів із контексту, а не пиши лише 'немає повної рекомендації'.\n"
-                "- Окремо познач, які фактори підтверджені джерелами, а які треба уточнити.\n"
-                "- Постав 3-5 коротких уточнювальних питань, якщо без них вибір залежить від обставин.\n"
-                "- Не використовуй застарілі тимчасові режими як головну рекомендацію, якщо контекст не підтверджує їх актуальність.\n\n"
-            )
-        elif _is_direct_fact:
-            answer_mode_block = (
-                "Режим відповіді: точна коротка норма.\n"
-                "- Спочатку дай пряму відповідь, якщо контекст містить норму.\n"
-                "- Якщо у фрагменті є сума/строк/умова без початку речення, не відривай її від умови; шукай підтвердження в сусідніх фрагментах контексту.\n"
-                "- Не додавай другорядні джерела як основний висновок, якщо вони не відповідають прямо на питання.\n\n"
-            )
-
         # Build user profile block if available
         profile_block = ""
         if body.user_profile:
@@ -7201,8 +7301,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         history_evidence_block = ""
         if _history_evidence_text:
             history_evidence_block = (
-                "Компактна пам'ять попередньо підтверджених фактів діалогу "
-                "(це не самостійне джерело права; юридичні твердження все одно підтверджуй поточними джерелами):\n"
+                "Компактна пам'ять попередньо підтверджених фактів діалогу:\n"
                 f"{_history_evidence_text[:1400]}\n\n"
             )
 
@@ -7223,14 +7322,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 history_block = "Останні повідомлення діалогу:\n" + "\n".join(history_lines) + "\n\n"
 
         prompt = (
-            f"{style_block}"
-            f"{evidence_rules_block}"
-            f"{answer_mode_block}"
             f"{profile_block}"
             f"{personal_block}"
             f"{summary_block}"
             f"{history_evidence_block}"
             f"{history_block}"
+            f"{evidence_brief}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
             f"{context}\n\n"
             f"---\nПитання: {question}"
@@ -7279,6 +7376,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         "start_time": start_time, "max_output_tokens": max_output_tokens,
         "query_rewritten": rewritten_query,
         "query_plan": _query_plan,
+        "evidence_meta": evidence_meta,
     }
 
 
@@ -7865,9 +7963,11 @@ async def ask(body: AskRequest):
     category = max(set(cats), key=cats.count) if cats else "Загальне"
     elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
+    used_citations = _citations_used_in_answer(answer, pipe["citations"])
+
     return {
         "answer": answer,
-        "references": pipe["citations"],
+        "references": used_citations,
         "templates": [],
         "_meta": {
             "processing_time_ms": elapsed_ms,
@@ -7878,6 +7978,7 @@ async def ask(body: AskRequest):
             "n_docs": len(pipe["results"]),
             "query_rewritten": pipe.get("query_rewritten"),
             "query_plan": pipe.get("query_plan"),
+            "evidence": pipe.get("evidence_meta"),
             **classification,
         },
     }
@@ -8109,9 +8210,10 @@ async def ask_stream(body: AskRequest):
             category = max(set(cats), key=cats.count) if cats else "Загальне"
             elapsed_ms = int((time.time() - pipe["start_time"]) * 1000)
 
+            used_citations = _citations_used_in_answer(full_answer, pipe["citations"])
             citations_payload = {
                 "answer": full_answer,
-                "references": pipe["citations"],
+                "references": used_citations,
                 "templates": [],
                 "_meta": {
                     "processing_time_ms": elapsed_ms,
@@ -8122,6 +8224,7 @@ async def ask_stream(body: AskRequest):
                     "n_docs": len(pipe["results"]),
                     "query_rewritten": pipe.get("query_rewritten"),
                     "query_plan": pipe.get("query_plan"),
+                    "evidence": pipe.get("evidence_meta"),
                     **classification,
                 },
             }
@@ -8252,6 +8355,9 @@ def _do_update_qdrant_meta(session_id: str, sources: list) -> None:
         _qdrant_meta_stop.clear()
         from update_qdrant_meta import run_update_qdrant
         run_update_qdrant(log_callback=log, stop_event=_qdrant_meta_stop, sources=sources)
+        if not _qdrant_meta_stop.is_set():
+            log("🔎 Перебудова document registry після патчу Qdrant payload...", "info")
+            _rebuild_document_registry(log, _qdrant_meta_stop)
     except Exception as e:
         log(f"Критична помилка: {e}", "error")
     finally:
@@ -8334,13 +8440,12 @@ def _do_apply_text_cancellations(session_id: str, sources: list) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pipeline — повний автоматичний цикл оновлення (7 кроків)
+# Pipeline — повний автоматичний цикл оновлення
 # ══════════════════════════════════════════════════════════════════════════════
 
 _PIPELINE_STEP_NAMES = [
     "Скрапінг (нові документи)",
     "Реіндекс (тільки нові)",
-    "Реіндекс великих Rada/KMU документів",
     "Збагачення метаданих OpenData",
     "Видобування текстових скасувань",
     "Застосування текстового кешу",
@@ -8363,7 +8468,7 @@ def _load_pipeline_resume() -> dict:
             return json.loads(_PIPELINE_RESUME_FILE.read_text("utf-8"))
     except Exception:
         pass
-    return {"step1_done": [], "step2_done": [], "step3_done": []}
+    return {"step1_done": [], "step2_done": []}
 
 
 def _save_pipeline_resume(state: dict) -> None:
@@ -8382,7 +8487,7 @@ def _clear_pipeline_resume() -> None:
 
 
 def _do_pipeline(session_id: str) -> None:
-    """8-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
+    """7-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
     src = "pipeline"
     sources = list(_PIPELINE_SOURCES)
     step = 0
@@ -8398,19 +8503,14 @@ def _do_pipeline(session_id: str) -> None:
         # Clear all per-source stop events from a previous stop press
         for _evt in _v2_scrape_stop.values():
             _evt.clear()
-        for _evt in _fix_truncated_stop.values():
-            _evt.clear()
-
         # Load resume state — allows continuing from where we stopped
         resume = _load_pipeline_resume()
         step1_done = set(resume.get("step1_done", []))
         step2_done = set(resume.get("step2_done", []))
-        step3_done = set(resume.get("step3_done", []))
-        if step1_done or step2_done or step3_done:
+        if step1_done or step2_done:
             _pipeline_log(
                 f"⏩ Відновлення: скрапінг виконано {sorted(step1_done)}, "
-                f"реіндекс виконано {sorted(step2_done)}, "
-                f"великі документи виконано {sorted(step3_done)}", "info"
+                f"реіндекс виконано {sorted(step2_done)}", "info"
             )
         _pipeline_log(f"🚀 Пайплайн розпочато: {session_id[:8]}", "info")
 
@@ -8447,7 +8547,7 @@ def _do_pipeline(session_id: str) -> None:
                 _step_log(f"⚠️ Scrape {scrape_src}: {e}", "warning")
             if not _stopped():
                 step1_done.add(scrape_src)
-                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done), "step3_done": sorted(step3_done)})
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done)})
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[0]} завершено")
 
         # ── Step 2: Reindex new only ────────────────────────────────────────────
@@ -8473,42 +8573,12 @@ def _do_pipeline(session_id: str) -> None:
                 _step_log(f"⚠️ Reindex {reindex_src}: {e}", "warning")
             if not _stopped():
                 step2_done.add(reindex_src)
-                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done), "step3_done": sorted(step3_done)})
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done)})
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[1]} завершено")
 
-        # Step 3: reindex large previously-truncated Rada/KMU documents.
+        # ── Step 3: Enrich OpenData metadata ───────────────────────────────────
         step = 3
         _step_log(f"▶ {_PIPELINE_STEP_NAMES[2]}")
-        if _stopped():
-            _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
-            return
-        for fix_src in FIX_TRUNCATED_SOURCES:
-            if _stopped():
-                _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
-                return
-            if fix_src in step3_done:
-                _pipeline_log(f"  ⏭ {fix_src}: великі документи вже виконано (resume)", "info")
-                continue
-            try:
-                from reindex_truncated import run_fix_truncated, WORKERS as _FIX_WORKERS
-                _fix_truncated_stop[fix_src].clear()
-                run_fix_truncated(
-                    fix_src,
-                    log_callback=_pipeline_log,
-                    stop_event=_fix_truncated_stop[fix_src],
-                    resume=True,
-                    workers=_FIX_WORKERS,
-                )
-            except Exception as e:
-                _step_log(f"⚠️ Large-doc reindex {fix_src}: {e}", "warning")
-            if not _stopped():
-                step3_done.add(fix_src)
-                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done), "step3_done": sorted(step3_done)})
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[2]} завершено")
-
-        # ── Step 4: Enrich OpenData metadata ───────────────────────────────────
-        step = 4
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[3]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8519,11 +8589,11 @@ def _do_pipeline(session_id: str) -> None:
                        sources=["rada", "kmu"], force=False, new_only=True)
         except Exception as e:
             _step_log(f"⚠️ Enrich OpenData: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[3]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[2]} завершено")
 
-        # ── Step 5: Extract text cancellations ─────────────────────────────────
-        step = 5
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[4]}")
+        # ── Step 4: Extract text cancellations ─────────────────────────────────
+        step = 4
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[3]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8534,11 +8604,11 @@ def _do_pipeline(session_id: str) -> None:
                         sources=["rada", "kmu"], dry_run=False)
         except Exception as e:
             _step_log(f"⚠️ Text extract: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[4]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[3]} завершено")
 
-        # ── Step 6: Apply text cache ────────────────────────────────────────────
-        step = 6
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[5]}")
+        # ── Step 5: Apply text cache ────────────────────────────────────────────
+        step = 5
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[4]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8550,11 +8620,11 @@ def _do_pipeline(session_id: str) -> None:
                                          sources=["rada", "kmu"])
         except Exception as e:
             _step_log(f"⚠️ Apply text cache: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[5]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[4]} завершено")
 
-        # ── Step 7: Qdrant metadata patch ──────────────────────────────────────
-        step = 7
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[6]}")
+        # ── Step 6: Qdrant metadata patch ──────────────────────────────────────
+        step = 6
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[5]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8565,26 +8635,19 @@ def _do_pipeline(session_id: str) -> None:
                               sources=["rada", "kmu"])
         except Exception as e:
             _step_log(f"⚠️ Qdrant patch: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[6]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[5]} завершено")
 
-        # ── Step 8: Document registry ───────────────────────────────────────────
-        step = 8
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[7]}")
+        # ── Step 7: Document registry ───────────────────────────────────────────
+        step = 7
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[6]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
         try:
-            from document_registry import build_document_registry
-            from qdrant_storage import ALL_V2_COLLECTIONS
-
-            build_document_registry(
-                ALL_V2_COLLECTIONS,
-                log_callback=_pipeline_log,
-                stop_event=_pipeline_stop,
-            )
+            _rebuild_document_registry(_pipeline_log, _pipeline_stop)
         except Exception as e:
             _step_log(f"⚠️ Document registry: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[7]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[6]} завершено")
 
         # ── Done ────────────────────────────────────────────────────────────────
         run_ts = datetime.now(timezone.utc).isoformat()
@@ -8623,8 +8686,6 @@ async def pipeline_stop_route():
         _pipeline_stop.set()
         # Signal all sub-process stop events.
         for _evt in _v2_scrape_stop.values():
-            _evt.set()
-        for _evt in _fix_truncated_stop.values():
             _evt.set()
         _enrich_stop.set()
         _text_cancel_stop.set()

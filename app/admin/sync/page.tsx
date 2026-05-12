@@ -171,7 +171,10 @@ function CentroidWidget({ needsRebuild }: { needsRebuild: boolean }) {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    const id = window.setTimeout(fetchStatus, 0)
+    return () => window.clearTimeout(id)
+  }, [fetchStatus])
 
   async function handleRebuild() {
     setRebuilding(true); setError("")
@@ -264,7 +267,10 @@ function ScheduleWidget() {
     } catch { /* ignore */ }
   }, [isDirty])
 
-  useEffect(() => { fetchStatus(true) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const id = window.setTimeout(() => fetchStatus(true), 0)
+    return () => window.clearTimeout(id)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSave() {
     setSaving(true); setError(""); setSaved(false)
@@ -329,7 +335,7 @@ function ScheduleWidget() {
           </div>
           <div className="text-[12px] text-gray-400 mt-1 leading-relaxed">
             {pipelineMode
-              ? "Щодня запускає повний 6-крокований цикл: Скрапінг → Реіндекс нових → Збагачення → Текст. скасування → Застосування → Патч Qdrant"
+              ? "Щодня запускає повний 7-крокований цикл: Скрапінг → Реіндекс нових → Збагачення → Текст. скасування → Застосування → Патч Qdrant → Document registry"
               : "Вимкнено — щодня запускає тільки скрапінг окремих джерел нижче"}
           </div>
         </div>
@@ -423,19 +429,26 @@ function ManualStepsWidget({
   reindxStatus: Record<string, ReindexSourceStatus>
 }) {
   const [lastCompleted, setLastCompleted] = useState<LastCompleted>({})
+  const [nowMs, setNowMs] = useState(0)
 
   useEffect(() => {
+    const tick = () => setNowMs(Date.now())
+    const tickId = window.setTimeout(tick, 0)
     fetch("/api/admin/v2/reindex/last-completed")
       .then(r => r.ok ? r.json() : {})
       .then(setLastCompleted)
       .catch(() => { })
     const id = setInterval(() => {
+      tick()
       fetch("/api/admin/v2/reindex/last-completed")
         .then(r => r.ok ? r.json() : {})
         .then(setLastCompleted)
         .catch(() => { })
     }, 30000)
-    return () => clearInterval(id)
+    return () => {
+      window.clearTimeout(tickId)
+      clearInterval(id)
+    }
   }, [])
 
   const anyScrapeRunning = SOURCES.some(s => scrapeStatus[s]?.running)
@@ -443,11 +456,10 @@ function ManualStepsWidget({
   const anyScrapeResume = SOURCES.some(s => scrapeStatus[s]?.can_resume && !scrapeStatus[s]?.running)
   const anyReindexResume = SOURCES.some(s => reindxStatus[s]?.can_resume && !reindxStatus[s]?.running)
 
-  const now = Date.now()
   const staleSource = SOURCES.find(s => {
     const ts = lastCompleted[s]
-    if (!ts) return false
-    return (now - new Date(ts).getTime()) / 86400000 > 7
+    if (!ts || !nowMs) return false
+    return (nowMs - new Date(ts).getTime()) / 86400000 > 7
   })
 
   type StepDef = {
@@ -477,7 +489,7 @@ function ManualStepsWidget({
           {SOURCES.map(s => {
             const ts = lastCompleted[s]
             if (!ts) return null
-            const ageDays = (now - new Date(ts).getTime()) / 86400000
+            const ageDays = nowMs ? (nowMs - new Date(ts).getTime()) / 86400000 : 0
             const isStale = ageDays > 7
             return (
               <span key={s} className="inline-flex items-center gap-1">
@@ -590,6 +602,7 @@ const PIPELINE_STEP_NAMES = [
   "Видобування текстових скасувань",
   "Застосування текстового кешу",
   "Патч Qdrant payload",
+  "Document registry",
 ]
 
 function PipelineWidget() {
@@ -605,7 +618,10 @@ function PipelineWidget() {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { fetchStatus() }, [fetchStatus])
+  useEffect(() => {
+    const id = window.setTimeout(fetchStatus, 0)
+    return () => window.clearTimeout(id)
+  }, [fetchStatus])
   useEffect(() => {
     if (!status?.running) return
     const id = setInterval(fetchStatus, 3000)
@@ -785,7 +801,10 @@ export default function SyncPage() {
   }, [])
 
   // Initial fetch
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => {
+    const id = window.setTimeout(fetchAll, 0)
+    return () => window.clearTimeout(id)
+  }, [fetchAll])
 
   // Auto-poll when something is running
   const anyRunning = SOURCES.some(s =>
@@ -803,7 +822,8 @@ export default function SyncPage() {
     const runningSrc = SOURCES.find(s => scrapeStatus[s]?.running || reindxStatus[s]?.running)
     if (!runningSrc) return
     const type = scrapeStatus[runningSrc]?.running ? "scrape" : "reindex"
-    setActiveLog({ src: runningSrc, type })
+    const id = window.setTimeout(() => setActiveLog({ src: runningSrc, type }), 0)
+    return () => window.clearTimeout(id)
   }, [anyRunning]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -950,7 +970,7 @@ export default function SyncPage() {
             </div>
           </div>
 
-          {/* 6 кроків */}
+          {/* 7 кроків */}
           <div>
             <div className="text-[12px] text-gray-400 uppercase tracking-wide mb-2">Що відбувається під час повного циклу:</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
@@ -961,6 +981,7 @@ export default function SyncPage() {
                 { n: "4", color: "text-violet-400 border-violet-500/20 bg-violet-500/5", title: "Текст. скасування", desc: "Пошук у текстах: «втратив чинність», «скасовано» тощо." },
                 { n: "5", color: "text-pink-400 border-pink-500/20 bg-pink-500/5", title: "Застосування кешу", desc: "Знайдені скасування записуються у meta.json файли." },
                 { n: "6", color: "text-purple-400 border-purple-500/20 bg-purple-500/5", title: "Патч Qdrant", desc: "Метадані з meta.json → payload Qdrant (без ре-векторизації)." },
+                { n: "7", color: "text-cyan-400 border-cyan-500/20 bg-cyan-500/5", title: "Document registry", desc: "Швидкий індекс документів для title boost і ролей джерел." },
               ].map((s, i) => (
                 <div key={i} className={`rounded-lg border px-2.5 py-2 ${s.color}`}>
                   <div className="flex items-center gap-1.5 mb-0.5">
