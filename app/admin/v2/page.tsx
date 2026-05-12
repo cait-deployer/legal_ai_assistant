@@ -1544,6 +1544,7 @@ const FIX_SOURCES: { id: string; label: string; threshold: string }[] = [
 const PIPELINE_STEP_NAMES = [
   "Скрапінг (нові документи)",
   "Реіндекс (тільки нові)",
+  "Реіндекс великих Rada/KMU документів",
   "Збагачення метаданих OpenData",
   "Видобування текстових скасувань",
   "Застосування текстового кешу",
@@ -1642,7 +1643,7 @@ function PipelineUpdatePanel() {
             )}
           </div>
           <p className="text-xs text-gray-400">
-            Повний цикл для актуальної бази: скрапінг, реіндекс, OpenData, текстові скасування і патч Qdrant payload.
+            Повний цикл: скрапінг, реіндекс нових файлів, реіндекс великих Rada/KMU документів, OpenData, текстові скасування і патч Qdrant payload.
           </p>
         </div>
 

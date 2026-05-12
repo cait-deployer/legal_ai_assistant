@@ -8311,12 +8311,13 @@ def _do_apply_text_cancellations(session_id: str, sources: list) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pipeline — повний автоматичний цикл оновлення (6 кроків)
+# Pipeline — повний автоматичний цикл оновлення (7 кроків)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _PIPELINE_STEP_NAMES = [
     "Скрапінг (нові документи)",
     "Реіндекс (тільки нові)",
+    "Реіндекс великих Rada/KMU документів",
     "Збагачення метаданих OpenData",
     "Видобування текстових скасувань",
     "Застосування текстового кешу",
@@ -8338,7 +8339,7 @@ def _load_pipeline_resume() -> dict:
             return json.loads(_PIPELINE_RESUME_FILE.read_text("utf-8"))
     except Exception:
         pass
-    return {"step1_done": [], "step2_done": []}
+    return {"step1_done": [], "step2_done": [], "step3_done": []}
 
 
 def _save_pipeline_resume(state: dict) -> None:
@@ -8357,7 +8358,7 @@ def _clear_pipeline_resume() -> None:
 
 
 def _do_pipeline(session_id: str) -> None:
-    """6-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
+    """7-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
     src = "pipeline"
     sources = list(_PIPELINE_SOURCES)
     step = 0
@@ -8373,15 +8374,19 @@ def _do_pipeline(session_id: str) -> None:
         # Clear all per-source stop events from a previous stop press
         for _evt in _v2_scrape_stop.values():
             _evt.clear()
+        for _evt in _fix_truncated_stop.values():
+            _evt.clear()
 
         # Load resume state — allows continuing from where we stopped
         resume = _load_pipeline_resume()
         step1_done = set(resume.get("step1_done", []))
         step2_done = set(resume.get("step2_done", []))
-        if step1_done or step2_done:
+        step3_done = set(resume.get("step3_done", []))
+        if step1_done or step2_done or step3_done:
             _pipeline_log(
                 f"⏩ Відновлення: скрапінг виконано {sorted(step1_done)}, "
-                f"реіндекс виконано {sorted(step2_done)}", "info"
+                f"реіндекс виконано {sorted(step2_done)}, "
+                f"великі документи виконано {sorted(step3_done)}", "info"
             )
         _pipeline_log(f"🚀 Пайплайн розпочато: {session_id[:8]}", "info")
 
@@ -8418,7 +8423,7 @@ def _do_pipeline(session_id: str) -> None:
                 _step_log(f"⚠️ Scrape {scrape_src}: {e}", "warning")
             if not _stopped():
                 step1_done.add(scrape_src)
-                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done)})
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done), "step3_done": sorted(step3_done)})
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[0]} завершено")
 
         # ── Step 2: Reindex new only ────────────────────────────────────────────
@@ -8444,12 +8449,42 @@ def _do_pipeline(session_id: str) -> None:
                 _step_log(f"⚠️ Reindex {reindex_src}: {e}", "warning")
             if not _stopped():
                 step2_done.add(reindex_src)
-                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done)})
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done), "step3_done": sorted(step3_done)})
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[1]} завершено")
 
-        # ── Step 3: Enrich OpenData metadata ───────────────────────────────────
+        # Step 3: reindex large previously-truncated Rada/KMU documents.
         step = 3
         _step_log(f"▶ {_PIPELINE_STEP_NAMES[2]}")
+        if _stopped():
+            _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
+            return
+        for fix_src in FIX_TRUNCATED_SOURCES:
+            if _stopped():
+                _step_log("⏸ Зупинено — прогрес збережено, запустіть знову щоб продовжити", "warning")
+                return
+            if fix_src in step3_done:
+                _pipeline_log(f"  ⏭ {fix_src}: великі документи вже виконано (resume)", "info")
+                continue
+            try:
+                from reindex_truncated import run_fix_truncated, WORKERS as _FIX_WORKERS
+                _fix_truncated_stop[fix_src].clear()
+                run_fix_truncated(
+                    fix_src,
+                    log_callback=_pipeline_log,
+                    stop_event=_fix_truncated_stop[fix_src],
+                    resume=True,
+                    workers=_FIX_WORKERS,
+                )
+            except Exception as e:
+                _step_log(f"⚠️ Large-doc reindex {fix_src}: {e}", "warning")
+            if not _stopped():
+                step3_done.add(fix_src)
+                _save_pipeline_resume({"step1_done": sorted(step1_done), "step2_done": sorted(step2_done), "step3_done": sorted(step3_done)})
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[2]} завершено")
+
+        # ── Step 4: Enrich OpenData metadata ───────────────────────────────────
+        step = 4
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[3]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8460,11 +8495,11 @@ def _do_pipeline(session_id: str) -> None:
                        sources=["rada", "kmu"], force=False, new_only=True)
         except Exception as e:
             _step_log(f"⚠️ Enrich OpenData: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[2]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[3]} завершено")
 
-        # ── Step 4: Extract text cancellations ─────────────────────────────────
-        step = 4
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[3]}")
+        # ── Step 5: Extract text cancellations ─────────────────────────────────
+        step = 5
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[4]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8475,11 +8510,11 @@ def _do_pipeline(session_id: str) -> None:
                         sources=["rada", "kmu"], dry_run=False)
         except Exception as e:
             _step_log(f"⚠️ Text extract: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[3]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[4]} завершено")
 
-        # ── Step 5: Apply text cache ────────────────────────────────────────────
-        step = 5
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[4]}")
+        # ── Step 6: Apply text cache ────────────────────────────────────────────
+        step = 6
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[5]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8491,11 +8526,11 @@ def _do_pipeline(session_id: str) -> None:
                                          sources=["rada", "kmu"])
         except Exception as e:
             _step_log(f"⚠️ Apply text cache: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[4]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[5]} завершено")
 
-        # ── Step 6: Qdrant metadata patch ──────────────────────────────────────
-        step = 6
-        _step_log(f"▶ {_PIPELINE_STEP_NAMES[5]}")
+        # ── Step 7: Qdrant metadata patch ──────────────────────────────────────
+        step = 7
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[6]}")
         if _stopped():
             _step_log("⏸ Зупинено", "warning")
             return
@@ -8506,7 +8541,7 @@ def _do_pipeline(session_id: str) -> None:
                               sources=["rada", "kmu"])
         except Exception as e:
             _step_log(f"⚠️ Qdrant patch: {e}", "warning")
-        _step_log(f"✅ {_PIPELINE_STEP_NAMES[5]} завершено")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[6]} завершено")
 
         # ── Done ────────────────────────────────────────────────────────────────
         run_ts = datetime.now(timezone.utc).isoformat()
@@ -8543,8 +8578,10 @@ async def pipeline_stop_route():
         if not _sync["pipeline"]["running"]:
             raise HTTPException(400, "Пайплайн не виконується")
         _pipeline_stop.set()
-        # Signal all sub-process stop events (scrape steps 1, enrich 3, text 4, apply 5, qdrant 6)
+        # Signal all sub-process stop events.
         for _evt in _v2_scrape_stop.values():
+            _evt.set()
+        for _evt in _fix_truncated_stop.values():
             _evt.set()
         _enrich_stop.set()
         _text_cancel_stop.set()
