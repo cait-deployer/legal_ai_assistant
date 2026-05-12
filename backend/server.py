@@ -5108,6 +5108,8 @@ def _squeeze_context_results(
 
 def _source_role_for_result(result: dict) -> str:
     col = result.get("_collection", "")
+    if col == "rada_court_v2":
+        return "court_practice"
     if col.startswith("rada_") or col == "laws_kmu_v2":
         return "primary_norm"
     if col == "laws_mod_v2":
@@ -5231,6 +5233,51 @@ def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, di
         "not_basis": not_basis,
         "reasons": reasons,
     }
+
+
+def _filter_answer_context_sources(results: list[dict], query_text: str) -> list[dict]:
+    if not results:
+        return []
+
+    terms = _query_terms(query_text, limit=18)
+    q = query_text.lower()
+    court_query = any(t in q for t in ("суд", "практик", "позиці", "позици", "верховн", "ксу", "оскарж"))
+    tax_query = any(t in q for t in ("подат", "єдиний", "фоп", "пдв", "дпс", "зір"))
+    primary_available = any(_source_role_for_result(r) in {"primary_norm", "official_norm"} for r in results)
+
+    kept: list[dict] = []
+    has_primary = False
+
+    for r in results:
+        role = _source_role_for_result(r)
+        ans = r.get("_answerability") or _answerability_score(r, query_text, terms)
+        score = float(ans.get("score", 0.0) or 0.0)
+        cov = float(ans.get("coverage", 0.0) or 0.0)
+        direct = float(ans.get("directness", 0.0) or 0.0)
+        protected = bool(
+            r.get("_full_law") or r.get("_doc_expansion") or r.get("_article_hint")
+            or r.get("_evidence_coverage") or _is_must_have_primary_act(r) or r.get("_protected_code")
+        )
+
+        keep = False
+        if protected:
+            keep = True
+        elif role in {"primary_norm", "official_norm"} and (score >= 0.42 or cov >= 0.22 or direct >= 0.18):
+            keep = True
+        elif role == "tax_consultation" and (tax_query or not primary_available) and (score >= 0.52 or direct >= 0.25):
+            keep = True
+        elif role == "court_practice" and court_query and (score >= 0.55 or direct >= 0.30):
+            keep = True
+        elif role == "explanation" and not primary_available and score >= 0.62:
+            keep = True
+
+        if keep:
+            kept.append(r)
+            if role in {"primary_norm", "official_norm"}:
+                has_primary = True
+    if kept:
+        return kept
+    return results[: max(1, min(len(results), 4))]
 
 
 def _rerank_by_answerability(results: list[dict], query_text: str, max_docs: int, *, keep_weak: bool = False) -> list[dict]:
@@ -7108,6 +7155,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         _before - len(_filtered_results), _ret_threshold, _min_ans_score)
         results = _filtered_results
 
+    if results:
+        _before_answer_context = len(results)
+        _answer_context_results = _filter_answer_context_sources(results, _answerability_query)
+        if _answer_context_results:
+            results = _answer_context_results
+            if len(results) < _before_answer_context:
+                logger.info(
+                    "ANSWER CONTEXT SOURCE FILTER: kept %d/%d chunks",
+                    len(results),
+                    _before_answer_context,
+                )
+
     # Fast path: if retrieval found no usable legal context, do not spend a full
     # LLM call. Normal weak-but-present context still goes through Gemini so the
     # admin system prompt controls the answer style.
@@ -7216,7 +7275,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
         # Розподіляємо за правовою ієрархією: закони → КМУ → суди
         col = r.get("_collection", "")
-        if col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2"):
+        if col in ("laws_positions_v2", "laws_supreme_v2", "laws_ccu_v2", "rada_court_v2"):
             court_chunks.append(chunk_text)
         elif col == "laws_kmu_v2":
             kmu_chunks.append(chunk_text)
