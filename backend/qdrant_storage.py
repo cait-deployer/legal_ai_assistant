@@ -572,6 +572,41 @@ def ensure_text_indexes(collections: list[str] | None = None) -> dict[str, str]:
     return status
 
 
+def ensure_metadata_indexes(collections: list[str] | None = None) -> dict[str, str]:
+    """
+    Create payload indexes used by document registry and exact chunk fetches.
+
+    Qdrant can filter unindexed payload fields, but law_id/chunk_index filters
+    are hot paths in retrieval. Keeping them indexed prevents title boost and
+    registry rebuild from degenerating into full collection scans.
+    """
+    client = get_client()
+    status: dict[str, str] = {}
+    target_collections = collections or ALL_V2_COLLECTIONS
+    required = {
+        "law_id": PayloadSchemaType.KEYWORD,
+        "chunk_index": PayloadSchemaType.INTEGER,
+    }
+    for name in target_collections:
+        try:
+            info = client.get_collection(name)
+            schema = info.payload_schema or {}
+            missing = [field for field in required if field not in schema]
+            for field in missing:
+                client.create_payload_index(
+                    collection_name=name,
+                    field_name=field,
+                    field_schema=required[field],
+                )
+            status[name] = "ready" if not missing else "building"
+            if missing:
+                print(f"🔎 Metadata index створюється для '{name}': {', '.join(missing)}")
+        except Exception as e:
+            status[name] = "error"
+            print(f"⚠️ ensure_metadata_indexes [{name}]: {e}")
+    return status
+
+
 def get_text_index_status(collections: list[str] | None = None) -> dict[str, str]:
     """Повертає статус full-text індексу для кожної колекції."""
     client = get_client()
@@ -636,7 +671,7 @@ def search_qdrant_text(query: str, collections: list, limit: int = 5) -> list:
     return results
 
 
-def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
+def _search_qdrant_by_title_scroll(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
     """
     Multi-field keyword boost: знаходить документи де source АБО content містить
     ключові слова запиту. Docs ranked by total keyword matches across both fields.
@@ -740,3 +775,83 @@ def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_do
                 })
 
     return results
+
+
+def search_qdrant_by_title(keywords: list[str], collections: list, chunks_per_doc: int = 3) -> list:
+    """
+    Fast title/document search.
+
+    Prefer the document-level registry built from Qdrant payload metadata. It is
+    one row per law_id and avoids paginating through many chunks for every title
+    keyword. If the registry is not built yet, fall back to the legacy Qdrant
+    scroll implementation.
+    """
+    lowered_keywords = list(dict.fromkeys(kw.lower() for kw in keywords if len(kw) >= 5))
+    if not lowered_keywords:
+        return []
+
+    try:
+        from document_registry import search_document_registry
+
+        doc_hits = search_document_registry(lowered_keywords, collections, limit=30)
+        if doc_hits:
+            client = get_client()
+            results: list = []
+
+            def _chunk_keyword_score(point) -> tuple[int, int, int]:
+                payload = point.payload or {}
+                source = str(payload.get("source", "")).lower()
+                title = str(payload.get("rada_title") or payload.get("title") or "").lower()
+                content = str(payload.get("content", "")).lower()
+                title_text = f"{source}\n{title}"
+                text = f"{title_text}\n{content}"
+                title_matches = sum(1 for kw in lowered_keywords if kw in title_text)
+                content_matches = sum(1 for kw in lowered_keywords if kw in content)
+                all_matches = sum(1 for kw in lowered_keywords if kw in text)
+                return title_matches, content_matches, all_matches
+
+            for doc in doc_hits:
+                col = doc.get("collection", "")
+                lid = doc.get("law_id", "")
+                if not col or not lid:
+                    continue
+                try:
+                    pts, _ = client.scroll(
+                        collection_name=col,
+                        scroll_filter=Filter(
+                            must=[FieldCondition(key="law_id", match=MatchValue(value=lid))]
+                        ),
+                        limit=max(80, chunks_per_doc * 12),
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                except Exception as e:
+                    print(f"⚠️ search_qdrant_by_title registry chunks [{col}:{lid}]: {e}")
+                    continue
+
+                pts.sort(
+                    key=lambda p: (
+                        -_chunk_keyword_score(p)[0],
+                        -_chunk_keyword_score(p)[1],
+                        -_chunk_keyword_score(p)[2],
+                        (p.payload or {}).get("chunk_index", 0),
+                    )
+                )
+                for p in pts[:chunks_per_doc]:
+                    payload = p.payload or {}
+                    results.append({
+                        "out_content":  payload.get("content", ""),
+                        "out_metadata": {k: v for k, v in payload.items() if k != "content"},
+                        "similarity":   min(0.92, 0.68 + float(doc.get("_registry_score", 0.0)) * 0.12),
+                        "_collection":  col,
+                        "_title_match": True,
+                        "_registry_match": True,
+                        "_registry_score": doc.get("_registry_score", 0.0),
+                    })
+
+            if results:
+                return results
+    except Exception as e:
+        print(f"⚠️ document registry title search fallback: {e}")
+
+    return _search_qdrant_by_title_scroll(keywords, collections, chunks_per_doc=chunks_per_doc)

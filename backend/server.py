@@ -125,7 +125,7 @@ _SOURCES = (
     "scrape_text_missing_found",
     "apply_text_cancellations",
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
-    "pipeline",           # повний автоматичний пайплайн (6 кроків)
+    "pipeline",           # повний автоматичний пайплайн
 )
 _sync: dict[str, dict] = {
     src: {
@@ -6292,9 +6292,32 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         _before_title_exclude - len(_title_results),
                         _exclude_phrases[:6],
                     )
-            # Sort: specific law collections first (laws_kmu, laws_supreme) before broad rada collections
-            _COL_PRI = {"laws_kmu_v2": 0, "laws_supreme_v2": 1, "laws_ccu_v2": 2, "laws_wiki_v2": 3}
-            _title_results.sort(key=lambda r: _COL_PRI.get(r.get("_collection", ""), 9))
+            # Sort title hits by source role and registry score. Primary norms
+            # (Rada/KMU) should outrank courts/wiki unless the query was routed
+            # specifically to those secondary collections.
+            def _title_result_priority(r: dict) -> tuple:
+                col = r.get("_collection", "")
+                meta = r.get("out_metadata", {}) or {}
+                if col.startswith("rada_") or col == "laws_kmu_v2":
+                    role = 0
+                elif col == "laws_mod_v2":
+                    role = 1
+                elif col == "laws_zir_v2":
+                    role = 2
+                elif col in {"laws_supreme_v2", "laws_ccu_v2", "laws_positions_v2"}:
+                    role = 3
+                elif col == "laws_wiki_v2":
+                    role = 4
+                else:
+                    role = 5
+                return (
+                    bool(meta.get("rada_is_dead")),
+                    role,
+                    -float(r.get("_registry_score", 0.0)),
+                    -float(r.get("similarity", 0.0)),
+                )
+
+            _title_results.sort(key=_title_result_priority)
             _title_cap = int(settings_cache.get_float("title_boost_max_chunks", 16))
             _title_results = _title_results[:max(4, min(_title_cap, 24))]
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
@@ -8322,6 +8345,7 @@ _PIPELINE_STEP_NAMES = [
     "Видобування текстових скасувань",
     "Застосування текстового кешу",
     "Патч Qdrant payload",
+    "Document registry",
 ]
 
 
@@ -8358,7 +8382,7 @@ def _clear_pipeline_resume() -> None:
 
 
 def _do_pipeline(session_id: str) -> None:
-    """7-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
+    """8-step incremental sync pipeline. Each step runs sequentially; aborts on stop signal."""
     src = "pipeline"
     sources = list(_PIPELINE_SOURCES)
     step = 0
@@ -8542,6 +8566,25 @@ def _do_pipeline(session_id: str) -> None:
         except Exception as e:
             _step_log(f"⚠️ Qdrant patch: {e}", "warning")
         _step_log(f"✅ {_PIPELINE_STEP_NAMES[6]} завершено")
+
+        # ── Step 8: Document registry ───────────────────────────────────────────
+        step = 8
+        _step_log(f"▶ {_PIPELINE_STEP_NAMES[7]}")
+        if _stopped():
+            _step_log("⏸ Зупинено", "warning")
+            return
+        try:
+            from document_registry import build_document_registry
+            from qdrant_storage import ALL_V2_COLLECTIONS
+
+            build_document_registry(
+                ALL_V2_COLLECTIONS,
+                log_callback=_pipeline_log,
+                stop_event=_pipeline_stop,
+            )
+        except Exception as e:
+            _step_log(f"⚠️ Document registry: {e}", "warning")
+        _step_log(f"✅ {_PIPELINE_STEP_NAMES[7]} завершено")
 
         # ── Done ────────────────────────────────────────────────────────────────
         run_ts = datetime.now(timezone.utc).isoformat()

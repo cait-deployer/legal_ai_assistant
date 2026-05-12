@@ -1549,6 +1549,7 @@ const PIPELINE_STEP_NAMES = [
   "Видобування текстових скасувань",
   "Застосування текстового кешу",
   "Патч Qdrant payload",
+  "Document registry",
 ]
 
 function fmtPipelineTime(iso: string | null) {
@@ -1643,7 +1644,7 @@ function PipelineUpdatePanel() {
             )}
           </div>
           <p className="text-xs text-gray-400">
-            Повний цикл: скрапінг, реіндекс нових файлів, реіндекс великих Rada/KMU документів, OpenData, текстові скасування і патч Qdrant payload.
+            Повний цикл: скрапінг, реіндекс нових файлів, реіндекс великих Rada/KMU документів, OpenData, текстові скасування, патч Qdrant payload і document registry для швидкого пошуку.
           </p>
         </div>
 
