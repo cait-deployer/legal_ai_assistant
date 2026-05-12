@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { AlertCircle, Play, RefreshCw, Square } from "lucide-react"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -399,10 +400,16 @@ function ReindexSourcePanel({ source, state, collectionsReady, onRefresh }: {
 
   // Detect running → stopped transition for banner
   useEffect(() => {
+    let id: number | null = null
     if (prevRunning.current && !state.running) {
-      setStoppedAt(new Date().toLocaleTimeString("uk-UA"))
+      id = window.setTimeout(() => {
+        setStoppedAt(new Date().toLocaleTimeString("uk-UA"))
+      }, 0)
     }
     prevRunning.current = state.running
+    return () => {
+      if (id) window.clearTimeout(id)
+    }
   }, [state.running])
 
   async function doTrigger(reset = false) {
@@ -603,8 +610,11 @@ function ReindexTab() {
   }, [])
 
   useEffect(() => {
-    fetchStatus()
-    checkCollections()
+    const id = window.setTimeout(() => {
+      void fetchStatus()
+      void checkCollections()
+    }, 0)
+    return () => window.clearTimeout(id)
   }, [fetchStatus, checkCollections])
 
   const anyRunning = SOURCES.some(s => allStatus[s]?.running)
@@ -1518,10 +1528,210 @@ type FixSourceStatus = {
 
 type FixAllStatus = Record<string, FixSourceStatus>
 
+type PipelineStatus = {
+  running: boolean
+  pause_requested: boolean
+  live_logs: LogEntry[]
+  last_run: string | null
+  step_names: string[]
+}
+
 const FIX_SOURCES: { id: string; label: string; threshold: string }[] = [
   { id: "rada", label: "Верховна Рада", threshold: "> 8 KB (старий ліміт 8 000 символів)" },
   { id: "kmu",  label: "Кабінет Міністрів", threshold: "> 15 KB (старий ліміт 15 000 символів)" },
 ]
+
+const PIPELINE_STEP_NAMES = [
+  "Скрапінг (нові документи)",
+  "Реіндекс (тільки нові)",
+  "Збагачення метаданих OpenData",
+  "Видобування текстових скасувань",
+  "Застосування текстового кешу",
+  "Патч Qdrant payload",
+]
+
+function fmtPipelineTime(iso: string | null) {
+  if (!iso) return null
+  return new Date(iso).toLocaleString("uk-UA", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function PipelineUpdatePanel() {
+  const [status, setStatus] = useState<PipelineStatus | null>(null)
+  const [showLogs, setShowLogs] = useState(false)
+  const [error, setError] = useState("")
+  const logRef = useRef<HTMLDivElement | null>(null)
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/pipeline")
+      if (res.ok) setStatus(await res.json())
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    const id = window.setTimeout(() => { void fetchStatus() }, 0)
+    return () => window.clearTimeout(id)
+  }, [fetchStatus])
+
+  useEffect(() => {
+    if (!status?.running) return
+    const id = setInterval(fetchStatus, 3000)
+    return () => clearInterval(id)
+  }, [status?.running, fetchStatus])
+
+  useEffect(() => {
+    const el = logRef.current
+    if (showLogs && el) el.scrollTop = el.scrollHeight
+  }, [showLogs, status?.live_logs?.length])
+
+  async function runAction(action: "trigger" | "stop") {
+    setError("")
+    const res = await fetch("/api/admin/pipeline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(String(data.detail || data.error || "Помилка запуску пайплайну"))
+      return
+    }
+    setShowLogs(true)
+    await fetchStatus()
+  }
+
+  const stepNames = status?.step_names?.length ? status.step_names : PIPELINE_STEP_NAMES
+  const totalSteps = stepNames.length
+  const { currentStep, completedSteps } = (() => {
+    if (!status?.running && status?.last_run) {
+      return { currentStep: 0, completedSteps: new Set(Array.from({ length: totalSteps }, (_, i) => i + 1)) }
+    }
+    const completed = new Set<number>()
+    let current = 0
+    for (const log of status?.live_logs ?? []) {
+      const match = log.message.match(new RegExp(`^\\[(\\d{1,2})\\/${totalSteps}\\]\\s*(▶|✅)`))
+      if (!match) continue
+      const step = Number(match[1])
+      if (match[2] === "▶") current = step
+      if (match[2] === "✅") {
+        completed.add(step)
+        if (current === step) current = 0
+      }
+    }
+    return { currentStep: current, completedSteps: completed }
+  })()
+
+  return (
+    <div className="bg-[#111827] rounded-2xl border border-[#C9A84C]/10 p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-bold text-[#E0E6ED]">Пайплайн оновлення</span>
+            {status?.running && (
+              <span className="text-[12px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 animate-pulse">
+                Виконується{currentStep ? ` · крок ${currentStep}/${totalSteps}` : ""}
+              </span>
+            )}
+            {!status?.running && status?.last_run && (
+              <span className="text-[12px] text-gray-400">Останній: {fmtPipelineTime(status.last_run)}</span>
+            )}
+          </div>
+          <p className="text-xs text-gray-400">
+            Повний цикл для актуальної бази: скрапінг, реіндекс, OpenData, текстові скасування і патч Qdrant payload.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchStatus}
+            className="p-2 rounded-lg bg-[#1a2235] border border-[#C9A84C]/15 text-gray-400 hover:text-[#E0E6ED] transition-colors"
+            title="Оновити"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+          {status?.running ? (
+            <button
+              onClick={() => void runAction("stop")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-colors"
+            >
+              <Square className="w-3.5 h-3.5" /> Зупинити
+            </button>
+          ) : (
+            <button
+              onClick={() => void runAction("trigger")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+            >
+              <Play className="w-3.5 h-3.5" /> Запустити зараз
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {stepNames.map((name, i) => {
+          const step = i + 1
+          const done = completedSteps.has(step)
+          const active = status?.running && currentStep === step
+          return (
+            <div
+              key={name}
+              className={`rounded-xl border px-3 py-2 transition-colors ${
+                active
+                  ? "border-emerald-400/60 bg-emerald-500/10"
+                  : done
+                    ? "border-emerald-600/40 bg-emerald-900/20"
+                    : "border-white/5 bg-[#0A0E1A]/40"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`w-5 shrink-0 text-center text-[12px] font-black ${active || done ? "text-emerald-400" : "text-gray-500"}`}>
+                  {done ? "✓" : active ? "▶" : step}
+                </span>
+                <span className={`text-[12px] leading-tight ${active ? "text-emerald-200" : done ? "text-emerald-500/80" : "text-gray-400"}`}>
+                  {name}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <button
+        onClick={() => setShowLogs(v => !v)}
+        className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+      >
+        {showLogs ? "▲ Сховати логи" : `▼ Показати логи (${status?.live_logs?.length ?? 0})`}
+      </button>
+
+      {showLogs && (
+        <div ref={logRef} className="bg-[#0A0E1A] rounded-xl border border-[#C9A84C]/10 h-56 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
+          {!status?.live_logs?.length && <div className="text-gray-500">Логів ще немає...</div>}
+          {status?.live_logs?.map((log, i) => (
+            <div key={i} className={levelColor(log.level)}>
+              <span className="text-gray-600 mr-2">{log.ts?.slice(11, 19)}</span>
+              {log.message}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
+        Після будь-якого реіндексу перебудуй Centroid Router у /admin/sync, щоб routing колекцій відповідав новому Qdrant.
+      </div>
+    </div>
+  )
+}
 
 function FixTruncatedTab() {
   const [status, setStatus] = useState<FixAllStatus>({})
@@ -1591,6 +1801,8 @@ function FixTruncatedTab() {
 
   return (
     <div className="space-y-6">
+      <PipelineUpdatePanel />
+
       {/* Info */}
       <div className="bg-[#0d1120] rounded-2xl border border-amber-500/20 p-5 space-y-3">
         <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">Виправлення обрізаних документів</h3>
