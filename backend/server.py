@@ -135,6 +135,8 @@ _SOURCES = (
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
     "pipeline",           # повний автоматичний пайплайн
 )
+_SOURCES = _SOURCES + ("manual_law_pipeline",)
+
 _sync: dict[str, dict] = {
     src: {
         "running": False,
@@ -159,6 +161,7 @@ _text_missing_scrape_stop = threading.Event()
 _apply_text_cancel_stop = threading.Event()
 _qdrant_meta_stop = threading.Event()
 _pipeline_stop    = threading.Event()
+_manual_law_stop  = threading.Event()
 _fix_truncated_stop = {"rada": threading.Event(), "kmu": threading.Event()}
 
 _PIPELINE_LAST_RUN_FILE    = BASE_DIR / "pipeline_last_run.json"
@@ -2805,6 +2808,83 @@ async def get_base_categories():
 
 
 # ── /admin/sync/stats — аналітика надійності автосинхронізації ───────────────
+
+def _manual_law_status() -> dict:
+    with _lock:
+        state = dict(_sync["manual_law_pipeline"])
+        state["live_logs"] = list(_sync["manual_law_pipeline"]["live_logs"])
+        return state
+
+
+def _run_manual_law_pipeline(law_id: str, category: str, force: bool, session_id: str) -> None:
+    src = "manual_law_pipeline"
+    try:
+        _manual_law_stop.clear()
+        _log(src, f"Started manual Rada law pipeline: {law_id}", "info")
+        from manual_law_pipeline import run_manual_rada_law_pipeline
+
+        result = run_manual_rada_law_pipeline(
+            law_id,
+            category,
+            force=force,
+            log_callback=lambda msg, level="info": _log(src, msg, level),
+            stop_check=_manual_law_stop.is_set,
+            rebuild_registry=lambda log: _rebuild_document_registry(log, _manual_law_stop),
+        )
+        with _lock:
+            _sync[src]["result"] = result
+            _sync[src]["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _log(src, f"Done: {result.get('law_id')} -> {result.get('collection', '')}", "info")
+    except Exception as e:
+        with _lock:
+            _sync[src]["error"] = str(e)
+            _sync[src]["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _log(src, f"Failed: {e}", "error")
+    finally:
+        with _lock:
+            _sync[src]["running"] = False
+
+
+@app.get("/admin/base/manual-law/status")
+async def get_manual_law_pipeline_status():
+    return _manual_law_status()
+
+
+@app.post("/admin/base/manual-law/trigger")
+async def trigger_manual_law_pipeline(body: dict | None = Body(default=None)):
+    src = "manual_law_pipeline"
+    body = body or {}
+    law_id = str(body.get("law_id") or "").strip()
+    category = str(body.get("category") or "h2").strip().lower()
+    force = bool(body.get("force", True))
+    if not law_id:
+        raise HTTPException(400, "law_id is required")
+
+    with _lock:
+        if _sync[src]["running"]:
+            raise HTTPException(409, "manual law pipeline is already running")
+        session_id = str(uuid.uuid4())
+        _sync[src].update({
+            "running": True,
+            "pause_requested": False,
+            "session_id": session_id,
+            "law_id": law_id,
+            "category": category,
+            "force": force,
+            "error": None,
+            "result": None,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "live_logs": [],
+        })
+
+    threading.Thread(
+        target=_run_manual_law_pipeline,
+        args=(law_id, category, force, session_id),
+        daemon=True,
+    ).start()
+    return {"ok": True, "session_id": session_id, "status": _manual_law_status()}
+
 
 @app.get("/admin/sync/stats")
 async def get_sync_stats():

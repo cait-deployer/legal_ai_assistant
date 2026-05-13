@@ -90,6 +90,20 @@ export function categoryLabel(cat: string): string {
   return SECTION_LABELS[cat.toLowerCase()] ?? cat
 }
 
+type ManualLawStatus = {
+  running?: boolean
+  law_id?: string
+  category?: string
+  error?: string | null
+  result?: {
+    law_id?: string
+    title?: string
+    collection?: string
+    law_url?: string
+  } | null
+  live_logs?: { ts?: string; message: string; level?: string }[]
+}
+
 const PER_PAGE_OPTIONS = [12, 25, 50, 100]
 
 // ── Pagination ─────────────────────────────────────────────────────────────
@@ -344,6 +358,10 @@ export default function BasePage() {
 
   const [displayMode, setDisplayMode] = useState<"cards" | "table">("table")
   const [activeDoc, setActiveDoc] = useState<Law | null>(null)
+  const [manualLawId, setManualLawId] = useState("")
+  const [manualCategory, setManualCategory] = useState("h2")
+  const [manualStatus, setManualStatus] = useState<ManualLawStatus | null>(null)
+  const [manualError, setManualError] = useState<string | null>(null)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchInput = (val: string) => {
@@ -399,6 +417,58 @@ export default function BasePage() {
 
   useEffect(() => { fetchDocs() }, [fetchDocs])
 
+  const fetchManualStatus = useCallback(async () => {
+    const res = await fetch("/api/admin/base/manual-law/status", { cache: "no-store" })
+    if (!res.ok) throw new Error("Не вдалося отримати статус пайплайна")
+    const data = await res.json()
+    setManualStatus(data)
+    return data as ManualLawStatus
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const data = await fetchManualStatus()
+        if (!cancelled && data.running) {
+          window.setTimeout(tick, 2000)
+        }
+      } catch {
+        if (!cancelled) window.setTimeout(tick, 5000)
+      }
+    }
+    tick()
+    return () => { cancelled = true }
+  }, [fetchManualStatus])
+
+  useEffect(() => {
+    if (manualStatus?.result && !manualStatus.running) {
+      fetchDocs({ silent: true })
+    }
+  }, [manualStatus?.result, manualStatus?.running, fetchDocs])
+
+  const startManualPipeline = async () => {
+    const lawId = manualLawId.trim()
+    if (!lawId) {
+      setManualError("Введіть номер документа Rada, наприклад 4695-20")
+      return
+    }
+    setManualError(null)
+    try {
+      const res = await fetch("/api/admin/base/manual-law/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ law_id: lawId, category: manualCategory, force: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || data?.error || "Не вдалося запустити пайплайн")
+      setManualStatus(data.status)
+      window.setTimeout(() => { fetchManualStatus().catch(() => undefined) }, 1000)
+    } catch (e: unknown) {
+      setManualError(e instanceof Error ? e.message : "Помилка запуску пайплайна")
+    }
+  }
+
   const hasFilters = searchInput || sourceFilter
   const from = total === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1
   const to = Math.min(currentPage * itemsPerPage, total)
@@ -435,6 +505,69 @@ export default function BasePage() {
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             <span className="hidden sm:inline">Оновити</span>
           </Button>
+        </div>
+      </div>
+
+      <div className="shrink-0 py-4 border-b border-[#C9A84C]/10">
+        <div className="rounded-2xl border border-[#C9A84C]/15 bg-[#111827]/70 p-4 space-y-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-bold text-white">Доскрапити документ Rada</p>
+              <p className="text-xs text-[#E0E6ED]/60">Один номер закону проходить scrape {"->"} metadata {"->"} reindex {"->"} Qdrant {"->"} registry.</p>
+            </div>
+            {manualStatus?.running && (
+              <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-300">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Пайплайн виконується
+              </span>
+            )}
+          </div>
+
+          <div className="grid gap-2 lg:grid-cols-[minmax(160px,240px)_minmax(220px,1fr)_auto]">
+            <Input
+              value={manualLawId}
+              onChange={(e) => setManualLawId(e.target.value)}
+              placeholder="4695-20"
+              className="h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/25 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
+              disabled={manualStatus?.running}
+            />
+            <select
+              value={manualCategory}
+              onChange={(e) => setManualCategory(e.target.value)}
+              disabled={manualStatus?.running}
+              className="h-10 rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] px-3 text-sm text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40"
+            >
+              {Object.entries(SECTION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{value} - {label}</option>
+              ))}
+            </select>
+            <Button
+              onClick={startManualPipeline}
+              disabled={manualStatus?.running}
+              className="h-10 rounded-xl bg-[#C9A84C] text-[#0A0E1A] hover:bg-[#E2C47A] gap-2 font-bold"
+            >
+              {manualStatus?.running ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Запустити
+            </Button>
+          </div>
+
+          {(manualError || manualStatus?.error || manualStatus?.result || manualStatus?.live_logs?.length) && (
+            <div className="rounded-xl border border-[#C9A84C]/10 bg-[#0d1120] p-3 text-xs text-[#E0E6ED]/70 space-y-2">
+              {(manualError || manualStatus?.error) && (
+                <p className="text-red-300">{manualError || manualStatus?.error}</p>
+              )}
+              {manualStatus?.result && (
+                <p className="text-emerald-300">
+                  Готово: {manualStatus.result.law_id} {"->"} {manualStatus.result.collection}
+                </p>
+              )}
+              {manualStatus?.live_logs?.slice(-4).map((log, index) => (
+                <p key={`${log.ts ?? ""}-${index}`} className={log.level === "error" ? "text-red-300" : "text-[#E0E6ED]/60"}>
+                  {log.message}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

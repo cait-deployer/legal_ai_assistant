@@ -174,7 +174,7 @@ def _build_payload(meta: dict, chunk_text: str, chunk_idx: int, collection: str)
         or meta.get("url")
         or ""
     )
-    return {
+    payload = {
         "source":            f"{prefix}{title}",
         "law_id":            meta["law_id"],
         "law_url":           law_url,
@@ -194,6 +194,10 @@ def _build_payload(meta: dict, chunk_text: str, chunk_idx: int, collection: str)
         "chunk_index":       chunk_idx,
         "content":           chunk_text,
     }
+    for key, value in meta.items():
+        if key.startswith("rada_") or key in {"source_role", "source_domain"}:
+            payload[key] = value
+    return payload
 
 
 # ── Process one law ────────────────────────────────────────────────────────────
