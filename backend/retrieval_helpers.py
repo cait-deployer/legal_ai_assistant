@@ -628,11 +628,7 @@ def _deterministic_query_plan(question: str) -> dict:
         plan["should_compare"] = should_compare
         plan["needs_clarification"] = should_compare
         if should_compare:
-            plan["clarification_questions"] = [
-                "Команда буде у штаті чи працюватиме з підрядниками?",
-                "Який очікуваний річний оборот?",
-                "Плануються інвестори або частки в бізнесі?",
-            ]
+            plan["clarification_questions"] = _advisory_clarification_questions(question)[:3]
     elif title_queries:
         plan["title_queries"] = _merge_unique_strings(title_queries, limit=8)
         plan["title_must_terms"] = title_must_terms
@@ -748,6 +744,108 @@ def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _is_advisory_comparison_query(question: str, plan: dict | None = None) -> bool:
+    """Detect questions where a useful answer needs business/legal inputs first."""
+    q = (question or "").lower()
+    plan = plan or {}
+    comparison_markers = (
+        " vs ", " versus ", "краще", "лучше", "обрати", "выбрать", "вибрати",
+        "порівня", "сравн", "порівняти", "сравнить", "різниця", "разница",
+    )
+    advisory_markers = (
+        "рекомендац", "рекомендація", "рекомендацию", "порад", "совет", "підкажи", "подскажи",
+        "що вибрати", "что выбрать", "який варіант", "какой вариант", "який вид", "какой вид",
+    )
+    option_pair = (
+        "фоп" in q
+        and ("тов" in q or "ооо" in q)
+        and any(marker in f" {q} " for marker in (" чи ", " або ", " или "))
+    )
+    return bool(
+        _has_any_marker(f" {q} ", comparison_markers)
+        or _has_any_marker(q, advisory_markers)
+        or option_pair
+    )
+
+
+def _advisory_known_fact_count(question: str, history: list[dict] | None = None) -> int:
+    """Count decision inputs already present in the current turn and recent chat."""
+    parts = [question or ""]
+    for msg in (history or [])[-8:]:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "").lower()
+        if role and role not in {"user", "assistant"}:
+            continue
+        content = str(msg.get("content") or msg.get("text") or "").strip()
+        if content:
+            parts.append(content)
+    text = " ".join(parts).lower()
+
+    signal_groups = (
+        (r"\b\d+\s*(?:ти|х)?\s*(?:осіб|людей|чел|человек|працівник|співробіт|team|команд)",),
+        (r"\b\d+[\d\s.,]*(?:грн|uah|usd|eur|євро|дол|тис|млн|k)\b", "оборот", "дохід", "выруч", "revenue"),
+        ("штат", "найм", "найман", "підрядник", "контрактор", "фриланс", "фопи", "employees", "contractors"),
+        ("інвест", "инвест", "частк", "доля", "партнер", "засновник", "співвлас", "equity"),
+        ("клієнт", "клиент", "замовник", "україн", "інозем", "нерезидент", "foreign", "експорт"),
+        ("ризик", "відповідальн", "ответствен", "борг", "долг", "liability"),
+        ("прост", "дешев", "подат", "налог", "облік", "бухгалтер", "звіт", "лимит", "ліміт"),
+        ("продукт", "saas", "аутсорс", "outsourcing", "агентств", "послуг", "розробк", "software", " it ", " іт ", " ит "),
+    )
+    count = 0
+    for group in signal_groups:
+        if any(re.search(marker, text) if marker.startswith(r"\b") else marker in text for marker in group):
+            count += 1
+    return count
+
+
+def _advisory_clarification_questions(question: str, plan: dict | None = None) -> list[str]:
+    plan_questions = _clean_plan_list(
+        (plan or {}).get("clarification_questions", []),
+        limit=3,
+        min_len=8,
+        max_len=180,
+    )
+    if len(plan_questions) >= 3:
+        return plan_questions[:3]
+    default_questions = [
+        "Який формат роботи: продукт/SaaS, аутсорсинг, агентство чи змішана модель?",
+        "Який очікуваний річний оборот і хто клієнти: Україна, іноземні замовники чи обидва варіанти?",
+        "Команда буде у штаті, через ФОП/підрядників, чи планується змішана модель?",
+        "Чи будуть партнери, частки, інвестори або потреба обмежити особисту відповідальність?",
+        "Що для вас головніше: податкова простота, мінімальні витрати, захист відповідальності чи зручність для великих клієнтів?",
+    ]
+    return _merge_unique_strings(plan_questions, default_questions, limit=5)[:5]
+
+
+def _advisory_clarification_needed(
+    question: str,
+    history: list[dict] | None = None,
+    plan: dict | None = None,
+    profile: dict | None = None,
+) -> bool:
+    intent = str((profile or {}).get("intent") or "")
+    if "advisory" not in intent and not _is_advisory_comparison_query(question, plan):
+        return False
+    return _advisory_known_fact_count(question, history) < 3
+
+
+def _build_advisory_clarification_answer(question: str, plan: dict | None = None) -> str:
+    questions = _advisory_clarification_questions(question, plan)
+    lines = [
+        "Коротко:",
+        "Для рекомендації тут краще спочатку уточнити кілька вводних, інакше бот може притягнути нерелевантні норми та зробити слабкий висновок.",
+        "",
+        "Уточніть, будь ласка:",
+    ]
+    lines.extend(f"{idx}. {q}" for idx, q in enumerate(questions, start=1))
+    lines.extend([
+        "",
+        "Після цього я зможу порівняти варіанти по податках, найму/підрядниках, відповідальності, лімітах, обліку та корпоративній структурі.",
+    ])
+    return "\n".join(lines)
+
+
 def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
     """Small retrieval policy layer: roles, collection hints and fallback budgets."""
     q_base = (question or "").lower()
@@ -796,6 +894,7 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
     wants_explanation = _has_any_marker(text, explanation_markers)
     is_procedure = _has_any_marker(text, procedure_markers)
     is_labor = _has_any_marker(text, labor_markers)
+    is_advisory = _is_advisory_comparison_query(question, plan)
 
     collections: list[str] = []
     prefs: list[str] = []
@@ -805,7 +904,16 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
     max_aspects = 5
     carry_history_evidence = True
 
-    if is_court:
+    if is_advisory and (is_tax or "тов" in text or "ооо" in text or "бізнес" in text or "бизнес" in text or "it" in text):
+        intent = "business_advisory_comparison"
+        collections.extend([
+            "rada_finance_v2", "laws_zir_v2", "rada_industry_v2", "rada_civil_v2", "rada_labor_v2",
+        ])
+        prefs.extend(["rada", "zir"])
+        keyword_limit = 8
+        title_limit = 10
+        max_aspects = 3
+    elif is_court:
         intent = "court_position"
         collections.extend(["laws_supreme_v2", "laws_positions_v2", "laws_ccu_v2", "rada_court_v2"])
         prefs.extend(["court", "rada"])
@@ -1749,6 +1857,7 @@ def _strict_context_score(result: dict, query_text: str, terms: list[str] | None
     ans = result.get("_answerability") or _answerability_score(result, query_text, terms)
     col = result.get("_collection", "")
     score = float(ans.get("score", 0.0) or 0.0)
+    score += float(result.get("_source_role_score", 0.0) or 0.0)
     score += (float(ans.get("content_coverage", 0.0) or 0.0) * 0.16)
     score += ((_authority_score(result) - 1.0) * 0.18)
     score += _recency_score(result) * 0.40
@@ -1928,6 +2037,17 @@ def _squeeze_context_results(
 
 
 def _source_role_for_result(result: dict) -> str:
+    explicit_role = result.get("_source_role")
+    if explicit_role in {"base_code", "primary_law"}:
+        return "primary_norm"
+    if explicit_role in {"bylaw", "admin_procedure"}:
+        return "official_norm"
+    if explicit_role == "tax_explanation":
+        return "tax_consultation"
+    if explicit_role == "court_practice":
+        return "court_practice"
+    if explicit_role == "legal_explainer":
+        return "explanation"
     col = result.get("_collection", "")
     if col == "rada_court_v2":
         return "court_practice"

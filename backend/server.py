@@ -54,6 +54,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from generation_routes import register_generation_routes
 from eval_routes import register_eval_routes
 from admin_operation_routes import register_admin_operation_routes
+from source_reranking import rerank_by_source_role, role_summary
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
@@ -3663,6 +3664,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     "Також створи evidence_subquestions для кожного незалежного механізму, умови, процедурного кроку, обмеження або типу джерела, який треба довести перед відповіддю. "
                     "Для широких запитів на кшталт 'як законно', 'як правильно', 'порядок', 'процедура', 'як оформити', 'як звільнити', 'як отримати' не покладайся на один аспект: розклади питання на 3-5 доказових блоків, щоб retrieval шукав правову підставу, умови застосування, порядок дій/документи/строки, обмеження/гарантії та наслідки/оскарження. "
                     "Якщо користувач просить 'умови', 'компенсації', 'пільги' або 'критично важливе', роби окремі evidence_subquestions для кожної з цих частин, якщо вони є у питанні. "
+                    "Для рекомендацій, порівнянь і вибору варіанта ('що краще', 'який вид', 'ФОП чи ТОВ', 'рекомендація', 'порадь') не роздувай пошук, якщо бракує фактів для рішення. Став needs_clarification=true і дай 3 короткі clarification_questions про критерії вибору: формат діяльності, оборот/клієнти, команда/найм, власники/інвестори, ризик/відповідальність. "
                     "Якщо формулювання може з'їхати у суміжну тему, заповни avoid_if_only для цієї пастки. "
                     'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"evidence_subquestions":[{"id":"","question":"","must_find":[],"avoid_if_only":[],"target_collections":[],"source_preferences":[]}],"should_compare":false,"needs_clarification":false,"clarification_questions":[],"article_hint":null,"article_confidence":0.0}'
                 )
@@ -3738,15 +3740,35 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _retrieval_profile = _legal_query_profile(search_question, _query_plan)
         _profile_intent = str(_retrieval_profile.get("intent") or "")
         _is_procedural_profile = "procedure" in _profile_intent
+        _is_advisory_profile = "advisory" in _profile_intent
+        _is_scoped_profile = _is_procedural_profile or _is_advisory_profile
         _max_profile_aspects = int(_retrieval_profile.get("max_aspects") or 5)
         if _max_profile_aspects < len(_evidence_subquestions):
             _evidence_subquestions = _evidence_subquestions[:_max_profile_aspects]
         _profile_cols = _retrieval_profile.get("target_collections", [])
         _profile_sources = _retrieval_profile.get("source_preferences", [])
-        if _is_procedural_profile and _profile_cols:
-            _procedural_cols = set(_profile_cols)
+        if _advisory_clarification_needed(search_question, body.history, _query_plan, _retrieval_profile):
+            logger.info(
+                "ADVISORY CLARIFICATION: profile=%s known_facts=%s questions=%s",
+                _profile_intent,
+                _advisory_known_fact_count(search_question, body.history),
+                _advisory_clarification_questions(search_question, _query_plan)[:3],
+            )
+            return {"early_answer": {
+                "answer": _build_advisory_clarification_answer(search_question, _query_plan),
+                "references": [],
+                "templates": [],
+                "_meta": {
+                    "processing_time_ms": int((time.time() - start_time) * 1000),
+                    "tokens_used": 0,
+                    "category": "Уточнення",
+                    **_CLF_FALLBACK,
+                },
+            }}
+        if _is_scoped_profile and _profile_cols:
+            _scoped_cols = set(_profile_cols)
             for _sq in _evidence_subquestions:
-                _sq_cols = [c for c in (_sq.get("target_collections") or []) if c in _procedural_cols]
+                _sq_cols = [c for c in (_sq.get("target_collections") or []) if c in _scoped_cols]
                 _sq["target_collections"] = _sq_cols or _profile_cols[:5]
                 _sq["source_preferences"] = _profile_sources[:4]
         _evidence_questions: list[str] = []
@@ -3766,6 +3788,11 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _evidence_questions.append(_history_evidence_text[:700])
             _evidence_must_terms.extend(_history_evidence_terms[:14])
         _semantic_cols, _semantic_sources = _semantic_collection_hints(search_question, _query_plan)
+        if _is_scoped_profile and _profile_cols:
+            _profile_col_set = set(_profile_cols)
+            _profile_source_set = set(_profile_sources)
+            _semantic_cols = [c for c in _semantic_cols if c in _profile_col_set]
+            _semantic_sources = [s for s in _semantic_sources if s in _profile_source_set]
         _evidence_collections.extend(_profile_cols)
         _evidence_sources.extend(_profile_sources)
         _evidence_collections.extend(_semantic_cols)
@@ -3778,8 +3805,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _source_preferences = [
             str(s).strip().lower()
             for s in _merge_unique_strings(
-                _profile_sources if (_retrieval_profile.get("needs_exact_value") or _is_procedural_profile) else [],
-                [] if _is_procedural_profile else ((_query_plan.get("source_preferences", []) if _query_plan else [])),
+                _profile_sources if (_retrieval_profile.get("needs_exact_value") or _is_scoped_profile) else [],
+                [] if _is_scoped_profile else ((_query_plan.get("source_preferences", []) if _query_plan else [])),
                 _evidence_sources,
                 limit=8,
             )
@@ -3792,7 +3819,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     _evidence_collections,
                     limit=10,
                 )
-                if (_retrieval_profile.get("needs_exact_value") or _is_procedural_profile)
+                if (_retrieval_profile.get("needs_exact_value") or _is_scoped_profile)
                 else _merge_unique_strings(
                     (_query_plan.get("target_collections", []) if _query_plan else []),
                     _evidence_collections,
@@ -3887,7 +3914,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     preferred_collections = _collections_for_source_preferences(plan_collections, _source_preferences)
     if hinted_collections:
         non_rada_preferred = [c for c in preferred_collections if not c.startswith("rada_")]
-        if _is_procedural_profile:
+        if _is_scoped_profile:
             target_collections = hinted_collections
         else:
             target_collections = list(dict.fromkeys(hinted_collections + non_rada_preferred))
@@ -4668,7 +4695,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     _aspect_protected: list[dict] = []
     _aspect_seen_docs: set[tuple[str, str]] = set()
-    _protected_source_cols = set(_retrieval_profile.get("target_collections") or []) if _is_procedural_profile else set()
+    _protected_source_cols = set(_retrieval_profile.get("target_collections") or []) if _is_scoped_profile else set()
     _plan_aspects = _merge_unique_strings(
         (_query_plan.get("aspects", []) if _query_plan else []),
         _evidence_aspect_texts,
@@ -5079,6 +5106,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         return "втратив" in s or "втратила" in s
 
     results = [r for r in results if not _is_expired(r)]
+    if settings_cache.get_bool("source_role_rerank_enabled", True):
+        _before_role_top = [
+            f"{r.get('_collection')}:{r['out_metadata'].get('law_id', '?')}:{float(r.get('similarity', 0.0) or 0.0):.3f}"
+            for r in results[:6]
+        ]
+        results = rerank_by_source_role(results, _profile_intent, search_question)
+        logger.info(
+            "SOURCE ROLE RERANK: intent=%s before=%s after=%s",
+            _profile_intent,
+            _before_role_top,
+            role_summary(results, limit=8),
+        )
 
     response_length_pref = body.response_length_pref if body.response_length_pref in {"short", "standard", "detailed", "full"} else "standard"
     _article_final_candidates = [
@@ -5211,6 +5250,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             "rada_theme":        meta.get("rada_theme", ""),
             "rada_org":          meta.get("rada_org", ""),
             "rada_doc_type":     meta.get("rada_doc_type", ""),
+            "source_role":       r.get("_source_role", ""),
         })
 
         if not content:
@@ -5232,6 +5272,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         header_parts = [f"[{num}] {title}"]
         if doc_type:
             header_parts.append(doc_type)
+        if r.get("_source_role"):
+            header_parts.append(f"source_role: {r.get('_source_role')}")
         if law_id:
             header_parts.append(f"№ {law_id}")
         if status:
@@ -5292,7 +5334,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"{system_prompt}\n\n"
             "Правила цитування: використовуй тільки реальні числові посилання з контексту, наприклад [1] або [2]. "
             "Заборонено писати [N], [джерело], [source], [?] або будь-які нечислові placeholders. "
-            "Якщо не можеш прив'язати твердження до конкретного номера джерела, краще не став placeholder."
+            "Якщо не можеш прив'язати твердження до конкретного номера джерела, краще не став placeholder. "
+            "Правила ролей джерел: base_code і primary_law є основою відповіді; bylaw/admin_procedure деталізують порядок; "
+            "tax_explanation, court_practice і legal_explainer використовуй як допоміжні джерела, якщо питання прямо не вимагає саме їх."
         )
         temperature      = settings_cache.get_float("temperature", 0.20)
         top_p            = settings_cache.get_float("top_p", 0.8)
