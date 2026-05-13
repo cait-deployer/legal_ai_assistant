@@ -3640,11 +3640,13 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                         "article_confidence:float — впевненість від 0.0 до 1.0 що article_hint правильний. "
                         "Ставь 0.9+ тільки якщо ти майже певний у конкретній статті.\n"
                         "evidence_subquestions: 1-5 компактних доказових блоків. Кожен блок: id, question, must_find, avoid_if_only, target_collections, source_preferences. "
-                        "Так розкладай складні питання на незалежні пошуки навіть без слів-маркерів на кшталт 'які'. Не відповідай у цьому полі, тільки описуй потрібні докази.\n"
+                        "Це не відповідь користувачу, а карта доказів для retrieval: які окремі правові елементи треба знайти, щоб відповідь була повною, а не випадковим top-чанком. "
+                        "Для широких процедурних питань ('як законно', 'як правильно', 'порядок', 'процедура', 'оформити', 'звільнити', 'отримати') ОБОВ'ЯЗКОВО створи 3-5 блоків: legal_basis, conditions, procedure_steps, restrictions/guarantees, consequences/remedies. "
+                        "Назви блоки під конкретне питання, але не вигадуй норм і не пиши готову відповідь. Кожен блок має вести до окремого пошуку.\n"
                         "avoid_if_only:string[] — суміжні теми, які схожі за словами, але не мають бути основою відповіді без прямого запиту користувача "
                         "(наприклад: право користування/оренда, якщо питають про право власності; трудові гарантії, якщо питають про ВЛК).\n"
                         "Не заповнюй поля для галочки: якщо сигналу немає, лишай список порожнім. "
-                        "Якщо місця мало, пріоритет: target_collections, title_must_terms, title_exclude_terms, title_queries."
+                        "Якщо місця мало, пріоритет: target_collections, evidence_subquestions, title_must_terms, title_exclude_terms, title_queries."
                     ),
                 )
                 _planner_cfg = GenerationConfig(
@@ -3658,8 +3660,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                     "У title_queries постав фрази, які найімовірніше є в назвах законів, кодексів, постанов або порядків. "
                     "У title_must_terms/title_nice_terms/title_exclude_terms дай короткі title-слова для точного пошуку та відсікання чужої теми. "
                     "У target_collections постав точні v2-колекції, а не broad source. "
-                    "Також створи evidence_subquestions для кожного незалежного механізму, умови або типу джерела, який треба довести перед відповіддю. "
-                    "Якщо користувач просить 'як отримати', 'умови', 'компенсації', 'пільги' або 'критично важливе', роби окремі evidence_subquestions для кожної з цих частин, якщо вони є у питанні. "
+                    "Також створи evidence_subquestions для кожного незалежного механізму, умови, процедурного кроку, обмеження або типу джерела, який треба довести перед відповіддю. "
+                    "Для широких запитів на кшталт 'як законно', 'як правильно', 'порядок', 'процедура', 'як оформити', 'як звільнити', 'як отримати' не покладайся на один аспект: розклади питання на 3-5 доказових блоків, щоб retrieval шукав правову підставу, умови застосування, порядок дій/документи/строки, обмеження/гарантії та наслідки/оскарження. "
+                    "Якщо користувач просить 'умови', 'компенсації', 'пільги' або 'критично важливе', роби окремі evidence_subquestions для кожної з цих частин, якщо вони є у питанні. "
                     "Якщо формулювання може з'їхати у суміжну тему, заповни avoid_if_only для цієї пастки. "
                     'Схема: {"search_query":"","aspects":[],"legal_terms":[],"title_queries":[],"title_must_terms":[],"title_nice_terms":[],"title_exclude_terms":[],"primary_act_hints":[],"source_preferences":[],"target_collections":[],"evidence_subquestions":[{"id":"","question":"","must_find":[],"avoid_if_only":[],"target_collections":[],"source_preferences":[]}],"should_compare":false,"needs_clarification":false,"clarification_questions":[],"article_hint":null,"article_confidence":0.0}'
                 )

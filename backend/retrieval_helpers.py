@@ -439,82 +439,61 @@ def _evidence_block(
 
 
 def _procedure_evidence_subquestions(question: str) -> list[dict]:
-    """Evidence checklist for broad procedural questions.
+    """Generic fallback evidence checklist for broad procedural questions.
 
-    This is a domain scaffold, not an answer template: it tells retrieval what
-    kinds of legal proof must be present so one narrow exception does not become
-    the whole answer.
+    The LLM planner should normally create domain-aware blocks. This fallback
+    only preserves the universal legal reasoning shape when the planner fails.
+    It deliberately avoids topic-specific scenarios.
     """
     q = (question or "").lower()
     procedural = _has_any_marker(q, (
-        "як законно", "як правильно", "як оформ", "як звільн", "порядок", "процедур",
+        "як законно", "як правильно", "як оформ", "порядок", "процедур",
         "що зробити", "які кроки", "документи", "оформлення",
     ))
     if not procedural:
         return []
 
-    if _has_any_marker(q, ("звільн", "працівник", "роботодав", "трудов")):
-        cols = ["rada_labor_v2"]
-        prefs = ["rada"]
-        return [
-            _evidence_block(
-                "labor_termination_grounds",
-                "Загальні підстави припинення трудового договору та звільнення працівника",
-                ["припинення трудового договору", "підстави", "звільнення", "працівник"],
-                cols,
-                prefs,
-            ),
-            _evidence_block(
-                "labor_employee_initiative",
-                "Звільнення працівника за власним бажанням або за угодою сторін",
-                ["власне бажання", "угода сторін", "строк", "заява"],
-                cols,
-                prefs,
-            ),
-            _evidence_block(
-                "labor_employer_initiative",
-                "Звільнення з ініціативи роботодавця: допустимі підстави та заборони",
-                ["ініціатива роботодавця", "підстави", "забороняється", "скорочення"],
-                cols,
-                prefs,
-            ),
-            _evidence_block(
-                "labor_union_and_protected",
-                "Додаткові гарантії при звільненні: профспілка, захищені категорії, обмеження",
-                ["профспілка", "згода", "гарантії", "обмеження"],
-                cols,
-                prefs,
-            ),
-            _evidence_block(
-                "labor_final_settlement",
-                "Оформлення звільнення: наказ, видача документів, остаточний розрахунок",
-                ["наказ", "трудова книжка", "копія наказу", "розрахунок"],
-                cols,
-                prefs,
-            ),
-        ]
+    cols, prefs = _semantic_collection_hints(question, None)
+    if not cols:
+        cols = ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"]
+    if not prefs:
+        prefs = ["rada", "kmu", "mod"]
 
     return [
         _evidence_block(
-            "procedure_basis",
-            "Правова підстава процедури та хто має право її застосовувати",
-            ["підстава", "право", "орган", "суб'єкт"],
-            ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"],
-            ["rada", "kmu", "mod"],
+            "legal_basis",
+            f"{question[:120]}: правова підстава і застосовні норми",
+            ["підстава", "норма", "право", "закон"],
+            cols,
+            prefs,
+        ),
+        _evidence_block(
+            "conditions",
+            f"{question[:120]}: умови, хто має право, коли можна застосувати",
+            ["умови", "право", "суб'єкт", "випадки"],
+            cols,
+            prefs,
         ),
         _evidence_block(
             "procedure_steps",
-            "Основні кроки процедури, документи та строки",
+            f"{question[:120]}: порядок дій, документи і строки",
             ["порядок", "документи", "строк", "заява"],
-            ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"],
-            ["rada", "kmu", "mod"],
+            cols,
+            prefs,
         ),
         _evidence_block(
-            "procedure_limits",
-            "Обмеження, винятки та ризики неправильного оформлення процедури",
-            ["обмеження", "винятки", "відмова", "відповідальність"],
-            ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"],
-            ["rada", "kmu", "mod"],
+            "restrictions",
+            f"{question[:120]}: обмеження, гарантії, винятки або заборони",
+            ["обмеження", "гарантії", "винятки", "заборона"],
+            cols,
+            prefs,
+        ),
+        _evidence_block(
+            "consequences",
+            f"{question[:120]}: наслідки помилки, відповідальність або оскарження",
+            ["відповідальність", "наслідки", "оскарження", "порушення"],
+            cols,
+            prefs,
         ),
     ]
 
@@ -812,7 +791,7 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
 
     is_tax = _has_any_marker(text, tax_markers)
     needs_exact_value = _has_any_marker(q_base, value_markers)
-    is_court = _has_any_marker(text, court_markers)
+    is_court = _has_any_marker(q_base, court_markers)
     is_official = _has_any_marker(text, official_markers)
     wants_explanation = _has_any_marker(text, explanation_markers)
     is_procedure = _has_any_marker(text, procedure_markers)
