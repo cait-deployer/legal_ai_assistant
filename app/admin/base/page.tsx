@@ -100,8 +100,24 @@ type ManualLawStatus = {
     title?: string
     collection?: string
     law_url?: string
+    metadata_fields?: string[]
+    stats?: {
+      chunks?: number
+      uploaded?: number
+      errors?: number
+    }
   } | null
   live_logs?: { ts?: string; message: string; level?: string }[]
+}
+
+async function readJsonResponse(res: Response) {
+  const text = await res.text()
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`API повернув не JSON (${res.status}). Перезапустіть frontend/backend і спробуйте ще раз.`)
+  }
 }
 
 const PER_PAGE_OPTIONS = [12, 25, 50, 100]
@@ -363,6 +379,7 @@ export default function BasePage() {
   const [manualStatus, setManualStatus] = useState<ManualLawStatus | null>(null)
   const [manualError, setManualError] = useState<string | null>(null)
   const [manualPanelOpen, setManualPanelOpen] = useState(false)
+  const [manualStarting, setManualStarting] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchInput = (val: string) => {
@@ -420,8 +437,8 @@ export default function BasePage() {
 
   const fetchManualStatus = useCallback(async () => {
     const res = await fetch("/api/admin/base/manual-law/status", { cache: "no-store" })
-    if (!res.ok) throw new Error("Не вдалося отримати статус пайплайна")
-    const data = await res.json()
+    const data = await readJsonResponse(res)
+    if (!res.ok) throw new Error(data?.detail || data?.error || "Не вдалося отримати статус пайплайна")
     setManualStatus(data)
     return data as ManualLawStatus
   }, [])
@@ -455,23 +472,34 @@ export default function BasePage() {
       return
     }
     setManualError(null)
+    setManualStarting(true)
+    setManualStatus({
+      running: true,
+      law_id: lawId,
+      category: manualCategory,
+      live_logs: [{ message: "Sending trigger request...", level: "info" }],
+    })
     try {
       const res = await fetch("/api/admin/base/manual-law/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ law_id: lawId, category: manualCategory, force: true }),
       })
-      const data = await res.json()
+      const data = await readJsonResponse(res)
       if (!res.ok) throw new Error(data?.detail || data?.error || "Не вдалося запустити пайплайн")
       setManualStatus(data.status)
-      setManualPanelOpen(false)
+      setManualPanelOpen(true)
       window.setTimeout(() => { fetchManualStatus().catch(() => undefined) }, 1000)
     } catch (e: unknown) {
       setManualError(e instanceof Error ? e.message : "Помилка запуску пайплайна")
+      setManualStatus((prev) => ({ ...prev, running: false }))
+    } finally {
+      setManualStarting(false)
     }
   }
 
   const hasFilters = searchInput || sourceFilter
+  const manualBusy = manualStarting || Boolean(manualStatus?.running)
   const from = total === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1
   const to = Math.min(currentPage * itemsPerPage, total)
 
@@ -527,7 +555,7 @@ export default function BasePage() {
               </span>
             </div>
             <span className="inline-flex items-center gap-3 text-xs font-semibold text-[#C9A84C]">
-              {manualStatus?.running && (
+              {manualBusy && (
                 <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Пайплайн виконується
@@ -547,12 +575,12 @@ export default function BasePage() {
                 onChange={(e) => setManualLawId(e.target.value)}
                 placeholder="4695-20"
                 className="h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/25 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
-                disabled={manualStatus?.running}
+                disabled={manualBusy}
               />
               <select
                 value={manualCategory}
                 onChange={(e) => setManualCategory(e.target.value)}
-                disabled={manualStatus?.running}
+                disabled={manualBusy}
                 className="h-10 rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] px-3 text-sm text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40"
               >
                 {Object.entries(SECTION_LABELS).map(([value, label]) => (
@@ -561,10 +589,10 @@ export default function BasePage() {
               </select>
               <Button
                 onClick={startManualPipeline}
-                disabled={manualStatus?.running}
+                disabled={manualBusy}
                 className="h-10 rounded-xl bg-[#C9A84C] text-[#0A0E1A] hover:bg-[#E2C47A] gap-2 font-bold"
               >
-                {manualStatus?.running ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {manualBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 Запустити
               </Button>
             </div>
@@ -576,11 +604,20 @@ export default function BasePage() {
                 <p className="text-red-300">{manualError || manualStatus?.error}</p>
               )}
               {manualStatus?.result && (
-                <p className="text-emerald-300">
-                  Готово: {manualStatus.result.law_id} {"->"} {manualStatus.result.collection}
-                </p>
+                <div className="space-y-1 text-emerald-300">
+                  <p>Готово: {manualStatus.result.law_id} {"->"} {manualStatus.result.collection}</p>
+                  <p className="text-[#E0E6ED]/60">
+                    Chunks: {manualStatus.result.stats?.chunks ?? 0}, uploaded: {manualStatus.result.stats?.uploaded ?? 0}, metadata fields: {manualStatus.result.metadata_fields?.length ?? 0}
+                  </p>
+                  {manualStatus.result.title && (
+                    <p className="text-[#E0E6ED]/60">Title: {manualStatus.result.title}</p>
+                  )}
+                </div>
               )}
-              {manualStatus?.live_logs?.slice(-4).map((log, index) => (
+              {manualBusy && !manualStatus?.result && (
+                <p className="text-[#C9A84C]">Очікуємо завершення етапів. Список оновиться автоматично після registry rebuild.</p>
+              )}
+              {manualStatus?.live_logs?.slice(-10).map((log, index) => (
                 <p key={`${log.ts ?? ""}-${index}`} className={log.level === "error" ? "text-red-300" : "text-[#E0E6ED]/60"}>
                   {log.message}
                 </p>

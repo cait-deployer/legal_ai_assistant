@@ -80,8 +80,8 @@ def _enrich_rada_meta(meta: dict, text: str, category: str) -> dict:
         "rada_doc_type": meta.get("doc_type", ""),
         "rada_adopted_date": adopted,
         "rada_effective_date": effective,
-        "rada_enriched_at": _now(),
-        "rada_enrichment_source": "manual_rada_pipeline",
+        "rada_enriched_at": meta.get("rada_enriched_at") or _now(),
+        "rada_enrichment_source": meta.get("rada_enrichment_source") or "manual_rada_pipeline",
     }
     return enriched
 
@@ -163,6 +163,7 @@ def run_manual_rada_law_pipeline(
         }
         meta_path = _save_raw_law(law_id, text, meta)
         _update_scrape_status(law_id, category, meta.get("title", law_id))
+        _log(log_callback, f"Scrape saved: {law_id}.txt + {law_id}.meta.json")
 
     if stopped():
         return {"law_id": law_id, "status": "stopped"}
@@ -185,6 +186,8 @@ def run_manual_rada_law_pipeline(
     _log(log_callback, "Step 3/5: fallback metadata normalization")
     meta = _enrich_rada_meta(meta, text, category)
     meta_path = _save_raw_law(law_id, text, meta)
+    enriched_keys = sorted(k for k in meta if k.startswith("rada_"))
+    _log(log_callback, f"Metadata ready: {len(enriched_keys)} rada_* fields")
 
     if stopped():
         return {"law_id": law_id, "status": "stopped"}
@@ -194,6 +197,7 @@ def run_manual_rada_law_pipeline(
     stats = _process_law("rada", law_id, str(meta_path))
     if stats.get("errors"):
         raise RuntimeError(f"Reindex finished with errors: {stats}")
+    _log(log_callback, f"Chunks: {stats.get('chunks', 0)}, uploaded: {stats.get('uploaded', 0)}")
 
     collection = get_v2_collection_for_category(category)
     _log(log_callback, f"Qdrant payload uploaded to {collection}")
@@ -212,6 +216,7 @@ def run_manual_rada_law_pipeline(
         "collection": collection,
         "stats": stats,
         "law_url": meta.get("law_url", ""),
+        "metadata_fields": enriched_keys,
     }
     _log(log_callback, f"Manual law pipeline finished: {law_id}")
     return result
