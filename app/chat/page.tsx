@@ -177,6 +177,29 @@ function MarkdownText({ text, refs, onCitationOpen }: {
     refs: Citation[];
     onCitationOpen: (c: Citation) => void;
 }) {
+    const normalizeMarkdown = (value: string) => {
+        const sectionNames = [
+            'Коротко',
+            'Що підтверджено контекстом',
+            'Чого бракує',
+            'Що зробити',
+            'На що звернути увагу',
+            'Якщо потрібно уточнити',
+            'Джерела',
+        ];
+        const sectionPattern = sectionNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+
+        return value
+            .replace(/\r\n/g, '\n')
+            .replace(new RegExp(`\\s+(${sectionPattern}):`, 'g'), '\n\n$1:')
+            .replace(new RegExp(`^\\s*(${sectionPattern}):`, 'g'), '$1:')
+            .replace(/(:)\s+([*•-]\s+)/g, '$1\n$2')
+            .replace(/([.!?])\s+([*•-]\s+)/g, '$1\n$2')
+            .replace(/(\[[\d,\s]+\])\s+([*•-]\s+)/g, '$1\n$2')
+            .replace(/([.!?])\s+(\d+[.)]\s+)/g, '$1\n$2')
+            .replace(/(\[[\d,\s]+\])\s+(\d+[.)]\s+)/g, '$1\n$2');
+    };
+
     const parseBold = (value: string, keyPrefix: string): ReactNode[] =>
         value.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
             const bold = part.match(/^\*\*([^*]+)\*\*$/);
@@ -217,7 +240,7 @@ function MarkdownText({ text, refs, onCitationOpen }: {
         return nodes;
     };
 
-    const lines = text.split('\n');
+    const lines = normalizeMarkdown(text).split('\n');
     return (
         <div className="space-y-2.5 min-w-0 break-words">
             {lines.map((line, i) => {
