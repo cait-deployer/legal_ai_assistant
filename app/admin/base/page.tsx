@@ -8,7 +8,7 @@ import {
   Search, RefreshCw, Loader2, AlertCircle,
   LayoutGrid, Table2, BookOpen, X, FileText, Hash,
   ExternalLink, Calendar, Layers, Filter, ChevronDown,
-  Maximize2, Minimize2,
+  Maximize2, Minimize2, Download,
 } from "lucide-react"
 import { LawCard } from "../rada/law-card"
 import { LawTable } from "../rada/law-table"
@@ -362,6 +362,7 @@ export default function BasePage() {
   const [manualCategory, setManualCategory] = useState("h2")
   const [manualStatus, setManualStatus] = useState<ManualLawStatus | null>(null)
   const [manualError, setManualError] = useState<string | null>(null)
+  const [manualPanelOpen, setManualPanelOpen] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchInput = (val: string) => {
@@ -463,6 +464,7 @@ export default function BasePage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || data?.error || "Не вдалося запустити пайплайн")
       setManualStatus(data.status)
+      setManualPanelOpen(false)
       window.setTimeout(() => { fetchManualStatus().catch(() => undefined) }, 1000)
     } catch (e: unknown) {
       setManualError(e instanceof Error ? e.message : "Помилка запуску пайплайна")
@@ -508,48 +510,65 @@ export default function BasePage() {
         </div>
       </div>
 
-      <div className="shrink-0 py-4 border-b border-[#C9A84C]/10">
+      <div className="shrink-0 py-3 border-b border-[#C9A84C]/10">
         <div className="rounded-2xl border border-[#C9A84C]/15 bg-[#111827]/70 p-4 space-y-3">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+          <button
+            type="button"
+            onClick={() => setManualPanelOpen((value) => !value)}
+            className="flex w-full flex-col gap-2 text-left sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#C9A84C]/10 text-[#C9A84C]">
+                <Download className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
               <p className="text-sm font-bold text-white">Доскрапити документ Rada</p>
               <p className="text-xs text-[#E0E6ED]/60">Один номер закону проходить scrape {"->"} metadata {"->"} reindex {"->"} Qdrant {"->"} registry.</p>
+              </span>
             </div>
-            {manualStatus?.running && (
-              <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-300">
+            <span className="inline-flex items-center gap-3 text-xs font-semibold text-[#C9A84C]">
+              {manualStatus?.running && (
+                <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Пайплайн виконується
+                </>
+              )}
+              <span className="rounded-lg border border-[#C9A84C]/20 px-3 py-1.5">
+                {manualPanelOpen ? "Згорнути" : "Розгорнути"}
               </span>
-            )}
-          </div>
+              <ChevronDown className={`h-4 w-4 transition-transform ${manualPanelOpen ? "rotate-180" : ""}`} />
+            </span>
+          </button>
 
-          <div className="grid gap-2 lg:grid-cols-[minmax(160px,240px)_minmax(220px,1fr)_auto]">
-            <Input
-              value={manualLawId}
-              onChange={(e) => setManualLawId(e.target.value)}
-              placeholder="4695-20"
-              className="h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/25 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
-              disabled={manualStatus?.running}
-            />
-            <select
-              value={manualCategory}
-              onChange={(e) => setManualCategory(e.target.value)}
-              disabled={manualStatus?.running}
-              className="h-10 rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] px-3 text-sm text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40"
-            >
-              {Object.entries(SECTION_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{value} - {label}</option>
-              ))}
-            </select>
-            <Button
-              onClick={startManualPipeline}
-              disabled={manualStatus?.running}
-              className="h-10 rounded-xl bg-[#C9A84C] text-[#0A0E1A] hover:bg-[#E2C47A] gap-2 font-bold"
-            >
-              {manualStatus?.running ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Запустити
-            </Button>
-          </div>
+          {manualPanelOpen && (
+            <div className="grid gap-2 lg:grid-cols-[minmax(160px,240px)_minmax(220px,1fr)_auto]">
+              <Input
+                value={manualLawId}
+                onChange={(e) => setManualLawId(e.target.value)}
+                placeholder="4695-20"
+                className="h-10 bg-[#0d1120] border-[#C9A84C]/20 rounded-xl text-[#E0E6ED] placeholder:text-[#C9A84C]/25 focus-visible:border-[#C9A84C]/40 focus-visible:ring-0"
+                disabled={manualStatus?.running}
+              />
+              <select
+                value={manualCategory}
+                onChange={(e) => setManualCategory(e.target.value)}
+                disabled={manualStatus?.running}
+                className="h-10 rounded-xl border border-[#C9A84C]/20 bg-[#0d1120] px-3 text-sm text-[#E0E6ED] focus:outline-none focus:border-[#C9A84C]/40"
+              >
+                {Object.entries(SECTION_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{value} - {label}</option>
+                ))}
+              </select>
+              <Button
+                onClick={startManualPipeline}
+                disabled={manualStatus?.running}
+                className="h-10 rounded-xl bg-[#C9A84C] text-[#0A0E1A] hover:bg-[#E2C47A] gap-2 font-bold"
+              >
+                {manualStatus?.running ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Запустити
+              </Button>
+            </div>
+          )}
 
           {(manualError || manualStatus?.error || manualStatus?.result || manualStatus?.live_logs?.length) && (
             <div className="rounded-xl border border-[#C9A84C]/10 bg-[#0d1120] p-3 text-xs text-[#E0E6ED]/70 space-y-2">
