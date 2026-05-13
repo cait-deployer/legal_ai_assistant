@@ -886,6 +886,17 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
         "працівник", "роботодав", "звільн", "трудов", "кзпп", "профспіл",
         "заробітн", "відпустк", "скорочення",
     )
+    military_markers = (
+        "тцк", "влк", "мобілізац", "мобилизац", "відстроч", "отсроч",
+        "бронюван", "бронь", "повіст", "повест", "військовозобов", "военнообязан",
+        "призов", "резервіст", "резервист", "зсу", "міноборони", "міністерство оборони",
+        "військова служба", "військовий облік", "військово-обліков", "резерв+",
+    )
+    military_deferral_markers = ("відстроч", "отсроч", "бронюван", "бронь", "не мобіліз", "не мобилиз")
+    military_summons_markers = ("повіст", "повест", "вруч", "явка", "роботодав", "підприємств", "предприят")
+    military_medical_markers = ("влк", "військово-лікар", "придатн", "непридатн", "обмежено придат")
+    military_service_markers = ("військова служба", "проходження служби", "звільнення з військової", "наказ командира", "службов")
+    military_accounting_markers = ("військовий облік", "військово-обліков", "резерв+", "дані", "облікові дані")
 
     is_tax = _has_any_marker(text, tax_markers)
     needs_exact_value = _has_any_marker(q_base, value_markers)
@@ -895,6 +906,12 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
     is_procedure = _has_any_marker(text, procedure_markers)
     is_labor = _has_any_marker(text, labor_markers)
     is_advisory = _is_advisory_comparison_query(question, plan)
+    is_military = _has_any_marker(text, military_markers)
+    is_military_deferral = _has_any_marker(text, military_deferral_markers)
+    is_military_summons = _has_any_marker(text, military_summons_markers)
+    is_military_medical = _has_any_marker(text, military_medical_markers)
+    is_military_service = _has_any_marker(text, military_service_markers)
+    is_military_accounting = _has_any_marker(text, military_accounting_markers)
 
     collections: list[str] = []
     prefs: list[str] = []
@@ -913,6 +930,39 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
         keyword_limit = 8
         title_limit = 10
         max_aspects = 3
+    elif is_military:
+        if is_military_medical:
+            intent = "military_medical_procedure"
+            collections.extend(["laws_mod_v2", "laws_kmu_v2", "rada_state_v2", "rada_other_v2"])
+            prefs.extend(["mod", "kmu", "rada"])
+        elif is_military_service:
+            intent = "military_service_procedure"
+            collections.extend(["laws_mod_v2", "rada_state_v2", "laws_kmu_v2", "rada_other_v2"])
+            prefs.extend(["mod", "rada", "kmu"])
+        elif is_military_accounting:
+            intent = "military_accounting_procedure"
+            collections.extend(["laws_kmu_v2", "laws_mod_v2", "rada_state_v2", "rada_other_v2"])
+            prefs.extend(["kmu", "mod", "rada"])
+        elif is_military_summons:
+            intent = "military_summons_procedure"
+            collections.extend(["laws_kmu_v2", "rada_state_v2", "rada_other_v2", "laws_mod_v2"])
+            prefs.extend(["kmu", "rada", "mod"])
+            if _has_any_marker(text, ("роботодав", "підприємств", "предприят", "працівник")):
+                collections.append("rada_labor_v2")
+        elif is_military_deferral:
+            intent = "military_deferral_procedure"
+            collections.extend(["rada_state_v2", "rada_other_v2", "laws_kmu_v2", "laws_mod_v2"])
+            prefs.extend(["rada", "kmu", "mod"])
+        else:
+            intent = "military_procedure" if is_procedure or is_official else "military_norm"
+            collections.extend(["rada_state_v2", "rada_other_v2", "laws_kmu_v2", "laws_mod_v2"])
+            prefs.extend(["rada", "kmu", "mod"])
+        if is_court:
+            collections.extend(["laws_supreme_v2", "laws_positions_v2", "laws_ccu_v2", "rada_court_v2"])
+            prefs.append("court")
+        keyword_limit = 10
+        title_limit = 12
+        max_aspects = 5 if is_procedure or "procedure" in intent else 4
     elif is_court:
         intent = "court_position"
         collections.extend(["laws_supreme_v2", "laws_positions_v2", "laws_ccu_v2", "rada_court_v2"])

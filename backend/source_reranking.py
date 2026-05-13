@@ -107,6 +107,15 @@ def role_weight(intent: str, role: SourceRole, question: str) -> float:
         question,
         ("краще", "лучше", "обрати", "вибрати", "выбрать", "рекомендац", "порівня", "сравн"),
     )
+    asks_military = "military" in intent or _question_has_any(
+        question,
+        (
+            "тцк", "влк", "мобілізац", "мобилизац", "відстроч", "отсроч",
+            "бронюван", "бронь", "повіст", "повест", "військовозобов",
+            "призов", "резервіст", "міноборони", "міністерство оборони",
+            "військова служба", "військовий облік", "резерв+",
+        ),
+    )
     asks_changes = _question_has_any(question, ("внесення змін", "зміни до", "редакц", "істор", "коли змінил"))
 
     if role == SourceRole.AMENDING_ACT:
@@ -121,6 +130,37 @@ def role_weight(intent: str, role: SourceRole, question: str) -> float:
             SourceRole.ADMIN_PROCEDURE: 0.03,
             SourceRole.TAX_EXPLANATION: -0.04,
             SourceRole.LEGAL_EXPLAINER: -0.10,
+        }.get(role, 0.0)
+
+    if asks_military:
+        if "service" in intent or "medical" in intent:
+            return {
+                SourceRole.ADMIN_PROCEDURE: 0.16,
+                SourceRole.BYLAW: 0.13,
+                SourceRole.PRIMARY_LAW: 0.11,
+                SourceRole.BASE_CODE: 0.10,
+                SourceRole.COURT_PRACTICE: -0.07,
+                SourceRole.TAX_EXPLANATION: -0.10,
+                SourceRole.LEGAL_EXPLAINER: -0.12,
+            }.get(role, 0.0)
+        if "deferral" in intent:
+            return {
+                SourceRole.PRIMARY_LAW: 0.16,
+                SourceRole.BYLAW: 0.14,
+                SourceRole.ADMIN_PROCEDURE: 0.11,
+                SourceRole.BASE_CODE: 0.10,
+                SourceRole.COURT_PRACTICE: -0.06,
+                SourceRole.TAX_EXPLANATION: -0.10,
+                SourceRole.LEGAL_EXPLAINER: -0.12,
+            }.get(role, 0.0)
+        return {
+            SourceRole.BYLAW: 0.15,
+            SourceRole.ADMIN_PROCEDURE: 0.14,
+            SourceRole.PRIMARY_LAW: 0.12,
+            SourceRole.BASE_CODE: 0.10,
+            SourceRole.COURT_PRACTICE: -0.06,
+            SourceRole.TAX_EXPLANATION: -0.10,
+            SourceRole.LEGAL_EXPLAINER: -0.12,
         }.get(role, 0.0)
 
     if asks_exact:
@@ -186,6 +226,32 @@ def _base_relevance(result: dict[str, Any]) -> float:
     return ans_score + sim * 0.18 + coverage * 0.10
 
 
+def _military_collection_weight(intent: str, result: dict[str, Any]) -> float:
+    intent = (intent or "").lower()
+    if "military" not in intent:
+        return 0.0
+    col = str(result.get("_collection") or "")
+    if col == "laws_mod_v2":
+        if "service" in intent or "medical" in intent:
+            return 0.08
+        if "summons" in intent or "accounting" in intent:
+            return 0.04
+        if "deferral" in intent:
+            return 0.02
+        return 0.04
+    if col == "laws_kmu_v2":
+        if "deferral" in intent or "summons" in intent or "accounting" in intent:
+            return 0.08
+        return 0.04
+    if col in {"rada_state_v2", "rada_other_v2"}:
+        if "deferral" in intent:
+            return 0.09
+        return 0.06
+    if col in _COURT_COLLECTIONS and "court" not in intent:
+        return -0.06
+    return 0.0
+
+
 def rerank_by_source_role(results: list[dict[str, Any]], intent: str, question: str) -> list[dict[str, Any]]:
     """Attach source roles and softly reorder results by legal authority."""
     if not results:
@@ -194,7 +260,7 @@ def rerank_by_source_role(results: list[dict[str, Any]], intent: str, question: 
     enriched: list[dict[str, Any]] = []
     for result in results:
         role = infer_source_role(result)
-        weight = role_weight(intent, role, question)
+        weight = role_weight(intent, role, question) + _military_collection_weight(intent, result)
         meta = result.get("out_metadata", {}) or {}
         if meta.get("rada_is_dead") or "втратив" in str(meta.get("status") or "").lower():
             weight -= 0.40
