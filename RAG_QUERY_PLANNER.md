@@ -1,7 +1,7 @@
 # URAI RAG Query Planner
 
 > Updated: May 2026. Source of truth: `backend/server.py`,
-> `backend/retrieval_helpers.py`.
+> `backend/retrieval_helpers.py`, `backend/source_reranking.py`.
 
 ## Purpose
 
@@ -87,6 +87,8 @@ Planner output may influence:
 - target collection hints;
 - aspect/evidence coverage;
 - article-window retrieval hints;
+- downstream source-role reranking through the intent/search text that reaches
+  `_ask_pipeline()`;
 - debug logs.
 
 Planner output may not directly create:
@@ -216,6 +218,40 @@ additional candidates that cover planner aspects/evidence. This prevents:
 Coverage candidates must still be real retrieved documents and pass quality
 checks.
 
+## Source-Role Reranking
+
+After answerability reranking and protected-context handling, the backend can
+run `rerank_by_source_role()` when `source_role_rerank_enabled=true`.
+
+This is not another planner and not an answer generator. It is a small
+policy-based ranking signal that infers a document role from collection and
+metadata:
+
+- `base_code`;
+- `primary_law`;
+- `amending_act`;
+- `bylaw`;
+- `admin_procedure`;
+- `tax_explanation`;
+- `court_practice`;
+- `legal_explainer`;
+- `other`.
+
+The intent profile changes only the source prior. Text relevance,
+answerability and real retrieved evidence still dominate. For example:
+
+- direct norm/value questions should prefer codes, laws and governing bylaws;
+- tax advisory questions may keep ZIR as useful explanation after primary law;
+- military/procedure questions may keep KMU/MOD procedure documents when they
+  directly answer the issue;
+- court-practice sources should rise for court/dispute questions and fall for
+  simple current-law norm questions;
+- amendment acts are demoted unless the user asks about changes, history or a
+  specific amending act.
+
+The reranker must stay generic. It must not contain answer-specific rules like
+"for speed fine use document X" or "for FOP choose document Y".
+
 ## Logging
 
 Expected logs:
@@ -230,6 +266,7 @@ Expected logs:
 - `ASPECT COVERAGE`
 - `EVIDENCE COVERAGE`
 - `FOLLOWUP EVIDENCE CARRY`
+- `SOURCE ROLE RERANK`
 - `CONTEXT SQUEEZE`
 - `FINAL RESULTS`
 

@@ -20,7 +20,7 @@ Gemini generates a cited answer.
 ## Important Runtime Files
 
 - `app/chat/page.tsx` - chat UI, SSE stream consumption, stop-generation UX,
-  chat switching, message persistence.
+  chat switching, message persistence and one-time beta tester welcome UX.
 - `app/api/ask/stream/route.ts` - authenticated streaming proxy to FastAPI,
   plan/source gating and response preference gating.
 - `app/api/ask/route.ts` - non-streaming ask proxy with the same plan logic.
@@ -28,6 +28,8 @@ Gemini generates a cited answer.
   endpoints, long-running sync/reindex workers and shared operation state.
 - `backend/retrieval_helpers.py` - query-planner normalization, retrieval
   scoring, answerability, citation and answer-completion helpers.
+- `backend/source_reranking.py` - generic source-role ranking signal for legal
+  authority/directness. It does not hardcode answers to specific questions.
 - `backend/schemas.py` - Pydantic request models shared by backend routes.
 - `backend/generation_routes.py` - utility LLM routes for history summaries,
   chat names and user prompt generation.
@@ -78,12 +80,27 @@ available.
 8. Vector, title and keyword searches collect candidates from allowed V2
    collections.
 9. The backend applies source scoring, document expansion, article-window
-   protection, aspect/evidence coverage and answerability reranking.
+   protection, aspect/evidence coverage, answerability reranking and
+   source-role reranking.
 10. Final context is squeezed to the strongest chunks and capped by response
     preference and `context_char_cap`.
 11. Gemini streams the answer with citations. A hidden `URAI_DONE` marker and
     continuation logic help avoid cut-off answers.
 12. The frontend saves the final assistant message, citations and analytics.
+
+## Feedback UX
+
+URAI has two feedback paths:
+
+- Inline message feedback under assistant answers (`MessageFeedback`). Beta
+  testers are expected to use these like/dislike controls after answers.
+- Generic app review (`ReviewModal`) for non-beta users when the review trigger
+  says it should be shown.
+
+Beta testers are treated as effective Pro users. In chat they receive only a
+one-time `BetaTesterWelcomeModal` after the first saved assistant answer in the
+browser. The modal explains beta status and asks for inline feedback; it is not
+shown after every answer.
 
 ## Local Development
 
@@ -122,6 +139,8 @@ explicitly wants to reset a job.
 - `URAI_ARCHITECTURE.md` - architecture, backend module layout, sources,
   storage, admin pages.
 - `RAG_QUERY_PLANNER.md` - planner JSON contract and retrieval usage.
+- `LEGAL_CONSTANTS_PLAN.md` - proposed design for a future legal-constants
+  layer. It is not current runtime behavior until explicitly implemented.
 - `V2_БАЗА_ПОЯСНЕННЯ.md` - human explanation of the V2 knowledge base.
 - `GEMINI_PROMPT.md` - production answer-prompt guidance.
 - `RAG2_NEXT_CHAT_PROMPT.md` - handoff prompt for future RAG quality work.

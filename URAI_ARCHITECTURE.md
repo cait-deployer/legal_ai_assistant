@@ -2,7 +2,8 @@
 
 > Updated: May 2026. Source of truth: `app/chat/page.tsx`,
 > `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`,
-> `backend/retrieval_helpers.py`, `backend/qdrant_storage.py`.
+> `backend/retrieval_helpers.py`, `backend/source_reranking.py`,
+> `backend/qdrant_storage.py`.
 
 This document describes the current production architecture, not the old V1
 prototype.
@@ -29,6 +30,7 @@ Supporting modules now hold code that used to live directly in `server.py`:
 | --- | --- |
 | `backend/schemas.py` | Pydantic request bodies shared by FastAPI routes. |
 | `backend/retrieval_helpers.py` | Query planner normalization, retrieval scoring, answerability helpers, citation filtering and answer-completion helpers used by `_ask_pipeline()`, `/ask` and `/ask_stream`. |
+| `backend/source_reranking.py` | Policy-based source-role reranker. It infers legal source roles from collection and metadata, adds a small intent-aware ranking signal, and logs `SOURCE ROLE RERANK`. It must not encode one-off answers. |
 | `backend/generation_routes.py` | Utility LLM routes: `/summarize_history`, `/generate-name`, `/generate-user-prompt`. |
 | `backend/eval_routes.py` | Admin retrieval eval runner routes under `/admin/eval/*`. It calls `_ask_pipeline()` for production-like retrieval evaluation. |
 | `backend/admin_operation_routes.py` | Admin operation HTTP routes for pipeline, enrichment, text-cancellation, Qdrant metadata patching and `/admin/meta/list`. Worker functions remain in `server.py`. |
@@ -52,7 +54,10 @@ admin HTTP wiring, check the route-registration modules first.
 8. Backend retrieves context and streams answer tokens.
 9. Frontend displays tokens, then finalizes on the `citations` event.
 10. Assistant message, citations, analytics and usage are saved.
-11. Background title/summary tasks may run after the response.
+11. For beta testers, the first saved assistant answer can trigger a one-time
+    welcome modal explaining beta status and asking for inline like/dislike
+    feedback. It is not a per-answer feedback modal.
+12. Background title/summary tasks may run after the response.
 
 The chat input supports stop-generation UX: during generation the send icon is
 replaced with a stop icon; clicking it aborts the current request and restores
@@ -96,6 +101,9 @@ Plan data comes from Supabase:
 - Beta users are treated as effective Pro.
 - `full` answers require Pro/Beta.
 - `detailed` answers require paid/Beta.
+- Beta users are not shown the generic app-review modal in chat. They keep
+  inline message feedback controls and receive only a one-time beta welcome
+  modal after the first saved assistant answer in that browser.
 
 Source feature mapping:
 
@@ -131,12 +139,28 @@ Raw source text is stored under `/root/laws_raw/{source}/`.
 - Rada: primary laws, codes and resolutions.
 - KMU: Cabinet of Ministers resolutions, procedures and orders.
 - MOD: Ministry of Defense normative/reference materials from `mod.gov.ua`,
-  mostly personnel, financial and property-related orders/procedures.
+  mostly personnel, financial and property-related orders/procedures. It is
+  used when the query is military/defense-related, but it should not replace
+  Rada/KMU when those are the direct governing acts.
 - ZIR: official tax Q&A from DPS; useful for tax practice, not a replacement for
   primary law when primary law is available.
 - Wiki: explanatory background from LegalAid Wiki.
 - Supreme/positions/CCU: court and constitutional interpretation; important, but
   should not crowd out direct normative sources for simple norm questions.
+
+`backend/source_reranking.py` expresses these roles more precisely for the final
+ranking stage:
+
+| Source role | Typical sources | Retrieval meaning |
+| --- | --- | --- |
+| `base_code` | codes in Rada collections | strongest for direct norm/value questions |
+| `primary_law` | Rada laws | primary legal basis |
+| `amending_act` | acts about changes/amendments | useful for history/change questions, demoted for ordinary current-law answers |
+| `bylaw` | KMU/MOD/Rada bylaws | procedures, implementing rules and sector details |
+| `admin_procedure` | procedures/instructions/regulations | practical steps and documents |
+| `tax_explanation` | ZIR | official tax explanation, not a replacement for primary law |
+| `court_practice` | Supreme/CCU/positions/court Rada | disputes, interpretation and litigation risk |
+| `legal_explainer` | Wiki | background explanation only |
 
 ## Backend Retrieval Pipeline
 
@@ -161,11 +185,12 @@ The current `_ask_pipeline()` does this:
 16. Protect aspect and evidence-subquestion coverage candidates.
 17. Run deterministic answerability reranking.
 18. Optionally run Gemini reranker only when `llm_reranker_enabled=true`.
-19. Inject contiguous article windows for direct article/norm questions.
-20. Filter expired/cancelled documents.
-21. Squeeze context to the strongest chunks.
-22. Generate the answer and classification.
-23. Use `URAI_DONE` and continuation logic to reduce truncated answers.
+19. Run source-role reranking when `source_role_rerank_enabled=true`.
+20. Inject contiguous article windows for direct article/norm questions.
+21. Filter expired/cancelled documents.
+22. Squeeze context to the strongest chunks.
+23. Generate the answer and classification.
+24. Use `URAI_DONE` and continuation logic to reduce truncated answers.
 
 The old centroid/router-only flow is not the current production mental model.
 
@@ -210,6 +235,9 @@ Overall character cap is `context_char_cap`, default 30000.
 - Do not call `vertexai.init()` per request.
 - Do not globally boost one source without eval evidence.
 - Do not remove wiki/ZIR/MOD; treat them by source role and directness.
+- Do not add one-off source-role rules for a single user question. If a role
+  weight changes, it must be explainable by source authority, intent and eval
+  evidence.
 - Every admin-visible backend capability should have a matching admin UI.
 
 ## Known Gaps

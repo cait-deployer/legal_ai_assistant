@@ -40,8 +40,15 @@ Important implemented features:
 - Article-window protection for direct norm/article questions.
 - Aspect/evidence coverage for multi-part questions.
 - MOD and ZIR source integration.
+- Source-role reranking in `backend/source_reranking.py`, controlled by
+  `source_role_rerank_enabled`. It is policy-based and generic: source role and
+  intent may add a small ranking signal, but the module must not know answers
+  for individual questions.
 - Completion marker `URAI_DONE` and backend continuation logic.
 - Frontend stop-generation UX.
+- Beta tester chat UX: one-time welcome modal after the first saved assistant
+  answer, plus inline like/dislike message feedback. The old per-answer
+  auto-open feedback modal is not current behavior.
 
 ## Quality Problems Still Worth Solving
 
@@ -51,7 +58,10 @@ Important implemented features:
 3. Some specific named-entity documents can still appear in general answers.
 4. Some source families can be useful but should not dominate when a direct
    primary norm exists.
-5. More quality work should be measured with approved/gold eval cases instead
+5. Legal constants are still a planned layer, not current runtime behavior.
+   Without it, the bot may correctly cite "20 NMDG" but should not invent the
+   hryvnia amount unless that constant is present in retrieved context.
+6. More quality work should be measured with approved/gold eval cases instead
    of manual inspection only.
 
 ## Rules For Improvements

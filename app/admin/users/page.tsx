@@ -655,7 +655,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <p className="text-xs text-[#E0E6ED]/40 leading-relaxed">
                   {editForm.is_beta_tester
                     ? "Користувач втратить PRO-доступ та обов&apos;язковий режим відгуків."
-                    : "Користувач отримає повний PRO-доступ та бачитиме модальне вікно відгуку після кожної відповіді."}
+                    : "Користувач отримає повний PRO-доступ, одноразове пояснення статусу та inline-кнопки відгуку після відповідей."}
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -839,7 +839,7 @@ function UserDrawer({ user, onClose, onRefresh, labels }: { user: User; onClose:
                 <div className="flex items-center justify-between p-4 rounded-xl bg-[#C9A84C]/5 border border-[#C9A84C]/15">
                   <div>
                     <p className="text-xs font-bold text-[#E0E6ED]">Бета-тестер</p>
-                    <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">Повний PRO-доступ + обов&apos;язковий відгук після кожної відповіді</p>
+                    <p className="text-[12px] text-[#E0E6ED]/40 mt-0.5">Повний PRO-доступ + одноразове пояснення та inline-відгуки</p>
                   </div>
                   <button
                     type="button"

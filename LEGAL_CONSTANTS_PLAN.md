@@ -1,5 +1,10 @@
 # URAI: довідник юридичних констант
 
+> Status: design plan, not current production runtime.
+> The current chat pipeline still answers from retrieved RAG context. A separate
+> `legal_constants_v2` layer is not implemented unless the code explicitly adds
+> constants retrieval before prompt generation.
+
 ## Навіщо це потрібно
 
 URAI відповідає на підставі RAG-контексту з нормативних документів. Це добре захищає від галюцинацій, але є окрема категорія питань, де користувачу потрібна не лише норма, а й практичний розрахунок:
@@ -266,4 +271,3 @@ Legal constants:
 - з датами дії;
 - з попередженнями про винятки;
 - без перенесення відповідальності на користувача.
-

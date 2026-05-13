@@ -31,6 +31,7 @@ import { ChatTour } from '@/components/chat-tour';
 import { motion } from 'framer-motion';
 import { MessageFeedback } from '@/app/components/feedback/MessageFeedback';
 import { ReviewModal } from '@/app/components/feedback/ReviewModal';
+import { BetaTesterWelcomeModal } from '@/app/components/feedback/BetaTesterWelcomeModal';
 import { useReviewTrigger } from '@/app/hooks/useReviewTrigger';
 
 const SAMPLE_QUESTIONS = [
@@ -76,6 +77,8 @@ type Message = {
     feedback?: { is_positive: boolean } | null;
     rewritten_query?: string;
 };
+
+const BETA_WELCOME_STORAGE_KEY = 'urai_beta_tester_welcome_seen';
 
 function stripCompletionArtifacts(text: string) {
     return (text || '').replace(/\s*URAI(?:_DONE)?\s*$/g, '').trim();
@@ -277,10 +280,21 @@ function ChatPage() {
     const [isFirstMessage, setIsFirstMessage] = useState(true);
     const [limitExceeded, setLimitExceeded] = useState(false);
     const [isBetaTester, setIsBetaTester] = useState(false);
-    const [pendingBetaFeedbackId, setPendingBetaFeedbackId] = useState<string | null>(null);
+    const [showBetaWelcome, setShowBetaWelcome] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showTour, setShowTour] = useState(false);
     const reviewTrigger = useReviewTrigger();
+
+    const closeBetaWelcome = useCallback(() => {
+        window.localStorage.setItem(BETA_WELCOME_STORAGE_KEY, '1');
+        setShowBetaWelcome(false);
+    }, []);
+
+    const maybeShowBetaWelcome = useCallback(() => {
+        if (window.localStorage.getItem(BETA_WELCOME_STORAGE_KEY) === '1') return;
+        window.localStorage.setItem(BETA_WELCOME_STORAGE_KEY, '1');
+        setShowBetaWelcome(true);
+    }, []);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const autoScrollRef = useRef(true);
@@ -741,9 +755,12 @@ function ChatPage() {
                 }).then(r => r.ok ? r.json() : null).then(saved => {
                     if (saved?.id) {
                         setMessages(prev => prev.map(m => m.id === STREAMING_ID ? { ...m, id: saved.id } : m));
-                        if (isBetaTester) setPendingBetaFeedbackId(saved.id);
                     }
-                    reviewTrigger.check();
+                    if (isBetaTester) {
+                        maybeShowBetaWelcome();
+                    } else {
+                        reviewTrigger.check();
+                    }
 
                     // Compress context after every 2nd user turn, then reuse it for the next question.
                     if (currentUserTurnCount % 2 === 0) {
@@ -911,8 +928,6 @@ function ChatPage() {
                                                                 chatId={currentChatId}
                                                                 initialIsPositive={msg.feedback?.is_positive ?? null}
                                                                 betaMode={isBetaTester}
-                                                                autoOpen={pendingBetaFeedbackId === msg.id}
-                                                                onSubmitted={() => setPendingBetaFeedbackId(current => current === msg.id ? null : current)}
                                                                 showReviewButton={isLastAi && reviewTrigger.buttonVisible}
                                                                 onReviewOpen={reviewTrigger.reopen}
                                                             />
@@ -1014,6 +1029,10 @@ function ChatPage() {
                     onLater={reviewTrigger.postpone}
                     onSubmitted={reviewTrigger.submitted}
                 />
+            )}
+
+            {showBetaWelcome && (
+                <BetaTesterWelcomeModal onClose={closeBetaWelcome} />
             )}
 
             {/* First-time user tour */}

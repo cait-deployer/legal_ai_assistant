@@ -350,6 +350,28 @@ Source roles:
 - `court_practice` — Supreme, CCU, Legal Positions.
 - `explanation` — Wiki.
 
+Current chat reranking uses a more granular runtime role layer from
+`backend/source_reranking.py`. It is derived from collection and metadata, not
+from individual hardcoded cases:
+
+- `base_code` - codes and other base acts, strongest for direct norm/value
+  questions.
+- `primary_law` - primary laws from Rada collections.
+- `amending_act` - acts about amendments; useful for change/history questions,
+  demoted for ordinary current-law answers.
+- `bylaw` - KMU/MOD/Rada bylaws and implementing acts.
+- `admin_procedure` - procedures, instructions and regulations.
+- `tax_explanation` - ZIR/DPS tax explanations.
+- `court_practice` - Supreme Court, CCU, legal positions and court-specific
+  sources.
+- `legal_explainer` - Wiki/background material.
+- `other` - fallback.
+
+The older registry role names are still useful for document registry search,
+but production context selection should be reasoned about with the granular
+runtime roles above plus answerability score, text coverage and document
+metadata.
+
 ## Retrieval Rules
 
 1. Rada/KMU имеют приоритет для юридических норм.

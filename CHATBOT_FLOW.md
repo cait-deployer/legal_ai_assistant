@@ -2,7 +2,7 @@
 
 > Updated: May 2026. Source of truth: `app/chat/page.tsx`,
 > `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`,
-> `backend/retrieval_helpers.py`.
+> `backend/retrieval_helpers.py`, `backend/source_reranking.py`.
 
 ## Runtime Flow
 
@@ -24,10 +24,11 @@ flowchart TD
     N --> O[Primary-act discovery and article window protection]
     O --> P[Aspect and evidence-subquestion coverage]
     P --> Q[Deterministic answerability reranker]
-    Q --> R[Strict context squeeze and expired-document filter]
-    R --> S[Gemini streamed answer + classification]
-    S --> T[Completion marker / continuation if needed]
-    T --> U[Frontend saves assistant message, citations, analytics]
+    Q --> R[Source-role rerank by legal authority and intent]
+    R --> S[Strict context squeeze and expired-document filter]
+    S --> T[Gemini streamed answer + classification]
+    T --> U[Completion marker / continuation if needed]
+    U --> V[Frontend saves assistant message, citations, analytics]
 ```
 
 ## Frontend Payload
@@ -41,7 +42,12 @@ flowchart TD
 - saves the assistant answer and citations after streaming completes;
 - lets the user stop generation. While generation is active, the send icon
   becomes a stop icon; clicking it aborts the request and restores the last
-  submitted question into the input.
+  submitted question into the input;
+- shows beta testers a one-time welcome modal after the first saved assistant
+  answer. The modal explains beta status and asks the user to leave inline
+  like/dislike feedback after answers. Closing it stores
+  `urai_beta_tester_welcome_seen` in `localStorage`; automatic beta feedback
+  modals are not opened after every answer.
 
 ## API Route
 
@@ -98,14 +104,31 @@ The pipeline:
 18. Add aspect/evidence coverage candidates for multi-part questions.
 19. Run deterministic answerability rerank.
 20. Optionally run Gemini LLM reranker only when `llm_reranker_enabled=true`.
-21. Squeeze final context to the strongest chunks.
-22. Filter cancelled/expired documents.
-23. Build context buckets.
-24. Generate streamed answer and parallel classification.
-25. Ask the model to finish with hidden marker `URAI_DONE`.
-26. If the answer is cut off or the marker is missing with a dangling ending,
+21. Run source-role reranking when `source_role_rerank_enabled=true`. This is a
+    small policy-based ranking signal from `backend/source_reranking.py`; it
+    uses source role and detected intent, not hardcoded answers.
+22. Squeeze final context to the strongest chunks.
+23. Filter cancelled/expired documents.
+24. Build context buckets.
+25. Generate streamed answer and parallel classification.
+26. Ask the model to finish with hidden marker `URAI_DONE`.
+27. If the answer is cut off or the marker is missing with a dangling ending,
     request a short continuation.
-27. Strip the marker before returning/saving the answer.
+28. Strip the marker before returning/saving the answer.
+
+## Beta Tester Feedback UX
+
+Beta status has two effects:
+
+- plan gating treats the user as effective Pro;
+- the chat UI keeps inline `MessageFeedback` controls under assistant answers.
+
+The current beta UX is intentionally non-intrusive. After the first assistant
+answer is saved for a beta tester, the frontend displays
+`BetaTesterWelcomeModal` once per browser. The modal does not collect feedback
+itself; it explains that beta feedback should be left with the inline
+like/dislike controls. The old behavior where a feedback modal auto-opened
+after every assistant answer is no longer part of the current flow.
 
 ## Query Planner
 
@@ -190,7 +213,8 @@ Server behavior:
 - Chat UI blocks users over `monthly_limit + bonus_requests`.
 - Streaming API has free-account fingerprint protection.
 - Usage increments only after assistant message save.
-- Beta users bypass UI limit and use effective Pro features.
+- Beta users bypass UI limit, use effective Pro features and do not receive the
+  generic app-review modal after answers.
 
 ## Known Gaps
 
