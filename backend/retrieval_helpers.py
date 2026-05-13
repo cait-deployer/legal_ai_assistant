@@ -420,6 +420,105 @@ def _clean_evidence_subquestions(value, *, limit: int = 5) -> list[dict]:
     return out
 
 
+def _evidence_block(
+    sid: str,
+    question: str,
+    must_find: list[str],
+    collections: list[str],
+    prefs: list[str],
+    avoid: list[str] | None = None,
+) -> dict:
+    return {
+        "id": sid,
+        "question": question,
+        "must_find": must_find,
+        "avoid_if_only": avoid or [],
+        "target_collections": collections,
+        "source_preferences": prefs,
+    }
+
+
+def _procedure_evidence_subquestions(question: str) -> list[dict]:
+    """Evidence checklist for broad procedural questions.
+
+    This is a domain scaffold, not an answer template: it tells retrieval what
+    kinds of legal proof must be present so one narrow exception does not become
+    the whole answer.
+    """
+    q = (question or "").lower()
+    procedural = _has_any_marker(q, (
+        "як законно", "як правильно", "як оформ", "як звільн", "порядок", "процедур",
+        "що зробити", "які кроки", "документи", "оформлення",
+    ))
+    if not procedural:
+        return []
+
+    if _has_any_marker(q, ("звільн", "працівник", "роботодав", "трудов")):
+        cols = ["rada_labor_v2"]
+        prefs = ["rada"]
+        return [
+            _evidence_block(
+                "labor_termination_grounds",
+                "Загальні підстави припинення трудового договору та звільнення працівника",
+                ["припинення трудового договору", "підстави", "звільнення", "працівник"],
+                cols,
+                prefs,
+            ),
+            _evidence_block(
+                "labor_employee_initiative",
+                "Звільнення працівника за власним бажанням або за угодою сторін",
+                ["власне бажання", "угода сторін", "строк", "заява"],
+                cols,
+                prefs,
+            ),
+            _evidence_block(
+                "labor_employer_initiative",
+                "Звільнення з ініціативи роботодавця: допустимі підстави та заборони",
+                ["ініціатива роботодавця", "підстави", "забороняється", "скорочення"],
+                cols,
+                prefs,
+            ),
+            _evidence_block(
+                "labor_union_and_protected",
+                "Додаткові гарантії при звільненні: профспілка, захищені категорії, обмеження",
+                ["профспілка", "згода", "гарантії", "обмеження"],
+                cols,
+                prefs,
+            ),
+            _evidence_block(
+                "labor_final_settlement",
+                "Оформлення звільнення: наказ, видача документів, остаточний розрахунок",
+                ["наказ", "трудова книжка", "копія наказу", "розрахунок"],
+                cols,
+                prefs,
+            ),
+        ]
+
+    return [
+        _evidence_block(
+            "procedure_basis",
+            "Правова підстава процедури та хто має право її застосовувати",
+            ["підстава", "право", "орган", "суб'єкт"],
+            ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"],
+            ["rada", "kmu", "mod"],
+        ),
+        _evidence_block(
+            "procedure_steps",
+            "Основні кроки процедури, документи та строки",
+            ["порядок", "документи", "строк", "заява"],
+            ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"],
+            ["rada", "kmu", "mod"],
+        ),
+        _evidence_block(
+            "procedure_limits",
+            "Обмеження, винятки та ризики неправильного оформлення процедури",
+            ["обмеження", "винятки", "відмова", "відповідальність"],
+            ["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"],
+            ["rada", "kmu", "mod"],
+        ),
+    ]
+
+
 def _merge_unique_strings(*groups: list[str], limit: int) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -510,6 +609,13 @@ def _deterministic_query_plan(question: str) -> dict:
     for triggers, collections in _QUERY_COLLECTION_RULES:
         if any(trigger in q for trigger in triggers):
             target_collections.extend(collections)
+    procedural_subquestions = _procedure_evidence_subquestions(question)
+    if procedural_subquestions:
+        for sq in procedural_subquestions:
+            aspects.append(sq["question"])
+            legal_terms.extend(sq.get("must_find", []))
+            target_collections.extend(sq.get("target_collections", []))
+            source_preferences.extend(sq.get("source_preferences", []))
     _semantic_cols, _semantic_prefs = _semantic_collection_hints(question, plan)
     target_collections.extend(_semantic_cols)
     source_preferences.extend(_semantic_prefs)
@@ -566,7 +672,7 @@ def _deterministic_query_plan(question: str) -> dict:
         plan["legal_terms"] = _merge_unique_strings(_query_terms(question, limit=10), limit=14)
         plan["search_query"] = " ".join(plan["legal_terms"])[:350] or question[:350]
     if plan.get("aspects") and not plan.get("evidence_subquestions"):
-        plan["evidence_subquestions"] = [
+        plan["evidence_subquestions"] = _clean_evidence_subquestions(procedural_subquestions, limit=5) or [
             {
                 "id": f"aspect_{idx + 1}",
                 "question": f"{question[:180]} {aspect}"[:220],
@@ -665,6 +771,7 @@ def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
 
 def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
     """Small retrieval policy layer: roles, collection hints and fallback budgets."""
+    q_base = (question or "").lower()
     text = " ".join([
         question or "",
         " ".join((plan or {}).get("legal_terms") or []),
@@ -694,12 +801,22 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
         "простими словами", "поясни", "що означ", "що таке", "різниця", "порівняй",
         "переваги", "недоліки",
     )
+    procedure_markers = (
+        "як законно", "як правильно", "як оформ", "порядок", "процедур", "що зробити",
+        "які кроки", "документи", "оформлення",
+    )
+    labor_markers = (
+        "працівник", "роботодав", "звільн", "трудов", "кзпп", "профспіл",
+        "заробітн", "відпустк", "скорочення",
+    )
 
     is_tax = _has_any_marker(text, tax_markers)
-    needs_exact_value = _has_any_marker(text, value_markers)
+    needs_exact_value = _has_any_marker(q_base, value_markers)
     is_court = _has_any_marker(text, court_markers)
     is_official = _has_any_marker(text, official_markers)
     wants_explanation = _has_any_marker(text, explanation_markers)
+    is_procedure = _has_any_marker(text, procedure_markers)
+    is_labor = _has_any_marker(text, labor_markers)
 
     collections: list[str] = []
     prefs: list[str] = []
@@ -724,10 +841,21 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
         prefs.extend(["rada", "zir", "kmu", "mod", "wiki"])
         keyword_limit = 10
         title_limit = 12
+    elif is_labor:
+        intent = "labor_procedure" if is_procedure else "labor_norm"
+        collections.extend(["rada_labor_v2", "rada_civil_v2", "laws_positions_v2", "laws_wiki_v2"])
+        prefs.extend(["rada", "court", "wiki"])
+        keyword_limit = 10
+        title_limit = 10
+        max_aspects = 5 if is_procedure else 4
     elif is_official:
         intent = "official_procedure"
         collections.extend(["laws_kmu_v2", "laws_mod_v2", "rada_admin_v2", "rada_state_v2", "laws_wiki_v2"])
         prefs.extend(["kmu", "mod", "rada", "wiki"])
+    elif is_procedure:
+        intent = "legal_procedure"
+        collections.extend(["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2", "laws_wiki_v2"])
+        prefs.extend(["rada", "kmu", "mod", "wiki"])
     elif wants_explanation:
         intent = "explanation"
         collections.extend(["laws_wiki_v2", "laws_zir_v2", "laws_kmu_v2"])

@@ -5317,6 +5317,22 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 f"{_history_evidence_text[:1400]}\n\n"
             )
 
+        evidence_requirements_block = ""
+        if _evidence_subquestions:
+            _req_lines = [
+                f"- {sq.get('question', '')}"
+                for sq in _evidence_subquestions[:5]
+                if sq.get("question")
+            ]
+            if _req_lines:
+                evidence_requirements_block = (
+                    f"Retrieval profile: {_retrieval_profile.get('intent', 'general_norm')}.\n"
+                    "Перед відповіддю перевір, що відповідь покриває ці доказові блоки; "
+                    "не перетворюй один вузький виняток на загальне правило:\n"
+                    + "\n".join(_req_lines)
+                    + "\n\n"
+                )
+
         # Build conversation history block — last 3 turns (6 messages) only
         # Older turns are already covered by context_summary
         history_block = ""
@@ -5338,6 +5354,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             f"{personal_block}"
             f"{summary_block}"
             f"{history_evidence_block}"
+            f"{evidence_requirements_block}"
             f"{history_block}"
             f"{evidence_brief}"
             "Контекст з українського законодавства, структурований за правовою ієрархією:\n\n"
