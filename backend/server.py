@@ -51,6 +51,9 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
+from generation_routes import register_generation_routes
+from eval_routes import register_eval_routes
+from admin_operation_routes import register_admin_operation_routes
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
@@ -58,12 +61,8 @@ load_dotenv()
 import settings_cache  # noqa: E402 — треба після load_dotenv
 from schemas import (  # noqa: E402
     AskRequest,
-    EvalRunBody,
-    GenerateNameRequest,
-    GenerateUserPromptRequest,
     RadaTriggerBody,
     ScheduleBody,
-    SummarizeHistoryBody,
 )
 
 # ── Vertex AI — ініціалізуємо один раз при старті ─────────────────────────────
@@ -942,6 +941,8 @@ app.add_middleware(
 )
 
 
+
+register_generation_routes(app, settings_cache, logger, lambda: _vertex_initialized, _init_vertex_ai)
 
 # ── /admin/stats ───────────────────────────────────────────────────────────────
 
@@ -3568,15 +3569,22 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _history_evidence = _history_evidence_summary(body.history)
         _history_evidence_text = _history_evidence.get("text", "")
         _history_evidence_terms = _history_evidence.get("terms", [])
+        _initial_retrieval_profile = _legal_query_profile(search_question)
         _q_for_followup = _question_before_followup.lower()
         _looks_like_recommendation_followup = any(
             marker in _q_for_followup
             for marker in ("рекомендац", "краще", "обрати", "вибрати", "выбрать", "лучше", "порівня", "сравн")
         )
         if _previous_user_question and _looks_like_followup(_question_before_followup):
-            search_question = f"{search_question}\nКонтекст попереднього питання: {_previous_user_question}"
-            logger.info("FOLLOWUP CONTEXT MERGE: %s", search_question[:220])
-        if _history_evidence_text and (_looks_like_followup(_question_before_followup) or _looks_like_recommendation_followup):
+            _safe_carry = _safe_followup_context(_question_before_followup, _previous_user_question)
+            if _safe_carry:
+                search_question = f"{search_question}\nКонтекст уточнення: {_safe_carry}"
+                logger.info("FOLLOWUP CONTEXT CARRY: %s", _safe_carry[:180])
+        if (
+            _history_evidence_text
+            and _initial_retrieval_profile.get("carry_history_evidence", True)
+            and (_looks_like_followup(_question_before_followup) or _looks_like_recommendation_followup)
+        ):
             search_question = (
                 f"{search_question}\n"
                 f"Попередньо підтверджені факти для повторного пошуку, не джерело права:\n"
@@ -3724,6 +3732,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _query_plan.get("evidence_subquestions", []) if _query_plan else [],
             limit=5,
         )
+        _retrieval_profile = _legal_query_profile(search_question, _query_plan)
+        _max_profile_aspects = int(_retrieval_profile.get("max_aspects") or 5)
+        if _max_profile_aspects < len(_evidence_subquestions):
+            _evidence_subquestions = _evidence_subquestions[:_max_profile_aspects]
         _evidence_questions: list[str] = []
         _evidence_must_terms: list[str] = []
         _evidence_collections: list[str] = []
@@ -3733,10 +3745,18 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _evidence_must_terms.extend(_sq.get("must_find", []))
             _evidence_collections.extend(_sq.get("target_collections", []))
             _evidence_sources.extend(_sq.get("source_preferences", []))
-        if _history_evidence_text and (_looks_like_followup(_question_before_followup) or _looks_like_recommendation_followup):
+        if (
+            _history_evidence_text
+            and _retrieval_profile.get("carry_history_evidence", True)
+            and (_looks_like_followup(_question_before_followup) or _looks_like_recommendation_followup)
+        ):
             _evidence_questions.append(_history_evidence_text[:700])
             _evidence_must_terms.extend(_history_evidence_terms[:14])
         _semantic_cols, _semantic_sources = _semantic_collection_hints(search_question, _query_plan)
+        _profile_cols = _retrieval_profile.get("target_collections", [])
+        _profile_sources = _retrieval_profile.get("source_preferences", [])
+        _evidence_collections.extend(_profile_cols)
+        _evidence_sources.extend(_profile_sources)
         _evidence_collections.extend(_semantic_cols)
         _evidence_sources.extend(_semantic_sources)
         _avoid_topic_terms = _merge_unique_strings(
@@ -3747,6 +3767,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _source_preferences = [
             str(s).strip().lower()
             for s in _merge_unique_strings(
+                _profile_sources if _retrieval_profile.get("needs_exact_value") else [],
                 (_query_plan.get("source_preferences", []) if _query_plan else []),
                 _evidence_sources,
                 limit=8,
@@ -3754,10 +3775,19 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             if str(s).strip()
         ]
         _target_collection_hints = _clean_plan_collections(
-            _merge_unique_strings(
-                (_query_plan.get("target_collections", []) if _query_plan else []),
-                _evidence_collections,
-                limit=10,
+            (
+                _merge_unique_strings(
+                    _profile_cols,
+                    (_query_plan.get("target_collections", []) if _query_plan else []),
+                    _evidence_collections,
+                    limit=10,
+                )
+                if _retrieval_profile.get("needs_exact_value")
+                else _merge_unique_strings(
+                    (_query_plan.get("target_collections", []) if _query_plan else []),
+                    _evidence_collections,
+                    limit=10,
+                )
             ),
             limit=8,
         )
@@ -3788,7 +3818,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             " ".join(_scoring_terms),
         ]).strip()
         logger.info(
-            "QUERY PLAN USED: scoring_terms=%s evidence_subq=%s title_queries=%s title_must=%s title_nice=%s title_exclude=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
+            "QUERY PLAN USED: profile=%s scoring_terms=%s evidence_subq=%s title_queries=%s title_must=%s title_nice=%s title_exclude=%s source_prefs=%s target_collections=%s act_hints=%s scoring_query=%r",
+            _retrieval_profile.get("intent"),
             _scoring_terms[:10],
             [
                 {
@@ -3882,6 +3913,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _evidence_aspect_texts,
         limit=6,
     )
+    _aspects = _aspects[: int((_retrieval_profile or {}).get("max_aspects") or 5)]
     try:
         if rewritten_query and _aspects:
             # Паралельно: embed rewrite + embed всіх аспектів + search оригінал
@@ -3927,12 +3959,15 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     if low_confidence:
         logger.info("LOW CONFIDENCE: top raw score %.3f < %.2f → widening BM25/title scope",
                     results[0]["similarity"], _RAW_GATE)
-        _lc_extra = ["rada_labor_v2", "rada_civil_v2", "laws_kmu_v2", "rada_finance_v2",
-                     "laws_positions_v2", "rada_admin_v2", "rada_state_v2"]
-        target_collections = list(dict.fromkeys(
-            target_collections + [c for c in _lc_extra if c in plan_collections]
-        ))
-        logger.info("LOW CONFIDENCE: target_collections expanded → %s", target_collections)
+        if not (_retrieval_profile or {}).get("needs_exact_value"):
+            _lc_extra = ["rada_labor_v2", "rada_civil_v2", "laws_kmu_v2", "rada_finance_v2",
+                         "laws_positions_v2", "rada_admin_v2", "rada_state_v2"]
+            target_collections = list(dict.fromkeys(
+                target_collections + [c for c in _lc_extra if c in plan_collections]
+            ))
+            logger.info("LOW CONFIDENCE: target_collections expanded → %s", target_collections)
+        else:
+            logger.info("LOW CONFIDENCE: exact-value profile keeps scoped collections → %s", target_collections)
     elif not results:
         logger.info("VECTOR: no hits above threshold %.2f → trying keyword/title fallback", match_threshold)
 
@@ -4250,8 +4285,9 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _planner_terms_text = " ".join(_scoring_terms) if _scoring_terms else ""
         _title_queries_text = " ".join(_title_queries) if _title_queries else ""
         _kw_query = f"{_planner_terms_text} {_title_queries_text} {rewritten_query or ''} {_act_hints_text} {search_question}".strip()
+        _kw_limit = int((_retrieval_profile or {}).get("keyword_limit") or 15)
         _kw_results = (
-            search_qdrant_text(_kw_query, target_collections, limit=15)
+            search_qdrant_text(_kw_query, target_collections, limit=max(5, min(_kw_limit, 15)))
             if settings_cache.get_bool("lexical_fallback_enabled", True)
             else []
         )
@@ -4270,7 +4306,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _kw_stems = _kw_query_words | {_ua_lemma(w) for w in _kw_query_words if _ua_lemma(w)}
         _kw_stems = {w for w in _kw_stems if w and w not in _kw_stopwords}
         _kw_added = 0
-        _kw_cap = max(12, body.max_docs * 3)
+        _profile_kw_cap = int((_retrieval_profile or {}).get("keyword_limit") or 0)
+        _kw_cap = _profile_kw_cap or max(12, body.max_docs * 3)
         _kw_min_matches = 2 if len(_kw_stems) >= 3 else 1
         for r in _kw_results:
             if _kw_added >= _kw_cap:
@@ -4428,7 +4465,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 )
 
             _title_results.sort(key=_title_result_priority)
-            _title_cap = int(settings_cache.get_float("title_boost_max_chunks", 16))
+            _profile_title_cap = int((_retrieval_profile or {}).get("title_limit") or 0)
+            _title_cap = _profile_title_cap or int(settings_cache.get_float("title_boost_max_chunks", 16))
             _title_results = _title_results[:max(4, min(_title_cap, 24))]
             logger.info("TITLE BOOST found: %s", [r["out_metadata"].get("law_id") for r in _title_results])
             logger.info(
@@ -5354,511 +5392,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     }
 
 
-@app.post("/summarize_history")
-async def summarize_history_endpoint(body: SummarizeHistoryBody):
-    """Стискає список повідомлень в короткий резюме (200-300 слів).
-    Якщо є existing_summary — включає його в новий стислий контекст."""
-    if not body.messages:
-        return {"summary": body.existing_summary or ""}
-
-    model_name = settings_cache.get("rewrite_model", "gemini-2.5-flash")
-    from vertexai.generative_models import GenerativeModel, GenerationConfig
-    try:
-        from vertexai.generative_models import ThinkingConfig as _SumThinkingConfig
-        _sum_gen_cfg = GenerationConfig(
-            temperature=0.0, max_output_tokens=4000,
-            thinking_config=_SumThinkingConfig(thinking_budget=0),
-        )
-    except Exception:
-        _sum_gen_cfg = GenerationConfig(temperature=0.0, max_output_tokens=4000)
-
-    lines: list[str] = []
-    if body.existing_summary:
-        lines.append(f"[Попереднє резюме]\n{body.existing_summary}\n")
-    for turn in body.messages:
-        role = turn.get("role", "")
-        content = (turn.get("content") or "").strip()[:800]
-        if role == "user":
-            lines.append(f"Користувач: {content}")
-        elif role == "assistant":
-            lines.append(f"Асистент: {content}")
-
-    dialogue_text = "\n".join(lines)
-    prompt = (
-        "Зроби стислий переказ наступного діалогу між юридичним асистентом і користувачем. "
-        "Збережи ключові факти: про що запитував користувач, які закони або норми згадувалися, "
-        "які висновки були зроблені, які уточнення вже поставлені та які відповіді вже надані. "
-        "Не використовуй markdown-заголовки. Переказ має бути 250-450 слів, українською мовою.\n\n"
-        f"{dialogue_text}\n\nСтислий переказ:"
-    )
-
-    try:
-        import asyncio as _asyncio
-        _sum_model = GenerativeModel(model_name)
-        resp = await _asyncio.wait_for(
-            _asyncio.to_thread(
-                _sum_model.generate_content,
-                prompt,
-                generation_config=_sum_gen_cfg,
-            ),
-            timeout=20,
-        )
-        summary = ""
-        try:
-            summary = (resp.text or "").strip()
-        except Exception:
-            pass
-        if not summary:
-            # Fallback: non-thought parts
-            try:
-                summary = " ".join(
-                    getattr(p, "text", "").strip()
-                    for p in resp.candidates[0].content.parts
-                    if not getattr(p, "thought", False) and getattr(p, "text", "")
-                ).strip()
-            except Exception:
-                pass
-        if not summary:
-            raise ValueError("empty summary")
-        return {"summary": summary}
-    except Exception as e:
-        logger.warning("summarize_history failed: %s", e)
-        fallback = dialogue_text[:4000].strip()
-        return {"summary": fallback}
-
-
-# ─── Eval Runner ─────────────────────────────────────────────────────────────
-
-_eval_state: dict = {
-    "running": False,
-    "session_id": None,
-    "started_at": None,
-    "logs": [],
-    "report": None,
-    "error": None,
-}
-_eval_lock = threading.Lock()
-
-
-def _eval_result_row(r: dict) -> dict:
-    meta = r.get("out_metadata") or {}
-    ans = r.get("_answerability") or {}
-    return {
-        "law_id": meta.get("law_id", ""),
-        "title": (meta.get("source") or meta.get("title") or "")[:240],
-        "collection": r.get("_collection", ""),
-        "score": round(float(r.get("similarity", 0.0) or 0.0), 4),
-        "answerability": round(float(ans.get("score", 0.0) or 0.0), 4) if ans else None,
-        "coverage": round(float(ans.get("coverage", 0.0) or 0.0), 3) if ans else None,
-    }
-
-
-async def _eval_vector_retrieve(question: str, top_n: int = 20) -> list[dict]:
-    """Fallback: embed question and search all V2 collections directly."""
-    import asyncio as _asyncio
-    import embed_v2 as _embed_v2
-    from qdrant_storage import get_client, ALL_V2_COLLECTIONS
-
-    vec = await _asyncio.to_thread(_embed_v2.embed_query, question)
-    client = get_client()
-
-    all_results: list[dict] = []
-    for col in ALL_V2_COLLECTIONS:
-        try:
-            hits = await _asyncio.to_thread(
-                client.search, col, vec, limit=8, with_payload=True
-            )
-            for h in hits:
-                payload = h.payload or {}
-                all_results.append({
-                    "law_id": payload.get("law_id", ""),
-                    "title": (payload.get("source") or payload.get("title") or "")[:200],
-                    "collection": col,
-                    "score": round(float(h.score), 4),
-                })
-        except Exception:
-            pass
-
-    all_results.sort(key=lambda x: x["score"], reverse=True)
-    seen: set[str] = set()
-    deduped: list[dict] = []
-    for r in all_results:
-        lid = r["law_id"]
-        key = lid if lid else f"__noid_{r['title'][:40]}"
-        if key not in seen:
-            seen.add(key)
-            deduped.append(r)
-        if len(deduped) >= top_n:
-            break
-    return deduped
-
-
-async def _eval_retrieve(question: str, top_n: int = 20) -> list[dict]:
-    """
-    Run the same retrieval/rerank/context selection pipeline as the chat,
-    but stop before answer generation. This makes eval results reflect the
-    real RAG path: rewrite, routing, keyword/title boosts, answerability
-    rerank, and context squeeze.
-    """
-    body = AskRequest(
-        question=question,
-        max_docs=max(top_n, 20),
-        filter_sources=None,
-        response_features=["response_detailed", "response_vs_position"],
-        response_length_pref="full",
-        response_lang_style="legal",
-    )
-    try:
-        pipe = await _ask_pipeline(body)
-        if pipe.get("early_answer"):
-            return []
-        return [_eval_result_row(r) for r in (pipe.get("results") or [])][:top_n]
-    except Exception as exc:
-        logger.warning("EVAL PIPELINE fallback to vector search: %s", exc)
-        return await _eval_vector_retrieve(question, top_n=top_n)
-
-
-def _eval_norm(text: str | None) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^\wА-Яа-яІіЇїЄєҐґ]+", " ", (text or "").lower())).strip()
-
-
-def _eval_source_matches_result(src: dict, result: dict) -> bool:
-    src_law_id = (src.get("law_id") or "").strip()
-    src_collection = (src.get("collection") or src.get("db_collection") or "").strip()
-    res_law_id = (result.get("law_id") or "").strip()
-    res_collection = (result.get("collection") or "").strip()
-
-    if src_collection and res_collection and src_collection != res_collection:
-        return False
-    if src_law_id and res_law_id:
-        return src_law_id == res_law_id
-
-    src_title = _eval_norm(src.get("title") or src.get("db_title"))
-    res_title = _eval_norm(result.get("title"))
-    if not src_title or not res_title:
-        return False
-    return len(src_title) >= 16 and (src_title in res_title or res_title in src_title)
-
-
-def _check_sources(results: list[dict], sources: list[dict], top_k: int) -> list[dict]:
-    checked = []
-    for src in sources:
-        rank = next((i + 1 for i, r in enumerate(results) if _eval_source_matches_result(src, r)), None)
-        checked.append({
-            **src,
-            "found_in_top": rank is not None and rank <= top_k,
-            "rank": rank,
-        })
-    return checked
-
-
-def _eval_worker(cases: list[dict], session_id: str):
-    import asyncio as _asyncio
-
-    loop = _asyncio.new_event_loop()
-    _asyncio.set_event_loop(loop)
-
-    total = len(cases)
-    hit5 = hit10 = bad5 = missed = with_expected = 0
-
-    try:
-        for i, case in enumerate(cases):
-            with _eval_lock:
-                if not _eval_state["running"]:
-                    break
-
-            question = (case.get("question") or "").strip()
-            case_id = case.get("id", f"case_{i}")
-            expected = case.get("expected_sources") or []
-            bad = case.get("bad_sources") or []
-            is_gold = case.get("is_gold", False)
-
-            entry: dict = {
-                "index": i + 1,
-                "total": total,
-                "case_id": case_id,
-                "is_gold": is_gold,
-                "question": question[:200],
-                "status": "running",
-                "hit5": None,
-                "hit10": None,
-                "bad5": None,
-                "expected_checked": [],
-                "bad_checked": [],
-                "top5": [],
-                "error": None,
-            }
-            with _eval_lock:
-                _eval_state["logs"].append(entry)
-
-            try:
-                results = loop.run_until_complete(_eval_retrieve(question, top_n=20))
-
-                exp_checked = _check_sources(results, expected, 5) if expected else []
-                exp_checked10 = _check_sources(results, expected, 10) if expected else []
-                bad_checked = _check_sources(results, bad, 5) if bad else []
-
-                any_hit5 = any(s["found_in_top"] for s in exp_checked) if expected else None
-                any_hit10 = any(s["found_in_top"] for s in exp_checked10) if expected else None
-                any_bad5 = any(s["found_in_top"] for s in bad_checked) if bad else None
-
-                if expected:
-                    with_expected += 1
-                    if any_hit5:
-                        hit5 += 1
-                    if any_hit10:
-                        hit10 += 1
-                    else:
-                        missed += 1
-                if bad and any_bad5:
-                    bad5 += 1
-
-                entry.update({
-                    "status": "done",
-                    "hit5": any_hit5,
-                    "hit10": any_hit10,
-                    "bad5": any_bad5,
-                    "expected_checked": exp_checked,
-                    "bad_checked": bad_checked,
-                    "top5": results[:5],
-                })
-            except Exception as exc:
-                entry.update({"status": "error", "error": str(exc)})
-
-        report = {
-            "total": total,
-            "with_expected": with_expected,
-            "hit5": hit5,
-            "hit10": hit10,
-            "missed": missed,
-            "bad5_cases": bad5,
-            "hit5_rate": round(hit5 / with_expected, 3) if with_expected else None,
-            "hit10_rate": round(hit10 / with_expected, 3) if with_expected else None,
-            "bad5_rate": round(bad5 / total, 3) if total else None,
-            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        with _eval_lock:
-            _eval_state["running"] = False
-            _eval_state["report"] = report
-
-    except Exception as exc:
-        with _eval_lock:
-            _eval_state["running"] = False
-            _eval_state["error"] = str(exc)
-    finally:
-        loop.close()
-
-
-@app.post("/admin/eval/run")
-async def eval_run(body: EvalRunBody):
-    with _eval_lock:
-        if _eval_state["running"]:
-            raise HTTPException(409, "Eval runner is already running")
-        if not body.cases:
-            raise HTTPException(400, "No cases provided")
-        sid = str(uuid.uuid4())[:8]
-        _eval_state.update({
-            "running": True,
-            "session_id": sid,
-            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "logs": [],
-            "report": None,
-            "error": None,
-        })
-
-    t = threading.Thread(target=_eval_worker, args=(body.cases, sid), daemon=True)
-    t.start()
-    return {"ok": True, "session_id": sid, "total": len(body.cases)}
-
-
-@app.post("/admin/eval/stop")
-async def eval_stop():
-    with _eval_lock:
-        _eval_state["running"] = False
-    return {"ok": True}
-
-
-@app.get("/admin/eval/status")
-async def eval_status():
-    with _eval_lock:
-        return dict(_eval_state)
-
-
-@app.get("/admin/eval/check_ids")
-async def eval_check_ids(ids: str = ""):
-    """Check which law_ids exist in any V2 Qdrant collection."""
-    from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient
-    from qdrant_client import models as _qmodels
-
-    id_list = [i.strip() for i in ids.split(",") if i.strip()][:20]
-    if not id_list:
-        return {}
-
-    client = _qclient()
-    results: dict[str, dict] = {}
-
-    def _check_one(law_id: str) -> dict:
-        for col in ALL_V2_COLLECTIONS:
-            try:
-                pts, _ = client.scroll(
-                    collection_name=col,
-                    scroll_filter=_qmodels.Filter(
-                        must=[_qmodels.FieldCondition(
-                            key="law_id",
-                            match=_qmodels.MatchValue(value=law_id),
-                        )]
-                    ),
-                    limit=1,
-                    with_payload=["title", "law_id"],
-                    with_vectors=False,
-                )
-                if pts:
-                    title = pts[0].payload.get("title") if pts[0].payload else None
-                    return {"found": True, "collection": col, "title": title}
-            except Exception:
-                continue
-        return {"found": False, "collection": None, "title": None}
-
-    import asyncio as _asyncio
-    for law_id in id_list:
-        results[law_id] = await _asyncio.to_thread(_check_one, law_id)
-
-    return results
-
-
-@app.post("/admin/eval/find_sources")
-async def eval_find_sources(body: dict):
-    """
-    For each source hint {law_id?, title?}: find the real document in Qdrant.
-    Tries law_id exact match first, then vector search by title.
-    Returns one result per input item (same order). Runs SEQUENTIALLY to avoid overwhelming Qdrant.
-    """
-    from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient, search_qdrant
-    from qdrant_client import models as _qmodels
-    import embed_v2 as _embed_v2
-    import asyncio as _asyncio
-
-    sources = (body.get("sources") or [])[:12]
-    if not sources:
-        return []
-
-    client = _qclient()
-    empty = {"found": False, "db_law_id": None, "db_title": None, "db_collection": None, "match_type": None}
-
-    def _scroll_by_id(law_id: str) -> dict | None:
-        """Synchronous scroll across all collections. Runs in a thread."""
-        for col in ALL_V2_COLLECTIONS:
-            try:
-                pts, _ = client.scroll(
-                    collection_name=col,
-                    scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
-                        key="law_id", match=_qmodels.MatchValue(value=law_id)
-                    )]),
-                    limit=1, with_payload=["source", "law_id"], with_vectors=False,
-                )
-                if pts:
-                    p = pts[0].payload or {}
-                    return {"found": True,
-                            "db_law_id": p.get("law_id", law_id),
-                            "db_title": p.get("source"),  # title stored as "source" in payload
-                            "db_collection": col, "match_type": "law_id"}
-            except Exception:
-                continue
-        return None
-
-    def _search_by_title(vec: list, threshold: float = 0.45) -> dict | None:
-        """Synchronous vector search across all collections. Runs in a thread.
-        search_qdrant returns {out_metadata: {...}, _collection: str, similarity: float}
-        """
-        try:
-            hits = search_qdrant(vec, 3, ALL_V2_COLLECTIONS, threshold)
-            if hits:
-                h = hits[0]
-                meta = h.get("out_metadata") or {}
-                return {"found": True,
-                        "db_law_id": meta.get("law_id"),
-                        "db_title": meta.get("source"),  # title stored as "source" in payload
-                        "db_collection": h.get("_collection"),
-                        "match_type": "title",
-                        "score": round(float(h.get("similarity", 0)), 3)}
-        except Exception:
-            pass
-        return None
-
-    results = []
-    for hint in sources:
-        law_id = (hint.get("law_id") or "").strip()
-        title = (hint.get("title") or "").strip()
-
-        # 1. Try exact law_id match
-        if law_id:
-            try:
-                res = await _asyncio.to_thread(_scroll_by_id, law_id)
-                if res:
-                    results.append(res)
-                    continue
-            except Exception:
-                pass
-
-        # 2. Vector search by title
-        if title:
-            try:
-                vec = await _asyncio.to_thread(_embed_v2.embed_query, title[:300])
-                res = await _asyncio.to_thread(_search_by_title, vec)
-                if res:
-                    results.append(res)
-                    continue
-            except Exception:
-                pass
-
-        results.append(dict(empty))
-
-    return results
-
-
-@app.get("/admin/eval/debug_scroll")
-async def eval_debug_scroll(law_id: str):
-    """Debug: shows which V2 collections contain a given law_id (exact match)."""
-    import asyncio as _asyncio
-    try:
-        from qdrant_storage import ALL_V2_COLLECTIONS, get_client as _qclient
-        from qdrant_client import models as _qmodels
-
-        client = _qclient()
-
-        def _check():
-            found_in = []
-            errors = []
-            for col in ALL_V2_COLLECTIONS:
-                try:
-                    pts, _ = client.scroll(
-                        collection_name=col,
-                        scroll_filter=_qmodels.Filter(must=[_qmodels.FieldCondition(
-                            key="law_id", match=_qmodels.MatchValue(value=law_id)
-                        )]),
-                        limit=3, with_payload=["source", "law_id"], with_vectors=False,
-                    )
-                    if pts:
-                        p = pts[0].payload or {}
-                        found_in.append({
-                            "collection": col,
-                            "db_law_id": p.get("law_id"),
-                            "db_title": p.get("source"),
-                            "chunks_found": len(pts),
-                        })
-                except Exception as e:
-                    errors.append(f"{col}: {type(e).__name__}: {e}")
-            return {
-                "searched_for": law_id,
-                "found": len(found_in) > 0,
-                "found_in": found_in,
-                "collections_checked": len(ALL_V2_COLLECTIONS),
-                "errors": errors,
-            }
-
-        return await _asyncio.to_thread(_check)
-    except Exception as e:
-        return {"searched_for": law_id, "found": False, "error": f"{type(e).__name__}: {e}"}
+register_eval_routes(app, _ask_pipeline, logger)
 
 
 @app.post("/ask")
@@ -6209,88 +5743,6 @@ async def ask_simple(body: AskRequest):
     return {"answer": "Endpoint видалено після A/B тесту.", "references": [], "templates": [], "_meta": {}}
 
 
-@app.post("/generate-name")
-async def generate_name(body: GenerateNameRequest):
-    """Генерує назву та категорію чату через Vertex AI."""
-    import asyncio as _asyncio
-    from vertexai.generative_models import GenerativeModel, GenerationConfig
-    import vertexai, json as _json
-
-    creds    = settings_cache.get_credentials()
-    project  = settings_cache.get_vertex_project()
-    location = settings_cache.get_vertex_location()
-    model_name = settings_cache.get("ai_model")
-    vertexai.init(project=project, location=location, credentials=creds)
-
-    prompt = (
-        "Ти — юридичний асистент. Проаналізуй запит користувача та відповідь AI.\n\n"
-        "Поверни СТРОГО JSON без жодного іншого тексту:\n"
-        '{"title":"назва до 5 слів без лапок","category":"категорія права"}\n\n'
-        "Категорії: Трудове, Кримінальне, Цивільне, ФОП/Бізнес, Сімейне, Нерухомість, Мобілізація, Захист прав, Інше\n\n"
-        f"Запит: {body.question[:500]}\nВідповідь: {body.answer[:500]}"
-    )
-
-    try:
-        model = GenerativeModel(model_name)
-        response = await _asyncio.to_thread(
-            model.generate_content,
-            prompt,
-            generation_config=GenerationConfig(temperature=0.3, max_output_tokens=60),
-        )
-        raw = response.text.replace("```json", "").replace("```", "").strip()
-        parsed = _json.loads(raw)
-        return {
-            "title":    (parsed.get("title", "") or "")[:80],
-            "category": (parsed.get("category", "") or "")[:50],
-        }
-    except Exception as e:
-        raise HTTPException(500, f"generate-name error: {e}")
-
-
-@app.post("/generate-user-prompt")
-async def generate_user_prompt(body: GenerateUserPromptRequest):
-    """Генерує персональний AI-промпт на основі профілю юзера з онбордингу."""
-    import asyncio as _asyncio
-    from vertexai.generative_models import GenerativeModel, GenerationConfig
-
-    role_label = body.role or "не вказано"
-    sub_role_label = ", ".join(body.sub_role) if body.sub_role else "не вказано"
-    segment_label = ", ".join(body.segment) if body.segment else "не вказано"
-
-    meta_prompt = (
-        "Ти — система персоналізації AI-юриста. Згенеруй детальний персональний профіль "
-        "для AI-асистента на основі даних користувача.\n\n"
-        "Профіль повинен містити 5–7 речень і чітко описувати:\n"
-        "1. Хто цей користувач, яка його роль і чим він займається у правовій сфері\n"
-        "2. Який рівень юридичних знань у нього — чи можна вживати складну термінологію\n"
-        "3. Які конкретні галузі права найбільш актуальні для нього\n"
-        "4. Як саме треба подавати відповіді: стиль, деталізація, акценти\n"
-        "5. Які практичні аспекти найважливіші (документи, ризики, строки тощо)\n\n"
-        f"Дані користувача:\n"
-        f"- Роль: {role_label}\n"
-        f"- Спеціалізація: {sub_role_label}\n"
-        f"- Сфери інтересів: {segment_label}\n\n"
-        "Поверни ТІЛЬКИ текст профілю — суцільний параграф без заголовків, без JSON, без переліків. "
-        "Обсяг: рівно 80–100 слів українською. Завжди завершуй думку повним реченням."
-    )
-
-    model_name = settings_cache.get("ai_model") or "gemini-2.5-flash"
-    try:
-        if not _vertex_initialized:
-            _init_vertex_ai()
-        model = GenerativeModel(model_name)
-        response = await _asyncio.to_thread(
-            model.generate_content,
-            meta_prompt,
-            generation_config=GenerationConfig(temperature=0.5, max_output_tokens=4096),
-        )
-        text = (response.text or "").strip()
-        return {"prompt": text}
-    except Exception as e:
-        raise HTTPException(500, f"generate-user-prompt error: {e}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # Enrich OpenData metadata (Rada + KMU)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -6629,437 +6081,28 @@ def _do_pipeline(session_id: str) -> None:
             _sync[src]["pause_requested"] = False
 
 
-@app.post("/admin/pipeline/trigger")
-async def pipeline_trigger():
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync("pipeline", _do_pipeline, session_id)
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id}
-
-
-@app.post("/admin/pipeline/stop")
-async def pipeline_stop_route():
-    with _lock:
-        if not _sync["pipeline"]["running"]:
-            raise HTTPException(400, "Пайплайн не виконується")
-        _pipeline_stop.set()
-        # Signal all sub-process stop events.
-        for _evt in _v2_scrape_stop.values():
-            _evt.set()
-        _enrich_stop.set()
-        _text_cancel_stop.set()
-        _apply_text_cancel_stop.set()
-        _qdrant_meta_stop.set()
-        _sync["pipeline"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.get("/admin/pipeline/status")
-async def pipeline_status():
-    with _lock:
-        running   = _sync["pipeline"]["running"]
-        pause_req = _sync["pipeline"]["pause_requested"]
-        logs      = list(_sync["pipeline"]["live_logs"])
-    last_run = None
-    if _PIPELINE_LAST_RUN_FILE.exists():
-        try:
-            last_run = json.loads(_PIPELINE_LAST_RUN_FILE.read_text("utf-8")).get("ts")
-        except Exception:
-            pass
-    return {
-        "running":         running,
-        "pause_requested": pause_req,
-        "live_logs":       logs,
-        "last_run":        last_run,
-        "step_names":      _PIPELINE_STEP_NAMES,
-    }
-
-
-@app.post("/admin/enrich/start")
-async def enrich_start(body: dict = Body(default={})):
-    sources = body.get("sources") or ["rada", "kmu"]
-    force   = bool(body.get("force", False))
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync("enrich_opendata", _do_enrich_opendata, session_id,
-                    sources=sources, force=force)
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id}
-
-
-@app.post("/admin/enrich/stop")
-async def enrich_stop_route():
-    with _lock:
-        if not _sync["enrich_opendata"]["running"]:
-            raise HTTPException(400, "Збагачення не виконується")
-        _enrich_stop.set()
-        _sync["enrich_opendata"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.post("/admin/enrich/text/start")
-async def enrich_text_start(body: dict = Body(default={})):
-    sources = body.get("sources") or ["rada", "kmu"]
-    dry_run = bool(body.get("dry_run", True))
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync(
-            "extract_text_cancellations",
-            _do_extract_text_cancellations,
-            session_id,
-            sources=sources,
-            dry_run=dry_run,
-        )
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id, "dry_run": dry_run}
-
-
-@app.post("/admin/enrich/text/stop")
-async def enrich_text_stop():
-    with _lock:
-        if not _sync["extract_text_cancellations"]["running"]:
-            raise HTTPException(400, "Text cancellation extraction is not running")
-        _text_cancel_stop.set()
-        _sync["extract_text_cancellations"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.post("/admin/enrich/text/check-missing/start")
-async def enrich_text_check_missing_start(body: dict = Body(default={})):
-    limit_raw = body.get("limit")
-    limit = int(limit_raw) if limit_raw else None
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync(
-            "check_text_missing",
-            _do_check_text_missing,
-            session_id,
-            limit=limit,
-        )
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id, "limit": limit}
-
-
-@app.post("/admin/enrich/text/check-missing/stop")
-async def enrich_text_check_missing_stop():
-    with _lock:
-        if not _sync["check_text_missing"]["running"]:
-            raise HTTPException(400, "Missing OpenData check is not running")
-        _text_missing_check_stop.set()
-        _sync["check_text_missing"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.post("/admin/enrich/text/scrape-found/start")
-async def enrich_text_scrape_found_start(body: dict = Body(default={})):
-    limit_raw = body.get("limit")
-    limit = int(limit_raw) if limit_raw else None
-    force = bool(body.get("force", False))
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync(
-            "scrape_text_missing_found",
-            _do_scrape_text_missing_found,
-            session_id,
-            limit=limit,
-            force=force,
-        )
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id, "limit": limit, "force": force}
-
-
-@app.post("/admin/enrich/text/scrape-found/stop")
-async def enrich_text_scrape_found_stop():
-    with _lock:
-        if not _sync["scrape_text_missing_found"]["running"]:
-            raise HTTPException(400, "Scrape found missing is not running")
-        _text_missing_scrape_stop.set()
-        _sync["scrape_text_missing_found"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.post("/admin/enrich/text/apply-cache/start")
-async def enrich_text_apply_cache_start(body: dict = Body(default={})):
-    sources = body.get("sources") or ["rada", "kmu"]
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync(
-            "apply_text_cancellations",
-            _do_apply_text_cancellations,
-            session_id,
-            sources=sources,
-        )
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id}
-
-
-@app.post("/admin/enrich/text/apply-cache/stop")
-async def enrich_text_apply_cache_stop():
-    with _lock:
-        if not _sync["apply_text_cancellations"]["running"]:
-            raise HTTPException(400, "Apply text cache is not running")
-        _apply_text_cancel_stop.set()
-        _sync["apply_text_cancellations"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.get("/admin/enrich/text/report")
-async def enrich_text_report(
-    kind: str = "missing",
-    status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-):
-    allowed = {
-        "missing": "text_cancellations_missing_report.json",
-        "partial": "text_cancellations_partial_report.json",
-        "opendata": "text_cancellations_missing_opendata_report.json",
-    }
-    if kind not in allowed:
-        raise HTTPException(400, f"kind must be one of {list(allowed)}")
-    path = Path(__file__).parent / allowed[kind]
-    if not path.exists():
-        return {"kind": kind, "items": [], "total": 0, "summary": {}, "exists": False}
-    try:
-        report = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        raise HTTPException(500, f"Cannot read report: {e}")
-
-    records = report.get("records")
-    if records is None:
-        records = report.get("results") or report.get("scrape_candidates") or []
-    from urllib.parse import unquote
-
-    def decode_report_item(item):
-        if not isinstance(item, dict):
-            return item
-        out = dict(item)
-        for key in ("cancelled_nreg", "raw_cancelled_nreg", "nreg", "by"):
-            if isinstance(out.get(key), str):
-                out[key] = unquote(out[key])
-        return out
-
-    records = [decode_report_item(item) for item in records]
-    if status:
-        records = [item for item in records if isinstance(item, dict) and item.get("status") == status]
-    total = len(records)
-    summary = {
-        "generated_at": report.get("generated_at"),
-        "kind": report.get("kind", kind),
-        "total_records": report.get("total_records", total),
-        "unique_nregs": report.get("unique_nregs"),
-        "stats": report.get("stats", {}),
-        "found_count": report.get("found_count"),
-        "top": report.get("top", [])[:20],
-    }
-    return {
-        "kind": kind,
-        "exists": True,
-        "summary": summary,
-        "items": records[offset: offset + limit],
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-    }
-
-
-@app.get("/admin/enrich/status")
-async def enrich_status():
-    with _lock:
-        s = dict(_sync["enrich_opendata"])
-        logs = list(s.get("live_logs", []))
-        qdm = dict(_sync["update_qdrant_meta"])
-        qdm_logs = list(qdm.get("live_logs", []))
-        text_cancel = dict(_sync["extract_text_cancellations"])
-        text_cancel_logs = list(text_cancel.get("live_logs", []))
-        text_missing = dict(_sync["check_text_missing"])
-        text_missing_logs = list(text_missing.get("live_logs", []))
-        text_scrape = dict(_sync["scrape_text_missing_found"])
-        text_scrape_logs = list(text_scrape.get("live_logs", []))
-        text_apply = dict(_sync["apply_text_cancellations"])
-        text_apply_logs = list(text_apply.get("live_logs", []))
-
-    state_file = Path(__file__).parent / "enrich_opendata_state.json"
-    state = {}
-    if state_file.exists():
-        try:
-            state = json.loads(state_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    qdrant_state_file = Path(__file__).parent / "update_qdrant_meta_state.json"
-    qdrant_state = {}
-    if qdrant_state_file.exists():
-        try:
-            qdrant_state = json.loads(qdrant_state_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    text_state_file = Path(__file__).parent / "text_cancellations_state.json"
-    text_state = {}
-    if text_state_file.exists():
-        try:
-            text_state = json.loads(text_state_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    text_missing_state_file = Path(__file__).parent / "text_cancellations_missing_opendata_state.json"
-    text_missing_state = {}
-    if text_missing_state_file.exists():
-        try:
-            text_missing_state = json.loads(text_missing_state_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    text_scrape_state_file = Path(__file__).parent / "text_cancellations_scrape_found_state.json"
-    text_scrape_state = {}
-    if text_scrape_state_file.exists():
-        try:
-            text_scrape_state = json.loads(text_scrape_state_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    return {
-        "enrich": {
-            "running":         s.get("running", False),
-            "pause_requested": s.get("pause_requested", False),
-            "live_logs":       logs,
-            "state":           state,
-        },
-        "qdrant_meta": {
-            "running":         qdm.get("running", False),
-            "pause_requested": qdm.get("pause_requested", False),
-            "live_logs":       qdm_logs,
-            "state":           qdrant_state,
-        },
-        "text_cancellations": {
-            "running":         text_cancel.get("running", False),
-            "pause_requested": text_cancel.get("pause_requested", False),
-            "live_logs":       text_cancel_logs,
-            "state":           text_state,
-        },
-        "text_missing_check": {
-            "running":         text_missing.get("running", False),
-            "pause_requested": text_missing.get("pause_requested", False),
-            "live_logs":       text_missing_logs,
-            "state":           text_missing_state,
-        },
-        "text_missing_scrape": {
-            "running":         text_scrape.get("running", False),
-            "pause_requested": text_scrape.get("pause_requested", False),
-            "live_logs":       text_scrape_logs,
-            "state":           text_scrape_state,
-        },
-        "text_apply_cache": {
-            "running":         text_apply.get("running", False),
-            "pause_requested": text_apply.get("pause_requested", False),
-            "live_logs":       text_apply_logs,
-            "state":           {},
-        },
-    }
-
-
-@app.post("/admin/enrich/qdrant/apply")
-async def enrich_qdrant_apply(body: dict = Body(default={})):
-    sources = body.get("sources") or ["rada", "kmu"]
-    session_id = str(uuid.uuid4())
-    try:
-        _start_sync("update_qdrant_meta", _do_update_qdrant_meta, session_id,
-                    sources=sources)
-    except ValueError as e:
-        raise HTTPException(409, str(e))
-    return {"ok": True, "session_id": session_id}
-
-
-@app.post("/admin/enrich/qdrant/stop")
-async def enrich_qdrant_stop():
-    with _lock:
-        if not _sync["update_qdrant_meta"]["running"]:
-            raise HTTPException(400, "Патч Qdrant не виконується")
-        _qdrant_meta_stop.set()
-        _sync["update_qdrant_meta"]["pause_requested"] = True
-    return {"ok": True}
-
-
-@app.get("/admin/meta/list")
-async def meta_list(
-    source: str = "rada",
-    dead: str | None = None,
-    doc_type: str | None = None,
-    theme: str | None = None,
-    q: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-):
-    """Повертає список збагачених meta.json для перегляду в адмін панелі."""
-    raw_base = Path("/root/laws_raw") / source
-    if not raw_base.exists():
-        return {"items": [], "total": 0, "source": source}
-
-    items = []
-    for meta_path in sorted(raw_base.glob("*.meta.json")):
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-
-        if "rada_enriched_at" not in meta:
-            continue
-
-        # Filters
-        if dead == "true" and not meta.get("rada_is_dead"):
-            continue
-        if dead == "false" and meta.get("rada_is_dead"):
-            continue
-        if doc_type and meta.get("rada_doc_type") != doc_type:
-            continue
-        if theme and theme not in (meta.get("rada_theme") or ""):
-            continue
-        if q:
-            q_lower = q.lower()
-            title = (meta.get("rada_title") or "").lower()
-            nreg  = (meta.get("rada_nreg")  or "").lower()
-            if q_lower not in title and q_lower not in nreg:
-                continue
-
-        items.append({
-            "nreg":          meta.get("rada_nreg", meta_path.name.replace(".meta.json", "")),
-            "title":         meta.get("rada_title", ""),
-            "doc_type":      meta.get("rada_doc_type", ""),
-            "status":        meta.get("rada_status", 0),
-            "status_name":   meta.get("rada_status_name", ""),
-            "is_dead":       meta.get("rada_is_dead", False),
-            "dead_by_status":meta.get("rada_is_dead_by_status", False),
-            "dead_by_link":  meta.get("rada_is_dead_by_link", False),
-            "dead_by_text":  meta.get("rada_is_dead_by_text", False),
-            "no_text":       meta.get("rada_no_text", False),
-            "adopted_date":  meta.get("rada_adopted_date", ""),
-            "last_edition":  meta.get("rada_last_edition", ""),
-            "dead_since":    meta.get("rada_dead_since", ""),
-            "replaced_by":   meta.get("rada_replaced_by", []),
-            "cancelled_by":  meta.get("rada_cancelled_by", []),
-            "cancelled_by_text": meta.get("rada_cancelled_by_text", []),
-            "theme":         meta.get("rada_theme", ""),
-            "classifiers":   meta.get("rada_classifiers", []),
-            "org":           meta.get("rada_org", ""),
-            "editions_cnt":  meta.get("rada_editions_cnt", 0),
-            "url":           meta.get("rada_url", ""),
-            "enriched_at":   meta.get("rada_enriched_at", ""),
-        })
-
-    total = len(items)
-    return {
-        "items":  items[offset: offset + limit],
-        "total":  total,
-        "source": source,
-    }
+register_admin_operation_routes(app, {
+    "_start_sync": _start_sync,
+    "_do_pipeline": _do_pipeline,
+    "_do_enrich_opendata": _do_enrich_opendata,
+    "_do_extract_text_cancellations": _do_extract_text_cancellations,
+    "_do_check_text_missing": _do_check_text_missing,
+    "_do_scrape_text_missing_found": _do_scrape_text_missing_found,
+    "_do_apply_text_cancellations": _do_apply_text_cancellations,
+    "_do_update_qdrant_meta": _do_update_qdrant_meta,
+    "_lock": _lock,
+    "_sync": _sync,
+    "_pipeline_stop": _pipeline_stop,
+    "_v2_scrape_stop": _v2_scrape_stop,
+    "_enrich_stop": _enrich_stop,
+    "_text_cancel_stop": _text_cancel_stop,
+    "_text_missing_check_stop": _text_missing_check_stop,
+    "_text_missing_scrape_stop": _text_missing_scrape_stop,
+    "_apply_text_cancel_stop": _apply_text_cancel_stop,
+    "_qdrant_meta_stop": _qdrant_meta_stop,
+    "_PIPELINE_LAST_RUN_FILE": _PIPELINE_LAST_RUN_FILE,
+    "_PIPELINE_STEP_NAMES": _PIPELINE_STEP_NAMES,
+})
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

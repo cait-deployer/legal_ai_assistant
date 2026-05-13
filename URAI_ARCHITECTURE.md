@@ -2,7 +2,7 @@
 
 > Updated: May 2026. Source of truth: `app/chat/page.tsx`,
 > `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`,
-> `backend/qdrant_storage.py`.
+> `backend/retrieval_helpers.py`, `backend/qdrant_storage.py`.
 
 This document describes the current production architecture, not the old V1
 prototype.
@@ -13,8 +13,29 @@ prototype.
 | --- | --- | --- |
 | Frontend | Next.js App Router, React | Chat UI, admin panel, settings, auth UX, SSE display |
 | API routes | Next.js Route Handlers | Supabase auth, plan gating, source gating, backend proxy |
-| Backend | FastAPI Python | Retrieval, query planning, Qdrant, Gemini, sync/reindex/admin endpoints |
+| Backend | FastAPI Python | Retrieval, query planning, Qdrant, Gemini, sync/reindex/admin routes |
 | Storage | Supabase + Qdrant | Users/chats/messages/analytics/settings + vector knowledge base |
+
+## Backend Module Layout
+
+`backend/server.py` remains the FastAPI application entrypoint and keeps the
+main chat orchestration in `_ask_pipeline()`. The file also still owns the
+long-running sync/reindex worker functions and shared in-memory operational
+state.
+
+Supporting modules now hold code that used to live directly in `server.py`:
+
+| File | Responsibility |
+| --- | --- |
+| `backend/schemas.py` | Pydantic request bodies shared by FastAPI routes. |
+| `backend/retrieval_helpers.py` | Query planner normalization, retrieval scoring, answerability helpers, citation filtering and answer-completion helpers used by `_ask_pipeline()`, `/ask` and `/ask_stream`. |
+| `backend/generation_routes.py` | Utility LLM routes: `/summarize_history`, `/generate-name`, `/generate-user-prompt`. |
+| `backend/eval_routes.py` | Admin retrieval eval runner routes under `/admin/eval/*`. It calls `_ask_pipeline()` for production-like retrieval evaluation. |
+| `backend/admin_operation_routes.py` | Admin operation HTTP routes for pipeline, enrichment, text-cancellation, Qdrant metadata patching and `/admin/meta/list`. Worker functions remain in `server.py`. |
+
+When changing production chat behavior, start with `_ask_pipeline()` in
+`server.py` and helper functions in `retrieval_helpers.py`. When changing
+admin HTTP wiring, check the route-registration modules first.
 
 ## Current Chat Flow
 

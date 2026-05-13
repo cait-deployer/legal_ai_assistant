@@ -1,6 +1,7 @@
 # URAI RAG Query Planner
 
-> Updated: May 2026. Source of truth: `backend/server.py`.
+> Updated: May 2026. Source of truth: `backend/server.py`,
+> `backend/retrieval_helpers.py`.
 
 ## Purpose
 
@@ -17,7 +18,7 @@ look for direct evidence deliberately. This is especially important for:
 
 ## Runtime Position
 
-The planner runs inside `_ask_pipeline()` after:
+The planner runs inside `backend/server.py::_ask_pipeline()` after:
 
 1. question validation;
 2. optional Russian-to-Ukrainian search translation;
@@ -63,7 +64,8 @@ Normalized planner shape:
 }
 ```
 
-All fields are sanitized by `_normalize_query_plan()`:
+All fields are sanitized by `_normalize_query_plan()` in
+`backend/retrieval_helpers.py`:
 
 - strings are trimmed and whitespace-normalized;
 - lists are deduplicated;

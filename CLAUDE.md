@@ -8,7 +8,7 @@
 URAI is a Ukrainian-law legal assistant:
 
 - Frontend: Next.js App Router in `app/`.
-- Backend: FastAPI in `backend/server.py`.
+- Backend: FastAPI in `backend/server.py`, with extracted route/helper modules.
 - Storage: Supabase and Qdrant.
 - Retrieval: V2 Qdrant collections, `gemini-embedding-001`, 3072 dimensions.
 - Generation: Gemini/Vertex AI, model selected from Supabase `app_settings`.
@@ -16,7 +16,9 @@ URAI is a Ukrainian-law legal assistant:
 ## Always Remember
 
 - The production chat uses V2 collections, not the old V1 collections.
-- `backend/server.py` is the main retrieval and generation pipeline.
+- `backend/server.py` is the FastAPI entrypoint and owns `_ask_pipeline()`.
+- `backend/retrieval_helpers.py` contains many pipeline helper functions that
+  used to live in `server.py`.
 - `backend/qdrant_storage.py` defines current V2 collection names.
 - `context_summary` exists but the chat page currently sends `null` to ask
   generation.
@@ -41,7 +43,13 @@ URAI is a Ukrainian-law legal assistant:
 - `app/chat/page.tsx` - chat UI and SSE stream handling.
 - `app/api/ask/stream/route.ts` - streaming proxy and plan/source gating.
 - `app/api/ask/route.ts` - non-streaming ask proxy.
-- `backend/server.py` - RAG pipeline and admin endpoints.
+- `backend/server.py` - FastAPI app, `_ask_pipeline()`, chat endpoints and
+  long-running worker functions.
+- `backend/retrieval_helpers.py` - query planner, scoring, context/citation and
+  answer-completion helpers.
+- `backend/schemas.py` - Pydantic route models.
+- `backend/generation_routes.py`, `backend/eval_routes.py`,
+  `backend/admin_operation_routes.py` - extracted FastAPI route groups.
 - `backend/qdrant_storage.py` - Qdrant collection/search helpers.
 - `backend/reindex_v2.py` - V2 reindex.
 - `backend/scrape_all_v2.py`, `backend/scrape_mod_v2.py`,
@@ -54,7 +62,7 @@ URAI is a Ukrainian-law legal assistant:
 For backend-only changes:
 
 ```powershell
-python -m py_compile backend\server.py
+python -m py_compile backend\server.py backend\retrieval_helpers.py backend\schemas.py backend\generation_routes.py backend\eval_routes.py backend\admin_operation_routes.py
 git diff --check
 ```
 

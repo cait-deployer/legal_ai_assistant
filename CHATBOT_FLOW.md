@@ -1,7 +1,8 @@
 # URAI Chatbot Flow
 
 > Updated: May 2026. Source of truth: `app/chat/page.tsx`,
-> `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`.
+> `app/api/ask/stream/route.ts`, `app/api/ask/route.ts`, `backend/server.py`,
+> `backend/retrieval_helpers.py`.
 
 ## Runtime Flow
 
@@ -63,7 +64,11 @@ flowchart TD
 
 ## Backend Retrieval
 
-`backend/server.py::_ask_pipeline()`:
+`backend/server.py::_ask_pipeline()` orchestrates chat retrieval and generation.
+Most pure helper functions used by the pipeline now live in
+`backend/retrieval_helpers.py`.
+
+The pipeline:
 
 1. Validate question.
 2. Initialize Vertex AI if needed.

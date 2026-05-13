@@ -659,6 +659,142 @@ def _merge_query_plans(base: dict, extra: dict, question: str) -> dict:
     return merged
 
 
+def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
+    """Small retrieval policy layer: roles, collection hints and fallback budgets."""
+    text = " ".join([
+        question or "",
+        " ".join((plan or {}).get("legal_terms") or []),
+        " ".join((plan or {}).get("aspects") or []),
+        " ".join((plan or {}).get("title_queries") or []),
+        " ".join((plan or {}).get("source_preferences") or []),
+    ]).lower()
+
+    tax_markers = (
+        "фоп", "єсв", "єдиний внесок", "єдиного внеску", "єдиний подат", "єдиного податку",
+        "податк", "пдв", "дпс", "зір", "спрощен", "3 груп", "третьої груп",
+    )
+    value_markers = (
+        "скільки", "розмір", "сума", "ставка", "відсот", "процент", "ліміт", "обмежен",
+        "мінімаль", "максималь", "платити", "сплачувати", "сплата", "термін", "строк",
+        "2024", "2025", "2026", "зараз", "наразі", "поточн",
+    )
+    court_markers = (
+        "суд", "судова практик", "верховн", "верховний суд", "постанова вс", " вс ", "касаційн", "позиці", "правова позиці",
+        "оскарж", "постанова суд", "рішення суд",
+    )
+    official_markers = (
+        "міністер", "мінобор", "дпс", "орган", "роз'яснен", "розяснен", "лист", "позиція орган",
+        "порядок", "процедур", "як оформ", "як подати", "як отримати",
+    )
+    explanation_markers = (
+        "простими словами", "поясни", "що означ", "що таке", "різниця", "порівняй",
+        "переваги", "недоліки",
+    )
+
+    is_tax = _has_any_marker(text, tax_markers)
+    needs_exact_value = _has_any_marker(text, value_markers)
+    is_court = _has_any_marker(text, court_markers)
+    is_official = _has_any_marker(text, official_markers)
+    wants_explanation = _has_any_marker(text, explanation_markers)
+
+    collections: list[str] = []
+    prefs: list[str] = []
+    intent = "general_norm"
+    keyword_limit = 12
+    title_limit = 16
+    max_aspects = 5
+    carry_history_evidence = True
+
+    if is_court:
+        intent = "court_position"
+        collections.extend(["laws_supreme_v2", "laws_positions_v2", "laws_ccu_v2", "rada_court_v2"])
+        prefs.extend(["court", "rada"])
+        keyword_limit = 10
+        title_limit = 12
+    elif is_tax:
+        intent = "tax_or_business"
+        collections.extend([
+            "rada_finance_v2", "rada_labor_v2", "laws_zir_v2", "laws_kmu_v2",
+            "laws_mod_v2", "laws_wiki_v2",
+        ])
+        prefs.extend(["rada", "zir", "kmu", "mod", "wiki"])
+        keyword_limit = 10
+        title_limit = 12
+    elif is_official:
+        intent = "official_procedure"
+        collections.extend(["laws_kmu_v2", "laws_mod_v2", "rada_admin_v2", "rada_state_v2", "laws_wiki_v2"])
+        prefs.extend(["kmu", "mod", "rada", "wiki"])
+    elif wants_explanation:
+        intent = "explanation"
+        collections.extend(["laws_wiki_v2", "laws_zir_v2", "laws_kmu_v2"])
+        prefs.extend(["wiki", "zir", "kmu", "rada"])
+
+    if needs_exact_value:
+        intent = f"{intent}_exact_value"
+        max_aspects = 2
+        keyword_limit = min(keyword_limit, 8)
+        title_limit = min(title_limit, 8)
+        carry_history_evidence = False
+
+    return {
+        "intent": intent,
+        "needs_exact_value": needs_exact_value,
+        "target_collections": _clean_plan_collections(collections, limit=8),
+        "source_preferences": _clean_plan_list(prefs, limit=6, min_len=3, max_len=20),
+        "max_aspects": max_aspects,
+        "keyword_limit": keyword_limit,
+        "title_limit": title_limit,
+        "carry_history_evidence": carry_history_evidence,
+    }
+
+
+def _safe_followup_context(current_question: str, previous_question: str) -> str:
+    """Carry only stable entities from the previous turn, not the whole topic."""
+    current = (current_question or "").lower()
+    previous = previous_question or ""
+    prev_lower = previous.lower()
+    carry: list[str] = []
+
+    entity_patterns = (
+        r"\bфоп\b(?:\s+\d\s*(?:груп[аиіїу]|гр\.?)?)?",
+        r"\bтов\b",
+        r"\bєсв\b",
+        r"\bпдв\b",
+        r"\bквед\b",
+        r"\b\d\s*(?:груп[аиіїу]|гр\.?)\b",
+        r"\b20\d{2}\b",
+    )
+    for pattern in entity_patterns:
+        for match in re.finditer(pattern, prev_lower, flags=re.IGNORECASE):
+            value = match.group(0).strip()
+            if not value or value in carry or any(value in item or item in value for item in carry):
+                continue
+            if value in current or any(ch.isdigit() for ch in value) or len(value) <= 5:
+                carry.append(value)
+            elif value in {"фоп", "тов", "єсв", "пдв", "квед"}:
+                carry.append(value)
+            if len(carry) >= 5:
+                break
+        if len(carry) >= 5:
+            break
+
+    cur_terms = set(_query_terms(current_question, limit=18))
+    for term in _query_terms(previous_question, limit=18):
+        if term in cur_terms or term in {"фоп", "тов", "єсв", "пдв", "квед"}:
+            if term not in carry and not any(term in item or item in term for item in carry):
+                carry.append(term)
+        if len(carry) >= 7:
+            break
+
+    if not carry:
+        return ""
+    return " ".join(dict.fromkeys(carry))[:160]
+
+
 def _semantic_collection_hints(question: str, plan: dict | None = None) -> tuple[list[str], list[str]]:
     text = " ".join([
         question or "",
@@ -668,6 +804,9 @@ def _semantic_collection_hints(question: str, plan: dict | None = None) -> tuple
     ]).lower()
     cols: list[str] = []
     prefs: list[str] = []
+    profile = _legal_query_profile(question, plan)
+    cols.extend(profile.get("target_collections", []))
+    prefs.extend(profile.get("source_preferences", []))
     if any(t in text for t in ("влк", "військово-лікар", "відстроч", "мобілізац", "військовий облік", "тцк", "призов", "бронюван", "бронь", "військовозобов", "міноборони", "міністерство оборони", "зсу", "збройних сил", "оборон")):
         cols.extend(["rada_state_v2", "rada_other_v2", "laws_mod_v2", "laws_kmu_v2"])
         prefs.extend(["rada", "mod", "kmu"])
@@ -1698,6 +1837,22 @@ def _source_role_for_result(result: dict) -> str:
     return "other"
 
 
+def _query_requires_exact_evidence(query_text: str) -> bool:
+    return bool(_legal_query_profile(query_text).get("needs_exact_value"))
+
+
+def _result_has_exact_value_evidence(result: dict) -> bool:
+    content = (result.get("out_content") or "").lower()
+    title = " ".join(str((result.get("out_metadata") or {}).get(k) or "") for k in ("source", "title", "rada_title")).lower()
+    haystack = f"{title} {content[:2500]}"
+    value_markers = (
+        "грн", "%", "відсот", "процент", "ставка", "розмір", "сума", "ліміт",
+        "мінімаль", "максималь", "заробітн", "прожитков", "сплач", "плат",
+        "строк", "термін", "2024", "2025", "2026",
+    )
+    return bool(re.search(r"\d", haystack)) and any(marker in haystack for marker in value_markers)
+
+
 def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, dict]:
     """
     Deterministic, conservative guide for Gemini.
@@ -1720,6 +1875,8 @@ def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, di
     background: list[str] = []
     not_basis: list[str] = []
     reasons: dict[int, str] = {}
+    requires_exact = _query_requires_exact_evidence(query_text)
+    exact_usable: list[str] = []
 
     def _title(meta: dict) -> str:
         return str(meta.get("rada_title") or meta.get("source") or meta.get("title") or "")[:120]
@@ -1767,6 +1924,7 @@ def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, di
         )
 
         label = f"[{idx}] {_title(meta)}"
+        has_exact = _result_has_exact_value_evidence(r)
         if dead:
             not_basis.append(label)
             reasons[idx] = "документ нечинний/втратив чинність"
@@ -1775,7 +1933,13 @@ def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, di
             reasons[idx] = conflict
         elif protected or role == "primary_norm" and (score >= 0.48 or cov >= 0.25):
             usable.append(label)
+            if has_exact:
+                exact_usable.append(label)
             reasons[idx] = "можна використовувати як основу"
+        elif requires_exact and role in {"official_norm", "tax_consultation"} and has_exact and (score >= 0.42 or direct >= 0.18):
+            usable.append(label)
+            exact_usable.append(label)
+            reasons[idx] = "містить прямі числові/строкові дані для відповіді"
         elif role in {"tax_consultation", "court_practice"} and (score >= 0.45 or direct >= 0.20):
             background.append(label)
             reasons[idx] = "допоміжне джерело, не замінює норму"
@@ -1788,6 +1952,11 @@ def _build_evidence_brief(results: list[dict], query_text: str) -> tuple[str, di
         else:
             not_basis.append(label)
             reasons[idx] = "слабко відповідає на питання"
+
+    if requires_exact and usable and not exact_usable:
+        background = usable[:2] + background
+        usable = []
+        reasons[-1] = "для питання про суму/ставку/строк не знайдено прямого числового підтвердження"
 
     state = "sufficient" if usable else ("partial" if background else "absent")
     lines = [
@@ -1818,6 +1987,7 @@ def _filter_answer_context_sources(results: list[dict], query_text: str) -> list
     q = query_text.lower()
     court_query = any(t in q for t in ("суд", "практик", "позиці", "позици", "верховн", "ксу", "оскарж"))
     tax_query = any(t in q for t in ("подат", "єдиний", "фоп", "пдв", "дпс", "зір"))
+    exact_query = _query_requires_exact_evidence(query_text)
     primary_available = any(_source_role_for_result(r) in {"primary_norm", "official_norm"} for r in results)
 
     kept: list[dict] = []
@@ -1833,10 +2003,15 @@ def _filter_answer_context_sources(results: list[dict], query_text: str) -> list
             r.get("_full_law") or r.get("_doc_expansion") or r.get("_article_hint")
             or r.get("_evidence_coverage") or _is_must_have_primary_act(r) or r.get("_protected_code")
         )
+        has_exact = _result_has_exact_value_evidence(r)
 
         keep = False
         if protected:
             keep = True
+        elif exact_query and role in {"primary_norm", "official_norm", "tax_consultation"} and has_exact and (score >= 0.38 or cov >= 0.16 or direct >= 0.14):
+            keep = True
+        elif exact_query and role in {"court_practice", "explanation"}:
+            keep = False
         elif role in {"primary_norm", "official_norm"} and (score >= 0.42 or cov >= 0.22 or direct >= 0.18):
             keep = True
         elif role == "tax_consultation" and (tax_query or not primary_available) and (score >= 0.52 or direct >= 0.25):

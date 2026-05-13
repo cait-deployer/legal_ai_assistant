@@ -12,6 +12,8 @@ Before changing code, read:
 - `URAI_ARCHITECTURE.md`
 - `RAG_QUERY_PLANNER.md`
 - `backend/server.py`
+- `backend/retrieval_helpers.py`
+- `backend/schemas.py`
 - `backend/qdrant_storage.py`
 - the specific frontend/API files you will touch.
 
@@ -22,6 +24,9 @@ Next.js rules.
 ## Current State
 
 The chat already uses V2 Qdrant collections and `gemini-embedding-001`.
+The backend has been partially split: `server.py` still owns `_ask_pipeline()`,
+while many helper functions live in `retrieval_helpers.py` and admin/utility
+route groups live in `*_routes.py` modules.
 
 Important implemented features:
 

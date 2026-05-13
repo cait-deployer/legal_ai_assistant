@@ -9,7 +9,8 @@ Gemini generates a cited answer.
 
 - Frontend: Next.js App Router in `app/`.
 - API routes: Next.js Route Handlers in `app/api/`.
-- Backend: FastAPI in `backend/server.py`.
+- Backend: FastAPI in `backend/server.py`, with route/helper modules in
+  `backend/*_routes.py`, `backend/schemas.py` and `backend/retrieval_helpers.py`.
 - Vector storage: Qdrant V2 collections from `backend/qdrant_storage.py`.
 - User/chat storage: Supabase tables for profiles, chats, messages, analytics,
   feedback and plans.
@@ -23,8 +24,16 @@ Gemini generates a cited answer.
 - `app/api/ask/stream/route.ts` - authenticated streaming proxy to FastAPI,
   plan/source gating and response preference gating.
 - `app/api/ask/route.ts` - non-streaming ask proxy with the same plan logic.
-- `backend/server.py` - retrieval, query planning, reranking, context building,
-  answer generation, admin sync endpoints.
+- `backend/server.py` - FastAPI app entrypoint, `_ask_pipeline()`, chat
+  endpoints, long-running sync/reindex workers and shared operation state.
+- `backend/retrieval_helpers.py` - query-planner normalization, retrieval
+  scoring, answerability, citation and answer-completion helpers.
+- `backend/schemas.py` - Pydantic request models shared by backend routes.
+- `backend/generation_routes.py` - utility LLM routes for history summaries,
+  chat names and user prompt generation.
+- `backend/eval_routes.py` - admin retrieval evaluation routes.
+- `backend/admin_operation_routes.py` - admin pipeline, enrichment, text-cache,
+  Qdrant metadata and meta-list HTTP routes.
 - `backend/qdrant_storage.py` - Qdrant collection definitions and search helpers.
 - `backend/reindex_v2.py` - reads raw law files, chunks, embeds and uploads to
   V2 Qdrant.
@@ -110,7 +119,8 @@ explicitly wants to reset a job.
 ## Documentation Map
 
 - `CHATBOT_FLOW.md` - current end-to-end chat flow.
-- `URAI_ARCHITECTURE.md` - architecture, sources, storage, admin pages.
+- `URAI_ARCHITECTURE.md` - architecture, backend module layout, sources,
+  storage, admin pages.
 - `RAG_QUERY_PLANNER.md` - planner JSON contract and retrieval usage.
 - `V2_БАЗА_ПОЯСНЕННЯ.md` - human explanation of the V2 knowledge base.
 - `GEMINI_PROMPT.md` - production answer-prompt guidance.
