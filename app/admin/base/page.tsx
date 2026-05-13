@@ -380,6 +380,7 @@ export default function BasePage() {
   const [manualError, setManualError] = useState<string | null>(null)
   const [manualPanelOpen, setManualPanelOpen] = useState(false)
   const [manualStarting, setManualStarting] = useState(false)
+  const [manualLogsOpen, setManualLogsOpen] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchInput = (val: string) => {
@@ -479,6 +480,7 @@ export default function BasePage() {
       category: manualCategory,
       live_logs: [{ message: "Sending trigger request...", level: "info" }],
     })
+    setManualLogsOpen(true)
     try {
       const res = await fetch("/api/admin/base/manual-law/trigger", {
         method: "POST",
@@ -500,6 +502,7 @@ export default function BasePage() {
 
   const hasFilters = searchInput || sourceFilter
   const manualBusy = manualStarting || Boolean(manualStatus?.running)
+  const lastManualLog = manualStatus?.live_logs?.at(-1)?.message
   const from = total === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1
   const to = Math.min(currentPage * itemsPerPage, total)
 
@@ -552,6 +555,9 @@ export default function BasePage() {
               <span className="min-w-0">
               <p className="text-sm font-bold text-white">Доскрапити документ Rada</p>
               <p className="text-xs text-[#E0E6ED]/60">Один номер закону проходить scrape {"->"} metadata {"->"} reindex {"->"} Qdrant {"->"} registry.</p>
+              {lastManualLog && (
+                <p className="mt-1 truncate text-xs text-[#C9A84C]/80">{lastManualLog}</p>
+              )}
               </span>
             </div>
             <span className="inline-flex items-center gap-3 text-xs font-semibold text-[#C9A84C]">
@@ -600,6 +606,18 @@ export default function BasePage() {
 
           {(manualError || manualStatus?.error || manualStatus?.result || manualStatus?.live_logs?.length) && (
             <div className="rounded-xl border border-[#C9A84C]/10 bg-[#0d1120] p-3 text-xs text-[#E0E6ED]/70 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-[#C9A84C]">Статус пайплайна</p>
+                {manualStatus?.live_logs?.length ? (
+                  <button
+                    type="button"
+                    onClick={() => setManualLogsOpen((value) => !value)}
+                    className="rounded-lg border border-[#C9A84C]/15 px-2.5 py-1 text-[#C9A84C] hover:border-[#C9A84C]/40"
+                  >
+                    {manualLogsOpen ? "Сховати логи" : `Показати логи (${manualStatus.live_logs.length})`}
+                  </button>
+                ) : null}
+              </div>
               {(manualError || manualStatus?.error) && (
                 <p className="text-red-300">{manualError || manualStatus?.error}</p>
               )}
@@ -617,11 +635,15 @@ export default function BasePage() {
               {manualBusy && !manualStatus?.result && (
                 <p className="text-[#C9A84C]">Очікуємо завершення етапів. Список оновиться автоматично після registry rebuild.</p>
               )}
-              {manualStatus?.live_logs?.slice(-10).map((log, index) => (
-                <p key={`${log.ts ?? ""}-${index}`} className={log.level === "error" ? "text-red-300" : "text-[#E0E6ED]/60"}>
-                  {log.message}
-                </p>
-              ))}
+              {manualLogsOpen && (
+                <div className="max-h-44 overflow-y-auto rounded-lg border border-[#C9A84C]/10 bg-black/10 p-2 space-y-1">
+                  {manualStatus?.live_logs?.slice(-20).map((log, index) => (
+                    <p key={`${log.ts ?? ""}-${index}`} className={log.level === "error" ? "text-red-300" : "text-[#E0E6ED]/60"}>
+                      {log.message}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

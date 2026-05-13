@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -86,6 +87,23 @@ def _enrich_rada_meta(meta: dict, text: str, category: str) -> dict:
     return enriched
 
 
+def _enrich_from_opendata(law_id: str, log_callback: Callable[[str, str], None] | None = None) -> dict:
+    try:
+        from enrich_opendata_meta import _build_enriched, _fetch_card
+
+        started = time.monotonic()
+        card, status = _fetch_card(law_id)
+        if not card:
+            _log(log_callback, f"OpenData card not applied: {status}", "warning")
+            return {}
+        enriched = _build_enriched(law_id, card, {}, {})
+        _log(log_callback, f"OpenData card applied in {time.monotonic() - started:.1f}s")
+        return enriched
+    except Exception as exc:
+        _log(log_callback, f"OpenData targeted enrichment skipped: {exc}", "warning")
+        return {}
+
+
 def _save_raw_law(law_id: str, text: str, meta: dict) -> Path:
     raw_dir = Path(RAW_DIR) / "rada"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -148,12 +166,35 @@ def run_manual_rada_law_pipeline(
     else:
         if stopped():
             return {"law_id": law_id, "status": "stopped"}
-        _log(log_callback, "Step 1/5: scraping zakon.rada.gov.ua")
-        from scrape_all_v2 import _fetch_rada
+        _log(log_callback, "Step 1/5: fetching text from zakon.rada.gov.ua")
+        from rada_scanner import BASE, detect_text_flags, get_law_metadata, get_law_text
 
-        _, text, meta = _fetch_rada({"id": law_id, "title": "", "category": category, "list_date": ""})
+        started = time.monotonic()
+        text = get_law_text(law_id)
         if not text or text == "__RESTRICTED__":
             raise RuntimeError("Rada returned empty or restricted text")
+        _log(log_callback, f"Text fetched: {len(text):,} chars in {time.monotonic() - started:.1f}s")
+
+        _log(log_callback, "Fetching Rada page metadata")
+        meta_started = time.monotonic()
+        law_meta = get_law_metadata(law_id)
+        flags = detect_text_flags(text)
+        meta = {
+            "law_id": law_id,
+            "title": "",
+            "source": "rada",
+            "category": category,
+            "effective_date": law_meta.get("effective_date", ""),
+            "law_url": f"{BASE}/laws/show/{law_id}",
+            "status": law_meta.get("status", ""),
+            "doc_number": law_meta.get("doc_number", ""),
+            "doc_type": law_meta.get("doc_type", ""),
+            "author": law_meta.get("author", ""),
+            "date_adopted": law_meta.get("date_adopted", ""),
+            "scraped_at": _now(),
+            **flags,
+        }
+        _log(log_callback, f"Rada metadata fetched in {time.monotonic() - meta_started:.1f}s")
         meta = {
             **meta,
             "title": meta.get("title") or _extract_title(text, law_id),
@@ -167,21 +208,10 @@ def run_manual_rada_law_pipeline(
 
     if stopped():
         return {"law_id": law_id, "status": "stopped"}
-    _log(log_callback, "Step 2/5: OpenData metadata enrichment")
-    try:
-        from enrich_opendata_meta import run_enrich
-
-        run_enrich(
-            log_callback=lambda msg, level="info": _log(log_callback, msg, level),
-            stop_event=None,
-            sources=["rada"],
-            force=False,
-            new_only=True,
-        )
-        if meta_path.exists():
-            meta = json.loads(meta_path.read_text("utf-8"))
-    except Exception as exc:
-        _log(log_callback, f"OpenData enrichment skipped: {exc}", "warning")
+    _log(log_callback, "Step 2/5: targeted OpenData metadata enrichment")
+    opendata_meta = _enrich_from_opendata(law_id, log_callback)
+    if opendata_meta:
+        meta = {**meta, **opendata_meta, "rada_enrichment_source": "opendata_card"}
 
     _log(log_callback, "Step 3/5: fallback metadata normalization")
     meta = _enrich_rada_meta(meta, text, category)
