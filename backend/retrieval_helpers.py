@@ -822,8 +822,8 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
         title_limit = 12
     elif is_labor:
         intent = "labor_procedure" if is_procedure else "labor_norm"
-        collections.extend(["rada_labor_v2", "rada_civil_v2", "laws_positions_v2", "laws_wiki_v2"])
-        prefs.extend(["rada", "court", "wiki"])
+        collections.extend(["rada_labor_v2", "rada_civil_v2"])
+        prefs.extend(["rada"])
         keyword_limit = 10
         title_limit = 10
         max_aspects = 5 if is_procedure else 4
@@ -833,8 +833,8 @@ def _legal_query_profile(question: str, plan: dict | None = None) -> dict:
         prefs.extend(["kmu", "mod", "rada", "wiki"])
     elif is_procedure:
         intent = "legal_procedure"
-        collections.extend(["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2", "laws_wiki_v2"])
-        prefs.extend(["rada", "kmu", "mod", "wiki"])
+        collections.extend(["rada_admin_v2", "laws_kmu_v2", "laws_mod_v2"])
+        prefs.extend(["rada", "kmu", "mod"])
     elif wants_explanation:
         intent = "explanation"
         collections.extend(["laws_wiki_v2", "laws_zir_v2", "laws_kmu_v2"])
@@ -2095,6 +2095,8 @@ def _filter_answer_context_sources(results: list[dict], query_text: str) -> list
     court_query = any(t in q for t in ("суд", "практик", "позиці", "позици", "верховн", "ксу", "оскарж"))
     tax_query = any(t in q for t in ("подат", "єдиний", "фоп", "пдв", "дпс", "зір"))
     exact_query = _query_requires_exact_evidence(query_text)
+    query_profile = _legal_query_profile(query_text)
+    procedural_query = "procedure" in str(query_profile.get("intent") or "")
     primary_available = any(_source_role_for_result(r) in {"primary_norm", "official_norm"} for r in results)
 
     kept: list[dict] = []
@@ -2113,7 +2115,9 @@ def _filter_answer_context_sources(results: list[dict], query_text: str) -> list
         has_exact = _result_has_exact_value_evidence(r)
 
         keep = False
-        if protected:
+        if procedural_query and role in {"court_practice", "explanation", "tax_consultation"} and primary_available:
+            keep = court_query and role == "court_practice" and (score >= 0.55 or direct >= 0.30)
+        elif protected:
             keep = True
         elif exact_query and role in {"primary_norm", "official_norm", "tax_consultation"} and has_exact and (score >= 0.38 or cov >= 0.16 or direct >= 0.14):
             keep = True
@@ -2246,6 +2250,29 @@ def _citations_used_in_answer(answer: str, citations: list[dict]) -> list[dict]:
         return citations
     filtered = [c for c in citations if int(c.get("num", 0) or 0) in used]
     return filtered or citations
+
+
+def _clean_invalid_citation_placeholders(answer: str, citations: list[dict]) -> str:
+    """Remove citation placeholders the UI cannot resolve, e.g. [N] or [джерело].
+
+    Numeric citations are preserved. Non-numeric placeholders are worse than no
+    citation because they render as broken source pills in the chat UI.
+    """
+    if not answer:
+        return answer
+    valid_nums = {int(c.get("num", 0) or 0) for c in citations if int(c.get("num", 0) or 0) > 0}
+
+    def repl(match: re.Match) -> str:
+        inner = match.group(1).strip()
+        if re.fullmatch(r"\d+(?:\s*,\s*\d+)*", inner):
+            nums = [int(n) for n in re.findall(r"\d+", inner)]
+            return match.group(0) if all(n in valid_nums for n in nums) else ""
+        if re.fullmatch(r"[A-Za-zА-Яа-яІіЇїЄєҐґ_\-\s]+", inner):
+            return ""
+        return match.group(0)
+
+    cleaned = re.sub(r"\[([^\[\]]{1,40})\]", repl, answer)
+    return re.sub(r"\s{2,}", " ", cleaned).replace(" .", ".").replace(" ,", ",").strip()
 
 
 def _finish_reason_is_max_tokens(finish_reason) -> bool:

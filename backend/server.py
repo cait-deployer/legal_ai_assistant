@@ -3736,9 +3736,19 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             limit=5,
         )
         _retrieval_profile = _legal_query_profile(search_question, _query_plan)
+        _profile_intent = str(_retrieval_profile.get("intent") or "")
+        _is_procedural_profile = "procedure" in _profile_intent
         _max_profile_aspects = int(_retrieval_profile.get("max_aspects") or 5)
         if _max_profile_aspects < len(_evidence_subquestions):
             _evidence_subquestions = _evidence_subquestions[:_max_profile_aspects]
+        _profile_cols = _retrieval_profile.get("target_collections", [])
+        _profile_sources = _retrieval_profile.get("source_preferences", [])
+        if _is_procedural_profile and _profile_cols:
+            _procedural_cols = set(_profile_cols)
+            for _sq in _evidence_subquestions:
+                _sq_cols = [c for c in (_sq.get("target_collections") or []) if c in _procedural_cols]
+                _sq["target_collections"] = _sq_cols or _profile_cols[:5]
+                _sq["source_preferences"] = _profile_sources[:4]
         _evidence_questions: list[str] = []
         _evidence_must_terms: list[str] = []
         _evidence_collections: list[str] = []
@@ -3756,8 +3766,6 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             _evidence_questions.append(_history_evidence_text[:700])
             _evidence_must_terms.extend(_history_evidence_terms[:14])
         _semantic_cols, _semantic_sources = _semantic_collection_hints(search_question, _query_plan)
-        _profile_cols = _retrieval_profile.get("target_collections", [])
-        _profile_sources = _retrieval_profile.get("source_preferences", [])
         _evidence_collections.extend(_profile_cols)
         _evidence_sources.extend(_profile_sources)
         _evidence_collections.extend(_semantic_cols)
@@ -3770,8 +3778,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _source_preferences = [
             str(s).strip().lower()
             for s in _merge_unique_strings(
-                _profile_sources if _retrieval_profile.get("needs_exact_value") else [],
-                (_query_plan.get("source_preferences", []) if _query_plan else []),
+                _profile_sources if (_retrieval_profile.get("needs_exact_value") or _is_procedural_profile) else [],
+                [] if _is_procedural_profile else ((_query_plan.get("source_preferences", []) if _query_plan else [])),
                 _evidence_sources,
                 limit=8,
             )
@@ -3781,11 +3789,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             (
                 _merge_unique_strings(
                     _profile_cols,
-                    (_query_plan.get("target_collections", []) if _query_plan else []),
                     _evidence_collections,
                     limit=10,
                 )
-                if _retrieval_profile.get("needs_exact_value")
+                if (_retrieval_profile.get("needs_exact_value") or _is_procedural_profile)
                 else _merge_unique_strings(
                     (_query_plan.get("target_collections", []) if _query_plan else []),
                     _evidence_collections,
@@ -3880,7 +3887,10 @@ async def _ask_pipeline(body: AskRequest) -> dict:
     preferred_collections = _collections_for_source_preferences(plan_collections, _source_preferences)
     if hinted_collections:
         non_rada_preferred = [c for c in preferred_collections if not c.startswith("rada_")]
-        target_collections = list(dict.fromkeys(hinted_collections + non_rada_preferred))
+        if _is_procedural_profile:
+            target_collections = hinted_collections
+        else:
+            target_collections = list(dict.fromkeys(hinted_collections + non_rada_preferred))
     else:
         target_collections = preferred_collections or plan_collections
     if hinted_collections or preferred_collections:
@@ -4658,6 +4668,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     _aspect_protected: list[dict] = []
     _aspect_seen_docs: set[tuple[str, str]] = set()
+    _protected_source_cols = set(_retrieval_profile.get("target_collections") or []) if _is_procedural_profile else set()
     _plan_aspects = _merge_unique_strings(
         (_query_plan.get("aspects", []) if _query_plan else []),
         _evidence_aspect_texts,
@@ -4671,6 +4682,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
             r for r in results
             if _aspect_overlap_ok(r, _aspect_terms) and not _is_background_collection(r.get("_collection", ""))
         ]
+        if _protected_source_cols:
+            _aspect_candidates = [r for r in _aspect_candidates if r.get("_collection", "") in _protected_source_cols]
         if not _aspect_candidates:
             continue
         _best = max(
@@ -4717,6 +4730,8 @@ async def _ask_pipeline(body: AskRequest) -> dict:
         _ev_avoid = _sq.get("avoid_if_only") or []
         _ev_candidates = []
         for r in results:
+            if _protected_source_cols and r.get("_collection", "") not in _protected_source_cols:
+                continue
             if r.get("_avoid_topic_penalty", 0.0) >= 0.30:
                 continue
             if _ev_cols and r.get("_collection", "") not in _ev_cols:
@@ -5113,7 +5128,7 @@ async def _ask_pipeline(body: AskRequest) -> dict:
 
     if results:
         _before_answer_context = len(results)
-        _answer_context_results = _filter_answer_context_sources(results, _answerability_query)
+        _answer_context_results = _filter_answer_context_sources(results, search_question)
         if _answer_context_results:
             results = _answer_context_results
             if len(results) < _before_answer_context:
@@ -5272,6 +5287,12 @@ async def _ask_pipeline(body: AskRequest) -> dict:
                 "Цитуй джерела у форматі [1], [2]. "
                 "Якщо відповіді немає в контексті, повідом про це."
             ),
+        )
+        system_prompt = (
+            f"{system_prompt}\n\n"
+            "Правила цитування: використовуй тільки реальні числові посилання з контексту, наприклад [1] або [2]. "
+            "Заборонено писати [N], [джерело], [source], [?] або будь-які нечислові placeholders. "
+            "Якщо не можеш прив'язати твердження до конкретного номера джерела, краще не став placeholder."
         )
         temperature      = settings_cache.get_float("temperature", 0.20)
         top_p            = settings_cache.get_float("top_p", 0.8)
@@ -5466,6 +5487,7 @@ async def ask(body: AskRequest):
 
     answer = await _complete_answer_if_needed(pipe, answer, finish_reason)
     answer = _deduplicate_answer_lines(_strip_answer_done_marker(answer))
+    answer = _clean_invalid_citation_placeholders(answer, pipe["citations"])
 
     try:
         classification = _json.loads(clf_response.text)
@@ -5710,6 +5732,7 @@ async def ask_stream(body: AskRequest):
                 cont_finish_reason = None
 
         full_answer = _deduplicate_answer_lines(_strip_answer_done_marker(completed_answer))
+        full_answer = _clean_invalid_citation_placeholders(full_answer, pipe["citations"])
 
         try:
             clf_response = await clf_task
