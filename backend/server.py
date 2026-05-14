@@ -132,6 +132,7 @@ _SOURCES = (
     "check_text_missing",
     "scrape_text_missing_found",
     "apply_text_cancellations",
+    "post_fix_metadata",
     "update_qdrant_meta", # патч Qdrant payload з збагачених meta.json
     "pipeline",           # повний автоматичний пайплайн
 )
@@ -163,6 +164,7 @@ _qdrant_meta_stop = threading.Event()
 _pipeline_stop    = threading.Event()
 _manual_law_stop  = threading.Event()
 _fix_truncated_stop = {"rada": threading.Event(), "kmu": threading.Event()}
+_post_fix_metadata_stop = threading.Event()
 
 _PIPELINE_LAST_RUN_FILE    = BASE_DIR / "pipeline_last_run.json"
 _PIPELINE_RESUME_FILE      = BASE_DIR / "pipeline_resume_state.json"
@@ -817,6 +819,8 @@ def _start_sync(src: str, fn, session_id: str, **kwargs) -> None:
             "live_logs": [],
             "session_id": session_id,
             "laws_processed": 0,
+            "result": None,
+            "error": None,
         })
     threading.Thread(
         target=fn,
@@ -2041,6 +2045,33 @@ def _do_fix_truncated(session_id: str, source: str):
             _sync[slot]["pause_requested"] = False
 
 
+def _do_post_fix_metadata(session_id: str, sources: list[str] | None = None):
+    slot = "post_fix_metadata"
+    log = _make_reindex_log_cb(slot)
+    try:
+        log(f"Post-fix metadata session {session_id[:8]} started", "info")
+        _post_fix_metadata_stop.clear()
+        from post_fix_pipeline import run_post_fix_pipeline
+
+        result = run_post_fix_pipeline(
+            sources=sources,
+            log_callback=log,
+            stop_event=_post_fix_metadata_stop,
+            rebuild_registry=lambda registry_log: _rebuild_document_registry(registry_log, _post_fix_metadata_stop),
+            clear_on_success=True,
+        )
+        with _lock:
+            _sync[slot]["result"] = result
+    except Exception as e:
+        log(f"Critical error: {e}", "error")
+        with _lock:
+            _sync[slot]["error"] = str(e)
+    finally:
+        with _lock:
+            _sync[slot]["running"] = False
+            _sync[slot]["pause_requested"] = False
+
+
 @app.get("/admin/v2/fix-truncated/status")
 async def fix_truncated_status():
     from reindex_truncated import get_resume_progress, _get_truncated_files
@@ -2064,7 +2095,50 @@ async def fix_truncated_status():
             "resume_progress":  progress,
             "total_on_disk":    total_on_disk,
         }
+    try:
+        from post_fix_pipeline import pending_status
+        post_fix_pending = pending_status()
+    except Exception:
+        post_fix_pending = {"sources": {}, "total": 0}
+    with _lock:
+        post_fix_state = dict(_sync["post_fix_metadata"])
+        post_fix_logs = list(post_fix_state.get("live_logs", []))
+    result["post_fix"] = {
+        "running": post_fix_state.get("running", False),
+        "pause_requested": post_fix_state.get("pause_requested", False),
+        "live_logs": post_fix_logs,
+        "pending": post_fix_pending,
+        "result": post_fix_state.get("result"),
+        "error": post_fix_state.get("error"),
+    }
     return result
+
+
+@app.post("/admin/v2/fix-truncated/post-fix/trigger")
+async def post_fix_metadata_trigger(body: dict = Body(default={})):
+    sources = body.get("sources") or ["rada", "kmu"]
+    sources = [s for s in sources if s in FIX_TRUNCATED_SOURCES]
+    if not sources:
+        raise HTTPException(400, f"sources must include one of {FIX_TRUNCATED_SOURCES}")
+    running_src = _any_fix_truncated_running()
+    if running_src:
+        raise HTTPException(409, f"Fix-truncated '{running_src}' is still running")
+    session_id = str(uuid.uuid4())
+    try:
+        _start_sync("post_fix_metadata", _do_post_fix_metadata, session_id, sources=sources)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True, "session_id": session_id}
+
+
+@app.post("/admin/v2/fix-truncated/post-fix/stop")
+async def post_fix_metadata_stop():
+    with _lock:
+        if not _sync["post_fix_metadata"]["running"]:
+            raise HTTPException(400, "Post-fix metadata pipeline is not running")
+        _post_fix_metadata_stop.set()
+        _sync["post_fix_metadata"]["pause_requested"] = True
+    return {"ok": True}
 
 
 @app.post("/admin/v2/fix-truncated/trigger")

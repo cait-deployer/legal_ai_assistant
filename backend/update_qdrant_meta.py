@@ -114,6 +114,26 @@ def _load_enriched_payloads(sources: list[str]) -> dict[str, dict]:
     return enriched
 
 
+def _normalize_target_ids(law_ids_by_source: dict[str, list[str]] | None) -> set[str]:
+    wanted: set[str] = set()
+    if not law_ids_by_source:
+        return wanted
+    for src, law_ids in law_ids_by_source.items():
+        for raw in law_ids or []:
+            law_id = str(raw).strip()
+            if not law_id:
+                continue
+            decoded = unquote(law_id)
+            wanted.add(law_id)
+            wanted.add(decoded)
+            if src == "kmu":
+                if decoded.startswith("kmu_"):
+                    wanted.add(decoded[4:])
+                else:
+                    wanted.add(f"kmu_{decoded}")
+    return wanted
+
+
 def _patch_collection(
     coll: str,
     enriched: dict[str, dict],
@@ -220,6 +240,7 @@ def run_update_qdrant(
     log_callback=print,
     stop_event: threading.Event | None = None,
     sources: list[str] | None = None,
+    law_ids_by_source: dict[str, list[str]] | None = None,
 ) -> None:
     global _stop_event, _log_fn
     _stop_event = stop_event
@@ -241,6 +262,15 @@ def run_update_qdrant(
     _log("[qdrant patch] 📂 Завантажую збагачені .meta.json в пам'ять...")
     t0 = time.monotonic()
     enriched = _load_enriched_payloads(sources)
+    wanted_ids = _normalize_target_ids(law_ids_by_source)
+    if wanted_ids:
+        before = len(enriched)
+        enriched = {
+            law_id: payload
+            for law_id, payload in enriched.items()
+            if law_id in wanted_ids or unquote(law_id) in wanted_ids
+        }
+        _log(f"[qdrant patch] targeted mode: {len(enriched):,}/{before:,} enriched docs selected")
     _log(
         f"[qdrant patch] ✔ Завантажено {len(enriched):,} збагачених законів"
         f" за {time.monotonic() - t0:.1f}с"

@@ -181,6 +181,25 @@ def _api_nreg(src: str, nreg: str) -> str:
     return nreg
 
 
+def _target_pairs(target_nregs_by_source: dict[str, list[str]] | None) -> list[tuple[str, str]]:
+    if not target_nregs_by_source:
+        return []
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for src, nregs in target_nregs_by_source.items():
+        if src not in SOURCES:
+            continue
+        for raw in nregs or []:
+            nreg = str(raw).strip()
+            if not nreg:
+                continue
+            key = (src, nreg)
+            if key not in seen:
+                seen.add(key)
+                pairs.append(key)
+    return pairs
+
+
 # ── Phase 1: Завантаження карток ──────────────────────────────────────────────
 
 def _eta(started: float, done: int, total: int) -> str:
@@ -618,7 +637,7 @@ def _uniq_list(values: list[str]) -> list[str]:
     return result
 
 
-def run_phase4_text_cancellations(sources: list[str]) -> dict:
+def run_phase4_text_cancellations(sources: list[str], target_aliases: set[str] | None = None) -> dict:
     """Apply text_cancellations_cache.json to local .meta.json files."""
     if not TEXT_CANCELLATIONS_CACHE.exists():
         _log(f"[Phase 4] text cancellation cache not found: {TEXT_CANCELLATIONS_CACHE}", "warning")
@@ -631,6 +650,12 @@ def run_phase4_text_cancellations(sources: list[str]) -> dict:
         return {"updated": 0, "skipped": 0, "errors": 1, "cache_found": True}
 
     cancellations = payload.get("cancellations") or {}
+    if target_aliases:
+        cancellations = {
+            nreg: entries
+            for nreg, entries in cancellations.items()
+            if nreg in target_aliases
+        }
     lookup = _local_meta_lookup(sources)
     updated = skipped = errors = already = 0
     examples = 0
@@ -735,10 +760,38 @@ def run_phase4_text_cancellations(sources: list[str]) -> dict:
     }
 
 
+def run_phase4_text_cancellations_targets(target_nregs_by_source: dict[str, list[str]]) -> dict:
+    """Apply text cancellation cache only to selected local .meta.json files."""
+    pairs = _target_pairs(target_nregs_by_source)
+    sources = sorted({src for src, _ in pairs})
+    if not pairs:
+        _log("[Phase 4 targeted] No target documents", "warning")
+        return {"updated": 0, "already": 0, "skipped": 0, "errors": 0, "cache_found": False, "cache_targets": 0}
+    if not TEXT_CANCELLATIONS_CACHE.exists():
+        _log(f"[Phase 4 targeted] text cancellation cache not found: {TEXT_CANCELLATIONS_CACHE}", "warning")
+        return {"updated": 0, "already": 0, "skipped": 0, "errors": 0, "cache_found": False, "cache_targets": 0}
+
+    try:
+        payload = json.loads(TEXT_CANCELLATIONS_CACHE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log(f"[Phase 4 targeted] Cannot read text cancellation cache: {exc}", "error")
+        return {"updated": 0, "already": 0, "skipped": 0, "errors": 1, "cache_found": True, "cache_targets": 0}
+
+    wanted_aliases: set[str] = set()
+    for src, nreg in pairs:
+        wanted_aliases.add(nreg)
+        wanted_aliases.add(_api_nreg(src, nreg))
+        if src == "kmu" and not nreg.startswith("kmu_"):
+            wanted_aliases.add(f"kmu_{nreg}")
+
+    return run_phase4_text_cancellations(sources, target_aliases=wanted_aliases)
+
+
 def run_apply_text_cancellations(
     log_callback=print,
     stop_event: threading.Event | None = None,
     sources: list[str] | None = None,
+    target_nregs_by_source: dict[str, list[str]] | None = None,
 ) -> dict:
     global _stop_event, _log_fn
     _stop_event = stop_event
@@ -746,8 +799,86 @@ def run_apply_text_cancellations(
     if sources is None:
         sources = SOURCES
     _log(f"=== Apply text cancellation cache: {', '.join(sources)} ===")
-    result = run_phase4_text_cancellations(sources)
+    if target_nregs_by_source:
+        result = run_phase4_text_cancellations_targets(target_nregs_by_source)
+    else:
+        result = run_phase4_text_cancellations(sources)
     _log("=== Apply text cancellation cache done ===")
+    return result
+
+
+def run_enrich_targets(
+    target_nregs_by_source: dict[str, list[str]],
+    log_callback=print,
+    stop_event: threading.Event | None = None,
+    force: bool = True,
+) -> dict:
+    """Refresh OpenData metadata for selected Rada/KMU documents only."""
+    global _stop_event, _log_fn
+    _stop_event = stop_event
+    _log_fn = log_callback
+
+    pairs = _target_pairs(target_nregs_by_source)
+    cards_cache = _load_cards_cache()
+    fetched = skipped_fetch = not_found = errors = updated = skipped = 0
+    _log(f"=== Targeted OpenData enrichment: {len(pairs)} docs ===")
+
+    for idx, (src, nreg) in enumerate(pairs, start=1):
+        if _stop_event and _stop_event.is_set():
+            _log(f"[target enrich] Stopped at {idx}/{len(pairs)}", "warning")
+            break
+        api_key = _api_nreg(src, nreg)
+        cached = cards_cache.get(api_key)
+        if cached and not force and _cache_fresh(cached):
+            skipped_fetch += 1
+            continue
+        card, status = _fetch_card(api_key)
+        if card:
+            cards_cache[api_key] = card
+            fetched += 1
+        elif status == "not_found":
+            cards_cache[api_key] = {"_not_found": True, "_ts": time.time()}
+            not_found += 1
+        else:
+            errors += 1
+            _log(f"[target enrich] fetch {src}/{nreg}: {status}", "warning")
+
+    _save_cards_cache(cards_cache)
+    p2 = run_phase2(cards_cache)
+    for idx, (src, nreg) in enumerate(pairs, start=1):
+        if _stop_event and _stop_event.is_set():
+            break
+        api_key = _api_nreg(src, nreg)
+        card = cards_cache.get(api_key)
+        if not card or card.get("_not_found"):
+            skipped += 1
+            continue
+        meta_path = RAW_BASE / src / f"{nreg}.meta.json"
+        try:
+            existing = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {"law_id": nreg}
+            enriched = _build_enriched(api_key, card, p2["reverse_dead"], p2["dokid_to_nreg"])
+            if existing.get("rada_is_dead_by_text"):
+                enriched["rada_is_dead"] = True
+                enriched["rada_is_dead_by_text"] = True
+                for key in ("rada_cancelled_by_text", "rada_cancelled_by_text_details", "rada_text_dead_confidence"):
+                    if existing.get(key):
+                        enriched[key] = existing.get(key)
+            existing.update(enriched)
+            meta_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+            updated += 1
+        except Exception as exc:
+            errors += 1
+            _log(f"[target enrich] write {src}/{nreg}: {exc}", "error")
+    result = {
+        "targets": len(pairs),
+        "fetched": fetched,
+        "fetch_skipped": skipped_fetch,
+        "not_found": not_found,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    _log(f"=== Targeted OpenData enrichment done: {result} ===")
     return result
 
 

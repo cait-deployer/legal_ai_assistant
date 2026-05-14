@@ -1526,7 +1526,22 @@ type FixSourceStatus = {
   total_on_disk: number
 }
 
-type FixAllStatus = Record<string, FixSourceStatus>
+type PostFixStatus = {
+  running: boolean
+  pause_requested: boolean
+  live_logs: LogEntry[]
+  pending?: {
+    total: number
+    sources: Record<string, { law_ids: string[]; count: number }>
+  }
+  result?: unknown
+  error?: string
+}
+
+type FixAllStatus = {
+  [source: string]: FixSourceStatus | PostFixStatus | undefined
+  post_fix?: PostFixStatus
+}
 
 type PipelineStatus = {
   running: boolean
@@ -1754,7 +1769,10 @@ function FixTruncatedTab() {
     return () => window.clearTimeout(id)
   }, [fetchStatus])
 
-  const anyRunning = FIX_SOURCES.some(s => status[s.id]?.running)
+  const postFix = status.post_fix
+  const postFixRunning = postFix?.running ?? false
+  const postFixPending = postFix?.pending?.total ?? 0
+  const anyRunning = FIX_SOURCES.some(s => status[s.id]?.running) || postFixRunning
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
@@ -1800,6 +1818,27 @@ function FixTruncatedTab() {
     } catch { /* ignore */ }
   }
 
+  async function handlePostFixStart() {
+    setError(e => ({ ...e, post_fix: "" }))
+    try {
+      const res = await fetch("/api/admin/v2/fix-truncated/post-fix/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sources: ["rada", "kmu"] }),
+      })
+      const data = await res.json()
+      if (!res.ok) setError(e => ({ ...e, post_fix: data.detail || data.error || "Error" }))
+      await fetchStatus()
+    } catch { setError(e => ({ ...e, post_fix: "Connection error" })) }
+  }
+
+  async function handlePostFixStop() {
+    try {
+      await fetch("/api/admin/v2/fix-truncated/post-fix/stop", { method: "POST" })
+      await fetchStatus()
+    } catch { /* ignore */ }
+  }
+
   return (
     <div className="space-y-6">
       <PipelineUpdatePanel />
@@ -1831,9 +1870,69 @@ function FixTruncatedTab() {
         </div>
       </div>
 
+      <div className="bg-[#111827] rounded-2xl border border-emerald-500/20 p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-[#E0E6ED]">Post-fix metadata pipeline</span>
+              {postFixRunning && (
+                <span className="text-xs font-bold text-emerald-400 animate-pulse">running</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Applies OpenData, text cancellation cache, Qdrant payload patch and document registry only to large docs repaired above.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400">pending: <b className="text-[#C9A84C]">{postFixPending}</b></span>
+            {postFixRunning ? (
+              <button
+                onClick={handlePostFixStop}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold text-xs hover:bg-red-700 transition-colors"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={handlePostFixStart}
+                disabled={postFixPending === 0 || FIX_SOURCES.some(s => status[s.id]?.running)}
+                className="px-4 py-2 rounded-lg bg-emerald-500 text-[#04130b] font-bold text-xs hover:bg-emerald-400 disabled:opacity-40 transition-colors"
+              >
+                Apply to repaired docs
+              </button>
+            )}
+          </div>
+        </div>
+
+        {postFix?.pending?.sources && Object.keys(postFix.pending.sources).length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            {Object.entries(postFix.pending.sources).map(([source, item]) => (
+              <span key={source} className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                {source}: {item.count}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {error.post_fix && (
+          <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error.post_fix}</div>
+        )}
+
+        {(postFix?.live_logs?.length ?? 0) > 0 && (
+          <div className="bg-[#0A0E1A] rounded-xl border border-emerald-500/10 h-48 overflow-y-auto font-mono text-[11px] p-3 space-y-0.5">
+            {postFix?.live_logs?.slice(-80).map((log, i) => (
+              <div key={i} className={levelColor(log.level)}>
+                <span className="text-gray-600 mr-2">{log.ts?.slice(11, 19)}</span>
+                {log.message}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Per-source panels */}
       {FIX_SOURCES.map(({ id, label, threshold }) => {
-        const src = status[id]
+        const src = status[id] as FixSourceStatus | undefined
         const running   = src?.running ?? false
         const stopping  = running && (src?.pause_requested ?? false)
         const progress  = src?.resume_progress

@@ -21,6 +21,7 @@ from pathlib import Path
 
 
 RAW_BASE = Path(os.environ.get("LAWS_RAW_DIR", "/root/laws_raw"))
+PROCESSED_MANIFEST = Path(__file__).parent / "fix_truncated_processed_manifest.json"
 HEARTBEAT_SEC = 20
 WORKERS = 2  # parallel document processing; embed_v2 is thread-safe
 
@@ -69,6 +70,51 @@ def _save_state(source: str, state: dict) -> None:
 
 def _clear_state(source: str) -> None:
     _make_state_path(source).unlink(missing_ok=True)
+
+
+def _load_processed_manifest() -> dict:
+    if PROCESSED_MANIFEST.exists():
+        try:
+            data = json.loads(PROCESSED_MANIFEST.read_text("utf-8"))
+            if isinstance(data, dict):
+                data.setdefault("sources", {})
+                return data
+        except Exception:
+            pass
+    return {"updated_at": None, "sources": {}}
+
+
+def _save_processed_manifest(manifest: dict) -> None:
+    manifest["updated_at"] = _now()
+    PROCESSED_MANIFEST.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        "utf-8",
+    )
+
+
+def _record_processed_law(source: str, law_id: str) -> None:
+    manifest = _load_processed_manifest()
+    src = manifest.setdefault("sources", {}).setdefault(source, {})
+    laws = src.setdefault("law_ids", [])
+    if law_id not in laws:
+        laws.append(law_id)
+        laws.sort()
+    src["updated_at"] = _now()
+    _save_processed_manifest(manifest)
+
+
+def get_processed_manifest() -> dict:
+    return _load_processed_manifest()
+
+
+def clear_processed_manifest(sources: list[str] | None = None) -> None:
+    if sources is None:
+        PROCESSED_MANIFEST.unlink(missing_ok=True)
+        return
+    manifest = _load_processed_manifest()
+    for source in sources:
+        manifest.get("sources", {}).pop(source, None)
+    _save_processed_manifest(manifest)
 
 
 def _get_truncated_files(source: str) -> list[tuple[str, Path]]:
@@ -324,6 +370,7 @@ def run_fix_truncated(
                 if law_id not in done_set:
                     state["done"].append(law_id)
                     done_set.add(law_id)
+                _record_processed_law(source, law_id)
                 log(f"  OK [{law_id}]: {msg}", "success")
             else:
                 failed += 1
